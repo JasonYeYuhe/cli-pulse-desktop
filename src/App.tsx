@@ -325,12 +325,172 @@ function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean
       </div>
 
       <section>
+        <h2 className="text-sm font-semibold text-neutral-400 mb-2">Last 7 days — cost</h2>
+        <CostTrendChart scan={scan} />
+      </section>
+
+      <section>
         <h2 className="text-sm font-semibold text-neutral-400 mb-2">Today's breakdown</h2>
         <EntriesTable
           entries={scan.entries.filter((e) => e.date === scan.today_key && e.model !== CLAUDE_MSG_BUCKET)}
         />
       </section>
     </div>
+  );
+}
+
+function CostTrendChart({ scan }: { scan: ScanResult }) {
+  const days = useMemo(() => {
+    // Build the last 7 ISO dates relative to today_key
+    const baseDate = new Date(scan.today_key + "T00:00:00Z");
+    const out: {
+      key: string;
+      label: string;
+      claudeCost: number;
+      codexCost: number;
+      otherCost: number;
+      totalCost: number;
+    }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(baseDate);
+      d.setUTCDate(baseDate.getUTCDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label =
+        i === 0
+          ? "Today"
+          : d.toLocaleDateString("en-US", { weekday: "short" });
+      const entries = scan.entries.filter(
+        (e) => e.date === key && e.model !== CLAUDE_MSG_BUCKET
+      );
+      const claudeCost = entries
+        .filter((e) => e.provider === "Claude")
+        .reduce((s, e) => s + (e.cost_usd ?? 0), 0);
+      const codexCost = entries
+        .filter((e) => e.provider === "Codex")
+        .reduce((s, e) => s + (e.cost_usd ?? 0), 0);
+      const otherCost = entries
+        .filter((e) => e.provider !== "Claude" && e.provider !== "Codex")
+        .reduce((s, e) => s + (e.cost_usd ?? 0), 0);
+      const totalCost = claudeCost + codexCost + otherCost;
+      out.push({ key, label, claudeCost, codexCost, otherCost, totalCost });
+    }
+    return out;
+  }, [scan]);
+
+  const maxCost = Math.max(...days.map((d) => d.totalCost), 1);
+  const chartWidth = 720;
+  const chartHeight = 200;
+  const barPadding = 16;
+  const barWidth = (chartWidth - barPadding * 8) / 7;
+  const barGap = barPadding;
+
+  return (
+    <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <svg
+        viewBox={`0 0 ${chartWidth} ${chartHeight + 40}`}
+        className="w-full h-auto"
+        role="img"
+        aria-label="7-day cost trend"
+      >
+        {/* Y-axis grid */}
+        {[0.25, 0.5, 0.75, 1].map((frac) => (
+          <line
+            key={frac}
+            x1={0}
+            x2={chartWidth}
+            y1={chartHeight - chartHeight * frac}
+            y2={chartHeight - chartHeight * frac}
+            stroke="#262626"
+            strokeWidth={1}
+            strokeDasharray="2 3"
+          />
+        ))}
+
+        {days.map((d, i) => {
+          const x = barPadding + i * (barWidth + barGap);
+          const claudeH = (d.claudeCost / maxCost) * chartHeight;
+          const codexH = (d.codexCost / maxCost) * chartHeight;
+          const otherH = (d.otherCost / maxCost) * chartHeight;
+          let yCursor = chartHeight;
+          return (
+            <g key={d.key}>
+              <title>
+                {d.key}
+                {"\n"}Claude ${d.claudeCost.toFixed(2)} · Codex ${d.codexCost.toFixed(2)}
+                {d.otherCost > 0 ? ` · Other $${d.otherCost.toFixed(2)}` : ""}
+                {"\n"}Total ${d.totalCost.toFixed(2)}
+              </title>
+              {claudeH > 0 && (
+                <rect
+                  x={x}
+                  y={(yCursor -= claudeH) || 0}
+                  width={barWidth}
+                  height={claudeH}
+                  fill="#10b981"
+                  rx={2}
+                />
+              )}
+              {codexH > 0 && (
+                <rect
+                  x={x}
+                  y={(yCursor -= codexH) || 0}
+                  width={barWidth}
+                  height={codexH}
+                  fill="#06b6d4"
+                  rx={2}
+                />
+              )}
+              {otherH > 0 && (
+                <rect
+                  x={x}
+                  y={(yCursor -= otherH) || 0}
+                  width={barWidth}
+                  height={otherH}
+                  fill="#a855f7"
+                  rx={2}
+                />
+              )}
+              {d.totalCost > 0 && (
+                <text
+                  x={x + barWidth / 2}
+                  y={chartHeight - (d.totalCost / maxCost) * chartHeight - 6}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="#a3a3a3"
+                  fontFamily="ui-monospace,monospace"
+                >
+                  ${d.totalCost.toFixed(d.totalCost < 10 ? 2 : 0)}
+                </text>
+              )}
+              <text
+                x={x + barWidth / 2}
+                y={chartHeight + 18}
+                textAnchor="middle"
+                fontSize="11"
+                fill={i === 6 ? "#e5e5e5" : "#737373"}
+              >
+                {d.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="flex items-center gap-4 mt-2 text-xs text-neutral-500">
+        <LegendDot color="#10b981" label="Claude" />
+        <LegendDot color="#06b6d4" label="Codex" />
+        <LegendDot color="#a855f7" label="Other" />
+        <span className="ml-auto font-mono">Max: {formatUSD(maxCost)}/day</span>
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+      {label}
+    </span>
   );
 }
 

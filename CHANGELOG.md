@@ -2,6 +2,20 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.1.2] — 2026-04-24
+
+### Added
+- **7-day cost trend chart on Overview.** Inline SVG, stacked bars by
+  provider (Claude green / Codex cyan / Other purple), hover for exact
+  per-day breakdown. No new dependencies — <3 KB added to bundle.
+
+### Fixed
+- **Sessions project detection no longer surfaces "Library" or "Cellar".**
+  Added an explicit filter for OS / toolchain path components
+  (Library / Applications / Cellar / Homebrew / node_modules / Program
+  Files / AppData / etc.) when extracting project names from cmdlines.
+  Strict improvement over v0.1.1 — 5 new tests cover the filter.
+
 ## [0.1.1] — 2026-04-24
 
 ### Added
