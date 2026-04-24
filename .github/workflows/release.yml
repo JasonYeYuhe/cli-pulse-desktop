@@ -67,7 +67,10 @@ jobs:
       - run: npm ci
 
       - name: Build & sign & attach to Release
-        uses: tauri-apps/tauri-action@v0
+        # Pinned to v0.6.2 (latest as of 2026-04) — v0's default tag lagged
+        # behind Tauri 2.10's updater-artifact discovery, causing latest.json
+        # and .sig files to be dropped on upload.
+        uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -80,4 +83,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
+          # Prefer NSIS .zip.sig over MSI .zip.sig when building latest.json
+          # — NSIS matches tauri.conf.json's nsis target.
+          updaterJsonPreferNsis: true
           args: --bundles ${{ matrix.bundles }}
