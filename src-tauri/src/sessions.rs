@@ -351,29 +351,33 @@ fn guess_project(command: &str, cwd: Option<&Path>) -> String {
         }
     }
     for m in PATH_EXTRACT.find_iter(command) {
-        let p = Path::new(m.as_str());
-        // Filter out root-level dirs (Users/home/opt/...) AND known
-        // non-project components (Library/Cellar/...). Keep the rest
-        // in original order, mirror Python's `parts[1]` choice — on
-        // macOS/Linux this means "take the component right after the
-        // username", which is almost always the project's parent
-        // directory ("code", "Documents", "Projects", etc.) or the
-        // project itself for flat layouts.
-        let parts: Vec<String> = p
-            .iter()
+        // IMPORTANT: don't use `Path::new(...).iter()` here — its
+        // behavior diverges between Unix and Windows for `/Users/...`
+        // paths (Windows treats the leading `/` as a drive-root
+        // component). Split manually on both separators to stay
+        // deterministic across platforms.
+        let parts: Vec<String> = m
+            .as_str()
+            .split(['/', '\\'])
             .filter_map(|s| {
-                let s = s.to_string_lossy();
-                let rooty = matches!(
-                    s.as_ref(),
-                    "/" | "Users" | "home" | "opt" | "var" | "tmp" | "srv"
-                );
-                if rooty || is_non_project_component(&s) {
+                if s.is_empty() {
+                    return None;
+                }
+                // Drop Windows drive-letter prefix like "C:".
+                if s.len() == 2 && s.ends_with(':') {
+                    return None;
+                }
+                let rooty = matches!(s, "Users" | "home" | "opt" | "var" | "tmp" | "srv");
+                if rooty || is_non_project_component(s) {
                     None
                 } else {
-                    Some(s.into_owned())
+                    Some(s.to_string())
                 }
             })
             .collect();
+        // Python helper returns parts[1] — on macOS/Linux this is the
+        // component right after the username (common: "code", "Projects",
+        // "Documents", or the project itself).
         if parts.len() >= 2 {
             return parts[1].clone();
         }
