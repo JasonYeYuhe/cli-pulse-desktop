@@ -2,6 +2,29 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.1] — 2026-04-25
+
+### Added
+- **Providers tab: expandable per-model breakdown.** Click any provider
+  row to see the top 10 models contributing to its spend, with input /
+  output tokens and per-model cost. Provider rows also show a small
+  progress bar relative to the top spender — quick visual ranking.
+- **Export scan data.** *Settings → Export* buttons download the last
+  30 days of local scan data as CSV (for Excel / Google Sheets) or JSON
+  (full `ScanResult` shape, useful for scripting).
+  - CSV columns: `date, provider, model, input_tokens, cached_tokens,
+    output_tokens, cost_usd, message_count`.
+  - Client-side only — no server round-trip.
+
+### Not in this release
+- **Server-side `dashboard_summary` on desktop** was considered but
+  skipped: the existing RPC requires a user JWT (iOS / macOS / Android
+  get one from OAuth signin), while the desktop app authenticates as a
+  paired *device* with `helper_secret`. Surfacing server aggregates
+  here would require a new `get_daily_usage_for_device` RPC on the
+  shared Supabase backend — a cross-project schema change that
+  shouldn't be made without an explicit plan.
+
 ## [0.2.0] — 2026-04-25
 
 ### Added

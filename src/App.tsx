@@ -268,6 +268,7 @@ export default function App() {
         {tab === "settings" && (
           <Settings
             config={config}
+            scan={scan}
             lastSync={lastSync}
             onPaired={async () => {
               await refreshConfig();
@@ -499,54 +500,138 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   );
 }
 
+type ProviderAgg = {
+  provider: string;
+  cost: number;
+  input: number;
+  output: number;
+  cached: number;
+  msgs: number;
+  days: Set<string>;
+  models: Map<string, { cost: number; input: number; output: number; cached: number }>;
+};
+
 function Providers({ scan }: { scan: ScanResult | null }) {
   const { t } = useTranslation();
-  const grouped = useMemo(() => {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const grouped = useMemo<ProviderAgg[] | null>(() => {
     if (!scan) return null;
-    const map = new Map<
-      string,
-      { input: number; output: number; cached: number; cost: number; msgs: number; days: Set<string> }
-    >();
+    const map = new Map<string, ProviderAgg>();
     for (const e of scan.entries) {
-      if (e.model === CLAUDE_MSG_BUCKET) {
-        const agg = map.get(e.provider);
-        if (agg) agg.msgs += e.message_count;
-        continue;
-      }
       const cur =
         map.get(e.provider) ??
-        { input: 0, output: 0, cached: 0, cost: 0, msgs: 0, days: new Set<string>() };
+        ({
+          provider: e.provider,
+          cost: 0,
+          input: 0,
+          output: 0,
+          cached: 0,
+          msgs: 0,
+          days: new Set<string>(),
+          models: new Map(),
+        } satisfies ProviderAgg);
+      if (e.model === CLAUDE_MSG_BUCKET) {
+        cur.msgs += e.message_count;
+        map.set(e.provider, cur);
+        continue;
+      }
       cur.input += e.input_tokens;
       cur.output += e.output_tokens;
       cur.cached += e.cached_tokens;
       cur.cost += e.cost_usd ?? 0;
       cur.days.add(e.date);
+      const m = cur.models.get(e.model) ?? { cost: 0, input: 0, output: 0, cached: 0 };
+      m.cost += e.cost_usd ?? 0;
+      m.input += e.input_tokens;
+      m.output += e.output_tokens;
+      m.cached += e.cached_tokens;
+      cur.models.set(e.model, m);
       map.set(e.provider, cur);
     }
-    return Array.from(map.entries());
+    return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
   }, [scan]);
 
   if (!grouped) return null;
 
+  function toggle(provider: string) {
+    const next = new Set(expanded);
+    if (next.has(provider)) next.delete(provider);
+    else next.add(provider);
+    setExpanded(next);
+  }
+
+  const maxCost = Math.max(...grouped.map((g) => g.cost), 1);
+
   return (
     <div className="space-y-3">
-      {grouped.map(([provider, v]) => (
-        <div
-          key={provider}
-          className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 flex items-center justify-between"
-        >
-          <div>
-            <div className="font-semibold">{provider}</div>
-            <div className="text-xs text-neutral-500">
-              {t("providers.active_days", { count: v.days.size, msgs: formatInt(v.msgs) })}
-            </div>
+      {grouped.map((v) => {
+        const isOpen = expanded.has(v.provider);
+        const barPct = (v.cost / maxCost) * 100;
+        const sortedModels = Array.from(v.models.entries())
+          .sort((a, b) => b[1].cost - a[1].cost)
+          .slice(0, 10);
+        return (
+          <div
+            key={v.provider}
+            className="rounded-lg border border-neutral-800 bg-neutral-900/40 overflow-hidden"
+          >
+            <button
+              type="button"
+              onClick={() => toggle(v.provider)}
+              className="w-full p-4 flex items-center justify-between hover:bg-neutral-900/60 text-left"
+            >
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <span className="text-neutral-500 text-xs w-4">{isOpen ? "▼" : "▶"}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold">{v.provider}</div>
+                  <div className="text-xs text-neutral-500">
+                    {t("providers.active_days", { count: v.days.size, msgs: formatInt(v.msgs) })}
+                    {v.models.size > 0 && <span className="ml-2">· {v.models.size} models</span>}
+                  </div>
+                  <div className="mt-2 h-1 bg-neutral-800 rounded overflow-hidden max-w-xs">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"
+                      style={{ width: `${barPct}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-mono text-lg">{formatUSD(v.cost)}</div>
+                <div className="text-xs text-neutral-500">
+                  {t("providers.io_tokens", { value: formatInt(v.input + v.output) })}
+                </div>
+              </div>
+            </button>
+
+            {isOpen && sortedModels.length > 0 && (
+              <div className="px-4 pb-4 pt-1 border-t border-neutral-800/50">
+                <table className="w-full text-xs">
+                  <thead className="text-neutral-500">
+                    <tr>
+                      <th className="text-left font-normal py-1.5">Model</th>
+                      <th className="text-right font-normal py-1.5">Input</th>
+                      <th className="text-right font-normal py-1.5">Output</th>
+                      <th className="text-right font-normal py-1.5">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedModels.map(([model, m]) => (
+                      <tr key={model} className="border-t border-neutral-800/40">
+                        <td className="py-1.5 font-mono truncate max-w-[22ch]">{model}</td>
+                        <td className="py-1.5 text-right font-mono">{formatInt(m.input)}</td>
+                        <td className="py-1.5 text-right font-mono">{formatInt(m.output)}</td>
+                        <td className="py-1.5 text-right font-mono">{formatUSD(m.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-          <div className="text-right">
-            <div className="font-mono text-lg">{formatUSD(v.cost)}</div>
-            <div className="text-xs text-neutral-500">{t("providers.io_tokens", { value: formatInt(v.input + v.output) })}</div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
       {grouped.length === 0 && (
         <div className="text-sm text-neutral-500">{t("providers.no_usage")}</div>
       )}
@@ -556,12 +641,14 @@ function Providers({ scan }: { scan: ScanResult | null }) {
 
 function Settings({
   config,
+  scan,
   lastSync,
   onPaired,
   onUnpaired,
   onSynced,
 }: {
   config: ConfigView | null;
+  scan: ScanResult | null;
   lastSync: { at: Date; report: SyncReport } | null;
   onPaired: () => Promise<void>;
   onUnpaired: () => Promise<void>;
@@ -772,6 +859,8 @@ function Settings({
         </section>
       )}
 
+      <ExportSection scan={scan} />
+
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
         <h2 className="text-sm font-semibold text-neutral-300">{t("settings.updates_heading")}</h2>
         <UpdaterPanel
@@ -800,6 +889,83 @@ function Settings({
         </div>
       )}
     </div>
+  );
+}
+
+function ExportSection({ scan }: { scan: ScanResult | null }) {
+  const { t } = useTranslation();
+
+  function triggerDownload(content: string, filename: string, mime: string) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function csvEscape(value: string | number | null | undefined): string {
+    if (value === null || value === undefined) return "";
+    const s = String(value);
+    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function exportCsv() {
+    if (!scan) return;
+    const rows = [
+      ["date", "provider", "model", "input_tokens", "cached_tokens", "output_tokens", "cost_usd", "message_count"],
+      ...scan.entries
+        .filter((e) => e.model !== CLAUDE_MSG_BUCKET)
+        .map((e) => [
+          e.date,
+          e.provider,
+          e.model,
+          e.input_tokens,
+          e.cached_tokens,
+          e.output_tokens,
+          e.cost_usd == null ? "" : e.cost_usd.toFixed(6),
+          e.message_count,
+        ]),
+    ];
+    const text = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload(text + "\n", `cli-pulse-usage-${stamp}.csv`, "text/csv");
+  }
+
+  function exportJson() {
+    if (!scan) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload(JSON.stringify(scan, null, 2), `cli-pulse-usage-${stamp}.json`, "application/json");
+  }
+
+  const days = scan?.days_scanned ?? 30;
+  const disabled = !scan;
+
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
+      <h2 className="text-sm font-semibold text-neutral-300">{t("settings.export_heading")}</h2>
+      <p className="text-xs text-neutral-500">{t("settings.export_hint", { days })}</p>
+      <div className="flex gap-2">
+        <button
+          onClick={exportCsv}
+          disabled={disabled}
+          className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
+        >
+          {t("settings.export_csv")}
+        </button>
+        <button
+          onClick={exportJson}
+          disabled={disabled}
+          className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
+        >
+          {t("settings.export_json")}
+        </button>
+      </div>
+    </section>
   );
 }
 
