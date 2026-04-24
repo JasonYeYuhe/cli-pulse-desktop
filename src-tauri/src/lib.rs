@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod creds;
+pub mod notify;
 pub mod paths;
 pub mod pricing;
 pub mod scanner;
@@ -115,6 +116,7 @@ struct PairResult {
 
 #[tauri::command]
 async fn pair_device(
+    app: tauri::AppHandle,
     pairing_code: String,
     device_name: Option<String>,
 ) -> Result<PairResult, String> {
@@ -145,6 +147,7 @@ async fn pair_device(
         helper_secret: resp.helper_secret,
     };
     config::save(&cfg).map_err(|e| format!("Failed to save config: {e}"))?;
+    notify::pair_success(&app, &name);
     Ok(PairResult {
         device_id: resp.device_id,
         user_id: resp.user_id,
@@ -237,11 +240,18 @@ fn friendly(e: supabase::SupabaseError) -> String {
 // Background sync — ticks every 2 minutes (same cadence as macOS helper).
 // ------------------------------------------------------------------------
 
-fn spawn_background_sync(stop: Arc<AtomicBool>) {
+/// Threshold at which we notify the user about repeated sync failures.
+/// Keeps noise low — transient network blips are normal, but three
+/// consecutive failures in 6 minutes means something real is wrong
+/// (bad helper_secret, server outage, local clock drift, etc.).
+const SYNC_FAILURE_NOTIFY_THRESHOLD: u32 = 3;
+
+fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
     async_runtime::spawn(async move {
         // First tick after 20s so the UI feels responsive on startup
         // without racing the initial human pairing flow.
         tokio::time::sleep(Duration::from_secs(20)).await;
+        let mut consecutive_failures: u32 = 0;
         while !stop.load(Ordering::Relaxed) {
             match background_tick().await {
                 Ok(Some(report)) => {
@@ -251,12 +261,20 @@ fn spawn_background_sync(stop: Arc<AtomicBool>) {
                         report.alerts_synced,
                         report.metrics_uploaded
                     );
+                    consecutive_failures = 0;
                 }
                 Ok(None) => {
                     log::debug!("background sync skipped — not paired");
                 }
                 Err(e) => {
-                    log::warn!("background sync error: {e}");
+                    consecutive_failures += 1;
+                    log::warn!(
+                        "background sync error ({}× consecutive): {e}",
+                        consecutive_failures
+                    );
+                    if consecutive_failures == SYNC_FAILURE_NOTIFY_THRESHOLD {
+                        notify::sync_failure_streak(&app, consecutive_failures, &e);
+                    }
                 }
             }
             tokio::time::sleep(SYNC_INTERVAL).await;
@@ -287,8 +305,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            spawn_background_sync(stop_bg.clone());
+            spawn_background_sync(app.handle().clone(), stop_bg.clone());
             // System tray — Windows first-class, Linux works with AppIndicator
             // when libayatana-appindicator3 is installed, otherwise we log and
             // continue window-first.
