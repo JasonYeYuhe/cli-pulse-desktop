@@ -284,6 +284,7 @@ mod tests {
             today_key: today.into(),
             days_scanned: 2,
             files_scanned: 1,
+            files_cached: 0,
         }
     }
 

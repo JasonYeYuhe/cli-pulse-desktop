@@ -1,36 +1,37 @@
 //! JSONL log scanner for Codex (OpenAI) and Claude (Anthropic) CLI tools.
 //!
-//! Ported from Swift `CostUsageScanner` in the macOS app. Sprint 0 does a
-//! full rescan every call — no incremental offset cache yet (that lives in
-//! Sprint 1). Per-day / per-model / per-provider buckets are aggregated and
-//! returned as `ScanResult`.
+//! Ported from Swift `CostUsageScanner` in the macOS app. Warm scans are
+//! incremental: files whose (mtime, size) are unchanged since the last
+//! run are skipped entirely; files that have grown are parsed only from
+//! their previous size forward (via `cache::FileAction::Incremental`).
+//! State lives in per-provider JSON caches at `cache::cache_path(...)`.
 //!
-//! Output schema must match what the Swift scanner produces so the existing
+//! Output schema matches what the Swift scanner produces so the existing
 //! Supabase RPCs (`upsert_daily_usage`) accept the payload unchanged.
 //!
-//! Key subtleties mirrored from Swift:
-//! - Codex `token_count` events carry cumulative `total_token_usage`; we
-//!   diff against the previous sample to get per-event deltas.
-//! - Codex model resolution: use `info.model` if present, else last seen
-//!   `turn_context.model`, else `"gpt-5"` fallback.
-//! - Claude streams can re-report cumulative usage across chunks — dedup
-//!   by `(message.id, requestId)` for TOKENS only. Message counts include
-//!   every raw user+assistant event against the synthetic `__claude_msg__`
-//!   bucket (Claude UI semantics — see PROJECT_FIX_v1.9.4).
+//! Claude cost invariant:
+//! The server, Swift, Kotlin and Rust implementations all sum per-message
+//! cost. NEVER compute cost from day-aggregated tokens — sonnet-4-5 and
+//! sonnet-4-6 have a 200K-token tier threshold that gets wrongly crossed
+//! once you aggregate. Per-message cost is accumulated into packed
+//! slot [4] (`cost_nanos`, scaled by 1e9) during parse.
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+use crate::cache::{self, CodexTotals, CostUsageCache, FileAction, FileEntry, Packed};
 use crate::paths;
 use crate::pricing;
 
 pub const CLAUDE_MSG_BUCKET_MODEL: &str = "__claude_msg__";
+const CLAUDE_COST_SCALE: f64 = 1_000_000_000.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyEntry {
@@ -48,73 +49,57 @@ pub struct DailyEntry {
 pub struct ScanResult {
     pub entries: Vec<DailyEntry>,
     pub total_cost_usd: f64,
-    pub total_tokens: i64, // input + output only (excludes cache reads)
+    pub total_tokens: i64,
     pub today_key: String,
     pub days_scanned: u32,
     pub files_scanned: u32,
+    /// Files present in the cache whose (mtime, size) matched and were
+    /// therefore skipped entirely. Useful for benchmarking the incremental
+    /// path and reported in the scan report.
+    pub files_cached: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanOptions {
+    pub days: u32,
+    pub force_rescan: bool,
+    pub cache_dir: Option<PathBuf>,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            days: 30,
+            force_rescan: false,
+            cache_dir: None,
+        }
+    }
 }
 
 pub fn scan(days: u32) -> anyhow::Result<ScanResult> {
+    scan_with_options(ScanOptions {
+        days,
+        ..Default::default()
+    })
+}
+
+pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
     let today = Utc::now().date_naive();
     let since = today
-        .checked_sub_signed(chrono::Duration::days(days as i64))
+        .checked_sub_signed(chrono::Duration::days(opts.days as i64))
         .unwrap_or(today);
-    let since_key = fmt_date(since);
-    let until_key = fmt_date(today);
+    let range = DateRange {
+        since_key: fmt_date(since),
+        until_key: fmt_date(today),
+    };
     let today_key = fmt_date(chrono::Local::now().date_naive());
 
-    let mut agg: HashMap<(String, String, String), Bucket> = HashMap::new();
-    let mut files_scanned: u32 = 0;
+    let (codex_cache, codex_files_scanned, codex_files_cached) =
+        scan_codex_provider(&opts, &range)?;
+    let (claude_cache, claude_files_scanned, claude_files_cached) =
+        scan_claude_provider(&opts, &range)?;
 
-    // --- Codex ---
-    for root in paths::codex_sessions_roots() {
-        files_scanned += scan_codex_root(&root, &since_key, &until_key, &mut agg)?;
-    }
-
-    // --- Claude ---
-    for root in paths::claude_projects_roots() {
-        files_scanned += scan_claude_root(&root, &since_key, &until_key, &mut agg)?;
-    }
-
-    let mut entries: Vec<DailyEntry> = agg
-        .into_iter()
-        .map(|((date, provider, model), b)| {
-            let cost = if provider == "Codex" {
-                pricing::codex_cost_usd(&model, b.input, b.cached, b.output)
-            } else if model == CLAUDE_MSG_BUCKET_MODEL {
-                // synthetic bucket — only msg count, no tokens, no cost
-                None
-            } else if b.cost_is_authoritative {
-                // Per-message Claude cost was accumulated during parse
-                // (see `parse_claude_file` — mirrors Swift `costNanos` slot).
-                Some(b.cost_usd_accum)
-            } else {
-                pricing::claude_cost_usd(&model, b.input, b.cache_read, b.cache_create, b.output)
-            };
-            let cached = if provider == "Claude" {
-                b.cache_read + b.cache_create
-            } else {
-                b.cached
-            };
-            DailyEntry {
-                date,
-                provider,
-                model,
-                input_tokens: b.input,
-                cached_tokens: cached,
-                output_tokens: b.output,
-                cost_usd: cost,
-                message_count: b.msgs,
-            }
-        })
-        .collect();
-
-    entries.sort_by(|a, b| {
-        a.date
-            .cmp(&b.date)
-            .then(a.provider.cmp(&b.provider))
-            .then(a.model.cmp(&b.model))
-    });
+    let entries = emit_entries(&codex_cache, &claude_cache, &range);
 
     let total_cost_usd: f64 = entries.iter().filter_map(|e| e.cost_usd).sum();
     let total_tokens: i64 = entries
@@ -127,28 +112,16 @@ pub fn scan(days: u32) -> anyhow::Result<ScanResult> {
         total_cost_usd,
         total_tokens,
         today_key,
-        days_scanned: days,
-        files_scanned,
+        days_scanned: opts.days,
+        files_scanned: codex_files_scanned + claude_files_scanned,
+        files_cached: codex_files_cached + claude_files_cached,
     })
 }
 
-#[derive(Default)]
-struct Bucket {
-    input: i64,
-    cached: i64,       // Codex only — single cached_input count
-    cache_read: i64,   // Claude only
-    cache_create: i64, // Claude only
-    output: i64,
-    msgs: i64,
-    /// Claude: per-message cost accumulated during parse. Swift parity —
-    /// tiered pricing evaluates per message (well below 200K threshold),
-    /// so daily aggregates must sum per-message cost, not re-price on
-    /// aggregated tokens.
-    cost_usd_accum: f64,
-    /// Whether cost_usd_accum is authoritative. Set true once we've added
-    /// a per-message cost to the bucket. If still false at emit time we
-    /// fall back to aggregate pricing (unknown model etc.).
-    cost_is_authoritative: bool,
+#[derive(Debug, Clone)]
+struct DateRange {
+    since_key: String,
+    until_key: String,
 }
 
 fn fmt_date(d: NaiveDate) -> String {
@@ -156,12 +129,10 @@ fn fmt_date(d: NaiveDate) -> String {
 }
 
 fn parse_day_key_local(ts: &str) -> Option<String> {
-    // Try chrono RFC3339 / ISO 8601 (handles fractional + offset)
     if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
         let local = dt.with_timezone(&chrono::Local);
         return Some(fmt_date(local.date_naive()));
     }
-    // Fallback: "YYYY-MM-DD" prefix treated as UTC midnight
     if ts.len() >= 10 {
         if let Ok(d) = NaiveDate::parse_from_str(&ts[..10], "%Y-%m-%d") {
             return Some(fmt_date(d));
@@ -170,47 +141,156 @@ fn parse_day_key_local(ts: &str) -> Option<String> {
     None
 }
 
-fn in_range(day: &str, since: &str, until: &str) -> bool {
-    day >= since && day <= until
+fn in_range(day: &str, r: &DateRange) -> bool {
+    day >= r.since_key.as_str() && day <= r.until_key.as_str()
 }
 
-fn read_jsonl_lines(path: &Path) -> anyhow::Result<BufReader<File>> {
-    Ok(BufReader::with_capacity(256 * 1024, File::open(path)?))
+fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn file_stat(path: &Path) -> Option<(i64, i64)> {
+    let meta = path.metadata().ok()?;
+    let size = meta.len() as i64;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .ok()?;
+    Some((mtime, size))
+}
+
+fn path_key(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 // ========================================================================
 // Codex scanning
 // ========================================================================
 
-fn scan_codex_root(
-    root: &Path,
-    since: &str,
-    until: &str,
-    agg: &mut HashMap<(String, String, String), Bucket>,
-) -> anyhow::Result<u32> {
-    if !root.exists() {
-        return Ok(0);
-    }
-    let mut count = 0u32;
-    for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
-        if !entry.file_type().is_file() {
+fn scan_codex_provider(
+    opts: &ScanOptions,
+    range: &DateRange,
+) -> anyhow::Result<(CostUsageCache, u32, u32)> {
+    let mut cache = if opts.force_rescan {
+        CostUsageCache::default()
+    } else {
+        cache::load("codex", opts.cache_dir.as_deref())
+    };
+
+    let mut files_scanned = 0u32;
+    let mut files_cached = 0u32;
+    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for root in paths::codex_sessions_roots() {
+        if !root.exists() {
             continue;
         }
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-            continue;
-        }
-        // Path-prefix date filter: Codex uses YYYY/MM/DD/*.jsonl layout.
-        // If we can parse a date from path segments, skip early.
-        if let Some(file_date) = codex_date_from_path(p, root) {
-            if !in_range(&file_date, since, until) {
+        for walk_entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+            if !walk_entry.file_type().is_file() {
                 continue;
             }
+            let p = walk_entry.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if let Some(file_date) = codex_date_from_path(p, &root) {
+                if !in_range(&file_date, range) {
+                    continue;
+                }
+            }
+            let key = path_key(p);
+            seen_paths.insert(key.clone());
+
+            let (mtime, size) = match file_stat(p) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            let action = cache::decide_action(cache.files.get(&key), mtime, size);
+            match action {
+                FileAction::Unchanged => {
+                    files_cached += 1;
+                    continue;
+                }
+                FileAction::Incremental { start_offset } => {
+                    let (initial_model, initial_totals) = cache
+                        .files
+                        .get(&key)
+                        .map(|e| (e.last_model.clone(), e.last_totals))
+                        .unwrap_or((None, None));
+                    let parsed =
+                        parse_codex_file(p, range, start_offset, initial_model, initial_totals);
+                    if !parsed.file_days.is_empty() {
+                        cache::apply_file_days(&mut cache, &parsed.file_days, 1);
+                    }
+                    let mut merged_days = cache
+                        .files
+                        .get(&key)
+                        .map(|e| e.days.clone())
+                        .unwrap_or_default();
+                    cache::merge_file_days(&mut merged_days, &parsed.file_days);
+                    cache.files.insert(
+                        key.clone(),
+                        FileEntry {
+                            mtime_unix_ms: mtime,
+                            size,
+                            days: merged_days,
+                            parsed_bytes: Some(parsed.parsed_bytes),
+                            last_model: parsed.last_model,
+                            last_totals: parsed.last_totals,
+                            session_id: parsed.session_id,
+                        },
+                    );
+                    files_scanned += 1;
+                }
+                FileAction::FullReparse => {
+                    if let Some(old) = cache.files.get(&key).cloned() {
+                        cache::apply_file_days(&mut cache, &old.days, -1);
+                    }
+                    let parsed = parse_codex_file(p, range, 0, None, None);
+                    cache::apply_file_days(&mut cache, &parsed.file_days, 1);
+                    cache.files.insert(
+                        key.clone(),
+                        FileEntry {
+                            mtime_unix_ms: mtime,
+                            size,
+                            days: parsed.file_days,
+                            parsed_bytes: Some(parsed.parsed_bytes),
+                            last_model: parsed.last_model,
+                            last_totals: parsed.last_totals,
+                            session_id: parsed.session_id,
+                        },
+                    );
+                    files_scanned += 1;
+                }
+            }
         }
-        parse_codex_file(p, since, until, agg)?;
-        count += 1;
     }
-    Ok(count)
+
+    // Evict files that vanished from disk since last scan.
+    let stale: Vec<String> = cache
+        .files
+        .keys()
+        .filter(|k| !seen_paths.contains(*k))
+        .cloned()
+        .collect();
+    for key in stale {
+        if let Some(old) = cache.files.remove(&key) {
+            cache::apply_file_days(&mut cache, &old.days, -1);
+        }
+    }
+
+    cache::prune_days(&mut cache, &range.since_key, &range.until_key);
+    cache.last_scan_unix_ms = now_unix_ms();
+    if let Err(e) = cache::save("codex", &cache, opts.cache_dir.as_deref()) {
+        log::warn!("cache::save(codex) failed: {e}");
+    }
+    Ok((cache, files_scanned, files_cached))
 }
 
 fn codex_date_from_path(path: &Path, root: &Path) -> Option<String> {
@@ -227,31 +307,57 @@ fn codex_date_from_path(path: &Path, root: &Path) -> Option<String> {
     }
 }
 
+struct CodexParseResult {
+    parsed_bytes: i64,
+    file_days: HashMap<String, HashMap<String, Packed>>,
+    last_model: Option<String>,
+    last_totals: Option<CodexTotals>,
+    session_id: Option<String>,
+}
+
 fn parse_codex_file(
     path: &Path,
-    since: &str,
-    until: &str,
-    agg: &mut HashMap<(String, String, String), Bucket>,
-) -> anyhow::Result<()> {
-    let reader = match read_jsonl_lines(path) {
-        Ok(r) => r,
-        Err(_) => return Ok(()),
+    range: &DateRange,
+    start_offset: i64,
+    initial_model: Option<String>,
+    initial_totals: Option<CodexTotals>,
+) -> CodexParseResult {
+    let mut out = CodexParseResult {
+        parsed_bytes: start_offset,
+        file_days: HashMap::new(),
+        last_model: initial_model.clone(),
+        last_totals: initial_totals,
+        session_id: None,
     };
 
-    let mut current_model: Option<String> = None;
-    let mut prev_total = CodexTotals::default();
-    let mut has_prev = false;
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return out,
+    };
+    if start_offset > 0 && file.seek(SeekFrom::Start(start_offset as u64)).is_err() {
+        return out;
+    }
+    let reader = BufReader::with_capacity(256 * 1024, file);
+
+    let mut current_model = initial_model;
+    let mut prev_total = initial_totals.unwrap_or_default();
+    let mut has_prev = initial_totals.is_some();
+    let mut bytes_seen: i64 = 0;
 
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,
             Err(_) => continue,
         };
+        bytes_seen += line.len() as i64 + 1; // +1 for the newline consumed
+
         if line.is_empty() {
             continue;
         }
-        // Cheap substring filter before JSON parse
-        if !line.contains("\"type\":\"event_msg\"") && !line.contains("\"type\":\"turn_context\"") {
+        if !line.contains("\"type\":\"event_msg\"")
+            && !line.contains("\"type\":\"turn_context\"")
+            && !line.contains("\"type\":\"session_meta\"")
+        {
             continue;
         }
         let obj: serde_json::Value = match serde_json::from_str(&line) {
@@ -259,6 +365,20 @@ fn parse_codex_file(
             Err(_) => continue,
         };
         let ty = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if ty == "session_meta" {
+            if out.session_id.is_none() {
+                if let Some(payload) = obj.get("payload") {
+                    out.session_id = payload
+                        .get("session_id")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| payload.get("sessionId").and_then(|v| v.as_str()))
+                        .or_else(|| payload.get("id").and_then(|v| v.as_str()))
+                        .map(String::from);
+                }
+            }
+            continue;
+        }
 
         if ty == "turn_context" {
             if let Some(payload) = obj.get("payload") {
@@ -291,7 +411,7 @@ fn parse_codex_file(
             Some(d) => d,
             None => continue,
         };
-        if !in_range(&day, since, until) {
+        if !in_range(&day, range) {
             continue;
         }
 
@@ -342,73 +462,167 @@ fn parse_codex_file(
         }
 
         let norm_model = pricing::normalize_codex_model(&model);
-        let key = (day, "Codex".to_string(), norm_model);
-        let bucket = agg.entry(key).or_default();
-        bucket.input += d_in;
-        bucket.cached += d_cached.min(d_in);
-        bucket.output += d_out;
+        let day_models = out.file_days.entry(day).or_default();
+        let packed = day_models
+            .entry(norm_model)
+            .or_insert_with(|| vec![0, 0, 0]);
+        packed[0] += d_in;
+        packed[1] += d_cached.min(d_in);
+        packed[2] += d_out;
     }
 
-    Ok(())
-}
-
-#[derive(Default, Clone, Copy)]
-struct CodexTotals {
-    input: i64,
-    cached: i64,
-    output: i64,
+    out.parsed_bytes = start_offset + bytes_seen;
+    out.last_model = current_model;
+    out.last_totals = if has_prev { Some(prev_total) } else { None };
+    out
 }
 
 // ========================================================================
 // Claude scanning
 // ========================================================================
 
-fn scan_claude_root(
-    root: &Path,
-    since: &str,
-    until: &str,
-    agg: &mut HashMap<(String, String, String), Bucket>,
-) -> anyhow::Result<u32> {
-    if !root.exists() {
-        return Ok(0);
-    }
-    let mut count = 0u32;
-    for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-            continue;
-        }
-        parse_claude_file(p, since, until, agg)?;
-        count += 1;
-    }
-    Ok(count)
-}
-
-fn parse_claude_file(
-    path: &Path,
-    since: &str,
-    until: &str,
-    agg: &mut HashMap<(String, String, String), Bucket>,
-) -> anyhow::Result<()> {
-    let reader = match read_jsonl_lines(path) {
-        Ok(r) => r,
-        Err(_) => return Ok(()),
+fn scan_claude_provider(
+    opts: &ScanOptions,
+    range: &DateRange,
+) -> anyhow::Result<(CostUsageCache, u32, u32)> {
+    let mut cache = if opts.force_rescan {
+        CostUsageCache::default()
+    } else {
+        cache::load("claude", opts.cache_dir.as_deref())
     };
 
+    let mut files_scanned = 0u32;
+    let mut files_cached = 0u32;
+    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for root in paths::claude_projects_roots() {
+        if !root.exists() {
+            continue;
+        }
+        for walk_entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+            if !walk_entry.file_type().is_file() {
+                continue;
+            }
+            let p = walk_entry.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let key = path_key(p);
+            seen_paths.insert(key.clone());
+
+            let (mtime, size) = match file_stat(p) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            let action = cache::decide_action(cache.files.get(&key), mtime, size);
+            match action {
+                FileAction::Unchanged => {
+                    files_cached += 1;
+                    continue;
+                }
+                FileAction::Incremental { start_offset } => {
+                    let parsed = parse_claude_file(p, range, start_offset);
+                    if !parsed.file_days.is_empty() {
+                        cache::apply_file_days(&mut cache, &parsed.file_days, 1);
+                    }
+                    let mut merged_days = cache
+                        .files
+                        .get(&key)
+                        .map(|e| e.days.clone())
+                        .unwrap_or_default();
+                    cache::merge_file_days(&mut merged_days, &parsed.file_days);
+                    cache.files.insert(
+                        key.clone(),
+                        FileEntry {
+                            mtime_unix_ms: mtime,
+                            size,
+                            days: merged_days,
+                            parsed_bytes: Some(parsed.parsed_bytes),
+                            last_model: None,
+                            last_totals: None,
+                            session_id: None,
+                        },
+                    );
+                    files_scanned += 1;
+                }
+                FileAction::FullReparse => {
+                    if let Some(old) = cache.files.get(&key).cloned() {
+                        cache::apply_file_days(&mut cache, &old.days, -1);
+                    }
+                    let parsed = parse_claude_file(p, range, 0);
+                    cache::apply_file_days(&mut cache, &parsed.file_days, 1);
+                    cache.files.insert(
+                        key.clone(),
+                        FileEntry {
+                            mtime_unix_ms: mtime,
+                            size,
+                            days: parsed.file_days,
+                            parsed_bytes: Some(parsed.parsed_bytes),
+                            last_model: None,
+                            last_totals: None,
+                            session_id: None,
+                        },
+                    );
+                    files_scanned += 1;
+                }
+            }
+        }
+    }
+
+    let stale: Vec<String> = cache
+        .files
+        .keys()
+        .filter(|k| !seen_paths.contains(*k))
+        .cloned()
+        .collect();
+    for key in stale {
+        if let Some(old) = cache.files.remove(&key) {
+            cache::apply_file_days(&mut cache, &old.days, -1);
+        }
+    }
+
+    cache::prune_days(&mut cache, &range.since_key, &range.until_key);
+    cache.last_scan_unix_ms = now_unix_ms();
+    if let Err(e) = cache::save("claude", &cache, opts.cache_dir.as_deref()) {
+        log::warn!("cache::save(claude) failed: {e}");
+    }
+    Ok((cache, files_scanned, files_cached))
+}
+
+struct ClaudeParseResult {
+    parsed_bytes: i64,
+    file_days: HashMap<String, HashMap<String, Packed>>,
+}
+
+fn parse_claude_file(path: &Path, range: &DateRange, start_offset: i64) -> ClaudeParseResult {
+    let mut out = ClaudeParseResult {
+        parsed_bytes: start_offset,
+        file_days: HashMap::new(),
+    };
+
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return out,
+    };
+    if start_offset > 0 && file.seek(SeekFrom::Start(start_offset as u64)).is_err() {
+        return out;
+    }
+    let reader = BufReader::with_capacity(256 * 1024, file);
+
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut bytes_seen: i64 = 0;
 
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,
             Err(_) => continue,
         };
+        bytes_seen += line.len() as i64 + 1;
+
         if line.is_empty() {
             continue;
         }
-
         let is_assistant = line.contains("\"type\":\"assistant\"");
         let is_user = line.contains("\"type\":\"user\"");
         if !is_assistant && !is_user {
@@ -428,18 +642,18 @@ fn parse_claude_file(
             Some(d) => d,
             None => continue,
         };
-        if !in_range(&day, since, until) {
+        if !in_range(&day, range) {
             continue;
         }
 
-        // User events: message count only, no tokens.
         if ty == "user" {
-            bump_msg(&day, agg);
+            bump_msg(&mut out.file_days, &day);
             continue;
         }
 
-        // type == "assistant": always count against msg bucket (incl. stream chunks).
-        bump_msg(&day, agg);
+        // type == "assistant" — always count against msg bucket even
+        // for streaming chunks (matches Claude Code UI semantics).
+        bump_msg(&mut out.file_days, &day);
 
         let message = match obj.get("message") {
             Some(m) => m,
@@ -454,7 +668,8 @@ fn parse_claude_file(
             None => continue,
         };
 
-        // Dedup for tokens — streaming reports cumulative usage across chunks.
+        // Token dedup: streaming chunks re-report cumulative usage —
+        // count each (message.id, requestId) only once for tokens.
         let message_id = message.get("id").and_then(|v| v.as_str());
         let request_id = obj.get("requestId").and_then(|v| v.as_str());
         if let (Some(mid), Some(rid)) = (message_id, request_id) {
@@ -472,35 +687,125 @@ fn parse_claude_file(
             continue;
         }
 
-        // Compute per-message cost now, mirroring Swift
-        // `CostUsageScanner.Pricing.claudeCostUSD` at parse time. Swift
-        // persists this in the cache as packed `costNanos` slot [4]; here
-        // we accumulate into the day bucket directly.
-        let msg_cost = pricing::claude_cost_usd(&model, input, cache_read, cache_create, output);
+        // Per-message cost (bit-exact Swift parity for tiered pricing).
+        let cost_nanos = pricing::claude_cost_usd(&model, input, cache_read, cache_create, output)
+            .map(|c| (c * CLAUDE_COST_SCALE).round() as i64)
+            .unwrap_or(0);
 
         let norm_model = pricing::normalize_claude_model(&model);
-        let key = (day, "Claude".to_string(), norm_model);
-        let bucket = agg.entry(key).or_default();
-        bucket.input += input;
-        bucket.cache_read += cache_read;
-        bucket.cache_create += cache_create;
-        bucket.output += output;
-        if let Some(c) = msg_cost {
-            bucket.cost_usd_accum += c;
-            bucket.cost_is_authoritative = true;
+        let day_models = out.file_days.entry(day).or_default();
+        let packed = day_models
+            .entry(norm_model)
+            .or_insert_with(|| vec![0, 0, 0, 0, 0, 0]);
+        while packed.len() < 6 {
+            packed.push(0);
+        }
+        packed[0] += input;
+        packed[1] += cache_read;
+        packed[2] += cache_create;
+        packed[3] += output;
+        packed[4] += cost_nanos;
+        // slot 5 already bumped for this event via bump_msg? No — bump_msg
+        // goes against the synthetic bucket. Per-model msg is a dedup-safe
+        // counter that matches Swift's msgDelta=0 branch for token lines.
+    }
+
+    out.parsed_bytes = start_offset + bytes_seen;
+    out
+}
+
+fn bump_msg(file_days: &mut HashMap<String, HashMap<String, Packed>>, day: &str) {
+    let day_models = file_days.entry(day.to_string()).or_default();
+    let packed = day_models
+        .entry(CLAUDE_MSG_BUCKET_MODEL.to_string())
+        .or_insert_with(|| vec![0, 0, 0, 0, 0, 0]);
+    while packed.len() < 6 {
+        packed.push(0);
+    }
+    packed[5] += 1;
+}
+
+// ========================================================================
+// Emission — walk per-provider cache.days and build DailyEntries.
+// ========================================================================
+
+fn emit_entries(
+    codex_cache: &CostUsageCache,
+    claude_cache: &CostUsageCache,
+    range: &DateRange,
+) -> Vec<DailyEntry> {
+    let mut out: Vec<DailyEntry> = Vec::new();
+
+    // Codex: [input, cached, output] — cost computed from pricing table
+    for (day, models) in &codex_cache.days {
+        if !in_range(day, range) {
+            continue;
+        }
+        for (model, packed) in models {
+            let input = packed.first().copied().unwrap_or(0);
+            let cached = packed.get(1).copied().unwrap_or(0);
+            let output = packed.get(2).copied().unwrap_or(0);
+            if input == 0 && cached == 0 && output == 0 {
+                continue;
+            }
+            let cost = pricing::codex_cost_usd(model, input, cached, output);
+            out.push(DailyEntry {
+                date: day.clone(),
+                provider: "Codex".into(),
+                model: model.clone(),
+                input_tokens: input,
+                cached_tokens: cached,
+                output_tokens: output,
+                cost_usd: cost,
+                message_count: 0,
+            });
         }
     }
 
-    Ok(())
-}
+    // Claude: [input, cache_read, cache_create, output, cost_nanos, msgs]
+    for (day, models) in &claude_cache.days {
+        if !in_range(day, range) {
+            continue;
+        }
+        for (model, packed) in models {
+            let input = packed.first().copied().unwrap_or(0);
+            let cache_read = packed.get(1).copied().unwrap_or(0);
+            let cache_create = packed.get(2).copied().unwrap_or(0);
+            let output = packed.get(3).copied().unwrap_or(0);
+            let cost_nanos = packed.get(4).copied().unwrap_or(0);
+            let msgs = packed.get(5).copied().unwrap_or(0);
+            // Emit when there's any real token activity OR the synthetic
+            // bucket has a non-zero msg count (per v1.9.4 invariant).
+            if input == 0 && cache_read == 0 && cache_create == 0 && output == 0 && msgs == 0 {
+                continue;
+            }
+            let cost = if model == CLAUDE_MSG_BUCKET_MODEL {
+                None
+            } else if cost_nanos > 0 {
+                Some(cost_nanos as f64 / CLAUDE_COST_SCALE)
+            } else {
+                pricing::claude_cost_usd(model, input, cache_read, cache_create, output)
+            };
+            out.push(DailyEntry {
+                date: day.clone(),
+                provider: "Claude".into(),
+                model: model.clone(),
+                input_tokens: input,
+                cached_tokens: cache_read + cache_create,
+                output_tokens: output,
+                cost_usd: cost,
+                message_count: msgs,
+            });
+        }
+    }
 
-fn bump_msg(day: &str, agg: &mut HashMap<(String, String, String), Bucket>) {
-    let key = (
-        day.to_string(),
-        "Claude".to_string(),
-        CLAUDE_MSG_BUCKET_MODEL.to_string(),
-    );
-    agg.entry(key).or_default().msgs += 1;
+    out.sort_by(|a, b| {
+        a.date
+            .cmp(&b.date)
+            .then(a.provider.cmp(&b.provider))
+            .then(a.model.cmp(&b.model))
+    });
+    out
 }
 
 // ========================================================================
@@ -518,12 +823,4 @@ fn json_i64_or(v: &serde_json::Value, keys: &[&str]) -> i64 {
         }
     }
     0
-}
-
-// Silence "unused" for the fallback path helpers during Sprint 0.
-#[allow(dead_code)]
-fn utc_to_local_day(dt: DateTime<FixedOffset>) -> String {
-    let utc: DateTime<Utc> = dt.with_timezone(&Utc);
-    let local = chrono::Local.from_utc_datetime(&utc.naive_utc());
-    fmt_date(local.date_naive())
 }

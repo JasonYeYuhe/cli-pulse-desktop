@@ -2,6 +2,34 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.1.3] — 2026-04-25
+
+### Performance
+- **Incremental scan cache** — per-provider JSON state at
+  `~/Library/Caches/dev.clipulse.desktop/cost-usage/{codex,claude}-v1.json`
+  (Linux: `~/.cache/...`, Windows: `%LOCALAPPDATA%\...`). Files whose
+  (mtime, size) are unchanged since the last scan are skipped entirely;
+  files that grew are parsed only from their previous size forward.
+- **27× faster warm scan** on a dev machine with 2711 JSONL files:
+  cold 36.2 s → warm 1.34 s. The 2-minute background sync tick goes
+  from "noticeable CPU blip" to "invisible."
+- ScanResult now reports `files_scanned` (actually touched) vs
+  `files_cached` (reused from cache).
+
+### Fixed
+- Nothing user-visible since 0.1.2. Claude cost parity with the macOS
+  Swift scanner is bit-exact on 04-18 through 04-21 (verified against
+  the same week of local data).
+
+### Build / internals
+- New `cache.rs` module (450 lines) — schema ported from Swift
+  `CostUsageCache.swift`, with explicit per-file state tracking
+  (`mtime`, `size`, `parsed_bytes`, Codex `last_totals` + `session_id`).
+- 11 new unit tests for cache arithmetic + decision logic + IO
+  roundtrip. 38/38 Rust tests pass.
+- `scanner.rs` refactored: parsers return per-file packed output
+  instead of mutating global agg; outer loop handles cache decisions.
+
 ## [0.1.2] — 2026-04-24
 
 ### Added

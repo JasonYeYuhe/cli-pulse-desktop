@@ -5,6 +5,7 @@
 //! + upsert_daily_usage round-trips, periodic 2-minute sync tick.
 
 pub mod alerts;
+pub mod cache;
 pub mod config;
 pub mod creds;
 pub mod notify;
