@@ -4,6 +4,7 @@
 //! Sprint 1 (this): Supabase pairing, config persistence, helper_sync
 //! + upsert_daily_usage round-trips, periodic 2-minute sync tick.
 
+pub mod alerts;
 pub mod config;
 pub mod creds;
 pub mod notify;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use config::HelperConfig;
+use once_cell::sync::Lazy;
 use scanner::ScanResult;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -107,6 +109,51 @@ async fn list_sessions() -> Result<sessions::SessionsSnapshot, String> {
         .map_err(|e| format!("sessions join error: {e}"))
 }
 
+/// Return the user's current alert thresholds (budget etc.). Never fails —
+/// falls back to defaults if no config exists yet.
+#[tauri::command]
+fn get_thresholds() -> Result<alerts::AlertThresholds, String> {
+    let cfg = config::load().map_err(|e| e.to_string())?;
+    Ok(cfg.map(|c| c.thresholds).unwrap_or_default())
+}
+
+/// Persist budget + CPU spike thresholds. Requires the device to be
+/// paired — the thresholds live inside `HelperConfig`, and that file
+/// is only created during `pair_device`.
+#[tauri::command]
+fn set_thresholds(thresholds: alerts::AlertThresholds) -> Result<(), String> {
+    let mut cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Device not paired — pair first, then set budgets".to_string())?;
+    cfg.thresholds = thresholds;
+    config::save(&cfg).map_err(|e| e.to_string())
+}
+
+/// Compute client-side alerts from the current scan + sessions snapshot.
+/// Frontend uses this to populate the Alerts tab without waiting for the
+/// 2-minute background sync.
+#[tauri::command]
+async fn preview_alerts() -> Result<Vec<alerts::Alert>, String> {
+    let cfg = config::load().map_err(|e| e.to_string())?;
+    let (thresholds, device_name) = match cfg.as_ref() {
+        Some(c) => (c.thresholds.clone(), Some(c.device_name.clone())),
+        None => (alerts::AlertThresholds::default(), None),
+    };
+    let scan = async_runtime::spawn_blocking(|| scanner::scan(30))
+        .await
+        .map_err(|e| format!("scanner join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+    let snapshot = async_runtime::spawn_blocking(sessions::collect_sessions)
+        .await
+        .map_err(|e| format!("sessions join error: {e}"))?;
+    Ok(alerts::compute(
+        &scan,
+        &snapshot,
+        &thresholds,
+        device_name.as_deref(),
+    ))
+}
+
 #[derive(Debug, Serialize)]
 struct PairResult {
     device_id: String,
@@ -145,6 +192,7 @@ async fn pair_device(
         device_name: name.clone(),
         helper_version: HELPER_VERSION.to_string(),
         helper_secret: resp.helper_secret,
+        thresholds: alerts::AlertThresholds::default(),
     };
     config::save(&cfg).map_err(|e| format!("Failed to save config: {e}"))?;
     notify::pair_success(&app, &name);
@@ -170,10 +218,11 @@ struct SyncReport {
     files_scanned: u32,
     live_sessions_sent: usize,
     live_processes_seen: usize,
+    alerts_computed: usize,
 }
 
 #[tauri::command]
-async fn sync_now() -> Result<SyncReport, String> {
+async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
     let cfg = config::load()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Device not paired yet".to_string())?;
@@ -187,19 +236,29 @@ async fn sync_now() -> Result<SyncReport, String> {
         .await
         .map_err(|e| format!("sessions join error: {e}"))?;
 
-    // 2. helper_sync — ship live sessions + empty alerts/quotas (Sprint 2.5)
+    // 2. Compute client-side alerts (budget breach, CPU spike)
+    let computed_alerts =
+        alerts::compute(&scan, &snapshot, &cfg.thresholds, Some(&cfg.device_name));
+
+    // 3. Fire notification on first budget breach seen today — guarded
+    //    by a process-local `Once` so the user isn't buzzed every tick.
+    maybe_notify_budget_breach(&app, &computed_alerts);
+
+    let alerts_payload = serde_json::to_value(&computed_alerts).unwrap_or(json!([]));
+
+    // 4. helper_sync — ship live sessions + computed alerts
     let hs = supabase::helper_sync(&supabase::HelperSyncRequest {
         p_device_id: &cfg.device_id,
         p_helper_secret: &cfg.helper_secret,
         p_sessions: sessions::sessions_payload(&snapshot),
-        p_alerts: json!([]),
+        p_alerts: alerts_payload,
         p_provider_remaining: json!({}),
         p_provider_tiers: json!({}),
     })
     .await
     .map_err(friendly)?;
 
-    // 3. upsert_daily_usage
+    // 5. upsert_daily_usage
     let metrics: Vec<_> = scan
         .entries
         .iter()
@@ -219,7 +278,31 @@ async fn sync_now() -> Result<SyncReport, String> {
         files_scanned: scan.files_scanned,
         live_sessions_sent: snapshot.sessions.len(),
         live_processes_seen: snapshot.total_processes_seen,
+        alerts_computed: computed_alerts.len(),
     })
+}
+
+/// De-dupe budget-breach toasts so the user gets exactly one popup per
+/// budget per day (not one every 2-minute tick). Keyed on the alert's
+/// `suppression_key` which already encodes the day.
+fn maybe_notify_budget_breach(app: &tauri::AppHandle, alerts: &[alerts::Alert]) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static SEEN: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+    let mut seen = match SEEN.lock() {
+        Ok(s) => s,
+        Err(_) => return, // poisoned — skip notification rather than panic
+    };
+    for a in alerts {
+        if a.source_kind.as_deref() != Some("budget") {
+            continue;
+        }
+        let key = a.suppression_key.clone().unwrap_or_else(|| a.id.clone());
+        if seen.insert(key) {
+            notify::budget_breach(app, &a.title, &a.message);
+        }
+    }
 }
 
 fn friendly(e: supabase::SupabaseError) -> String {
@@ -253,7 +336,7 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
         tokio::time::sleep(Duration::from_secs(20)).await;
         let mut consecutive_failures: u32 = 0;
         while !stop.load(Ordering::Relaxed) {
-            match background_tick().await {
+            match background_tick(&app).await {
                 Ok(Some(report)) => {
                     log::info!(
                         "background sync ok — {} sessions, {} alerts, {} metrics",
@@ -282,13 +365,13 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
     });
 }
 
-async fn background_tick() -> Result<Option<SyncReport>, String> {
+async fn background_tick(app: &tauri::AppHandle) -> Result<Option<SyncReport>, String> {
     // If we're not paired, this is a no-op.
     let cfg_exists = config::load().map_err(|e| e.to_string())?.is_some();
     if !cfg_exists {
         return Ok(None);
     }
-    let report = sync_now().await?;
+    let report = sync_now(app.clone()).await?;
     Ok(Some(report))
 }
 
@@ -325,6 +408,9 @@ pub fn run() {
             pair_device,
             unpair_device,
             sync_now,
+            get_thresholds,
+            set_thresholds,
+            preview_alerts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

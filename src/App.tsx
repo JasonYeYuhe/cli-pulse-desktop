@@ -70,6 +70,31 @@ type SessionsSnapshot = {
   collected_at: string;
 };
 
+type Alert = {
+  id: string;
+  type: string;
+  severity: "Info" | "Warning" | "Critical";
+  title: string;
+  message: string;
+  created_at: string;
+  related_project_id?: string | null;
+  related_project_name?: string | null;
+  related_session_id?: string | null;
+  related_session_name?: string | null;
+  related_provider?: string | null;
+  related_device_name?: string | null;
+  source_kind?: string | null;
+  source_id?: string | null;
+  grouping_key?: string | null;
+  suppression_key?: string | null;
+};
+
+type AlertThresholds = {
+  daily_budget_usd: number | null;
+  weekly_budget_usd: number | null;
+  cpu_spike_pct: number;
+};
+
 type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -98,6 +123,8 @@ export default function App() {
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [sessions, setSessions] = useState<SessionsSnapshot | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[] | null>(null);
+  const [alertsLoading, setAlertsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<{ at: Date; report: SyncReport } | null>(null);
@@ -145,11 +172,24 @@ export default function App() {
     }
   }, []);
 
+  const refreshAlerts = useCallback(async () => {
+    setAlertsLoading(true);
+    try {
+      const list = await invoke<Alert[]>("preview_alerts");
+      setAlerts(list);
+    } catch (e: any) {
+      console.warn("preview_alerts failed", e);
+    } finally {
+      setAlertsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     refreshConfig();
     runScan();
     refreshSessions();
-  }, [refreshConfig, runScan, refreshSessions]);
+    refreshAlerts();
+  }, [refreshConfig, runScan, refreshSessions, refreshAlerts]);
 
   // Sessions tab refreshes every 10s while visible
   useEffect(() => {
@@ -157,6 +197,13 @@ export default function App() {
     const id = setInterval(refreshSessions, 10_000);
     return () => clearInterval(id);
   }, [tab, refreshSessions]);
+
+  // Alerts tab refreshes every 30s while visible
+  useEffect(() => {
+    if (tab !== "alerts") return;
+    const id = setInterval(refreshAlerts, 30_000);
+    return () => clearInterval(id);
+  }, [tab, refreshAlerts]);
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
@@ -214,7 +261,7 @@ export default function App() {
           />
         )}
         {tab === "alerts" && (
-          <Placeholder title="Alerts" subtitle="CPU/quota/budget alerts ship in Sprint 3." />
+          <Alerts alerts={alerts} loading={alertsLoading} onRefresh={refreshAlerts} />
         )}
         {tab === "settings" && (
           <Settings
@@ -454,6 +501,8 @@ function Settings({
 
   return (
     <div className="max-w-2xl space-y-6">
+      {paired && <BudgetSection />}
+
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
         <h2 className="text-sm font-semibold text-neutral-300 mb-2">Account</h2>
         <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-sm">
@@ -578,6 +627,141 @@ function Settings({
         </div>
       )}
     </div>
+  );
+}
+
+function BudgetSection() {
+  const [thresholds, setThresholds] = useState<AlertThresholds | null>(null);
+  const [daily, setDaily] = useState<string>("");
+  const [weekly, setWeekly] = useState<string>("");
+  const [cpu, setCpu] = useState<string>("80");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const t = await invoke<AlertThresholds>("get_thresholds");
+        setThresholds(t);
+        setDaily(t.daily_budget_usd != null ? String(t.daily_budget_usd) : "");
+        setWeekly(t.weekly_budget_usd != null ? String(t.weekly_budget_usd) : "");
+        setCpu(String(t.cpu_spike_pct ?? 80));
+      } catch (e: any) {
+        console.warn("get_thresholds failed", e);
+      }
+    })();
+  }, []);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const dailyNum = daily.trim() === "" ? null : Number(daily);
+      const weeklyNum = weekly.trim() === "" ? null : Number(weekly);
+      const cpuNum = cpu.trim() === "" ? 80 : Number(cpu);
+      if (dailyNum != null && (isNaN(dailyNum) || dailyNum < 0)) {
+        throw new Error("Daily budget must be a non-negative number.");
+      }
+      if (weeklyNum != null && (isNaN(weeklyNum) || weeklyNum < 0)) {
+        throw new Error("Weekly budget must be a non-negative number.");
+      }
+      if (isNaN(cpuNum) || cpuNum < 0 || cpuNum > 100) {
+        throw new Error("CPU threshold must be between 0 and 100.");
+      }
+      const next: AlertThresholds = {
+        daily_budget_usd: dailyNum,
+        weekly_budget_usd: weeklyNum,
+        cpu_spike_pct: cpuNum,
+      };
+      await invoke("set_thresholds", { thresholds: next });
+      setThresholds(next);
+      setMsg({ kind: "ok", text: "Budget saved." });
+    } catch (e: any) {
+      setMsg({ kind: "err", text: String(e?.message ?? e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!thresholds) {
+    return (
+      <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+        <h2 className="text-sm font-semibold text-neutral-300 mb-2">Budget</h2>
+        <div className="text-sm text-neutral-500">Loading…</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <h2 className="text-sm font-semibold text-neutral-300 mb-1">Budget</h2>
+      <p className="text-xs text-neutral-500 mb-3">
+        Alerts fire once per day (or per week) when your CLI spend goes above these limits.
+        Leave blank to disable.
+      </p>
+      <form onSubmit={save} className="space-y-3 max-w-md">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="block text-xs text-neutral-400 mb-1">Daily budget (USD)</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={daily}
+              onChange={(e) => setDaily(e.target.value)}
+              placeholder="e.g. 25"
+              className="w-full px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-xs text-neutral-400 mb-1">Weekly budget (USD)</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={weekly}
+              onChange={(e) => setWeekly(e.target.value)}
+              placeholder="e.g. 150"
+              className="w-full px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+            />
+          </label>
+        </div>
+        <label className="block">
+          <span className="block text-xs text-neutral-400 mb-1">CPU spike threshold (%)</span>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="1"
+            value={cpu}
+            onChange={(e) => setCpu(e.target.value)}
+            className="w-24 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+          />
+          <span className="text-xs text-neutral-600 ml-2">
+            Alerts when one CLI process exceeds this for one scan.
+          </span>
+        </label>
+        <button
+          type="submit"
+          disabled={busy}
+          className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </form>
+      {msg && (
+        <div
+          className={`mt-3 px-3 py-2 rounded-md text-xs border ${
+            msg.kind === "ok"
+              ? "bg-emerald-950/50 border-emerald-900 text-emerald-200"
+              : "bg-red-950/60 border-red-900 text-red-200"
+          }`}
+        >
+          {msg.text}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -740,6 +924,97 @@ function ConfidenceDot({ c }: { c: "high" | "medium" | "low" }) {
   );
 }
 
+function Alerts({
+  alerts,
+  loading,
+  onRefresh,
+}: {
+  alerts: Alert[] | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  if (!alerts && loading) return <Skeleton />;
+  if (!alerts) return null;
+
+  const bySeverity = (s: string): number => (s === "Critical" ? 0 : s === "Warning" ? 1 : 2);
+  const sorted = [...alerts].sort(
+    (a, b) => bySeverity(a.severity) - bySeverity(b.severity) || b.created_at.localeCompare(a.created_at)
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-neutral-500">
+          {alerts.length === 0
+            ? "Nothing pressing — no active alerts."
+            : `${alerts.length} active alert${alerts.length === 1 ? "" : "s"}`}
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {sorted.length === 0 ? (
+        <EmptyAlertsHint />
+      ) : (
+        <div className="space-y-2">
+          {sorted.map((a) => (
+            <AlertCard key={a.id} alert={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlertCard({ alert }: { alert: Alert }) {
+  const accent =
+    alert.severity === "Critical"
+      ? "border-red-800 bg-red-950/40"
+      : alert.severity === "Warning"
+      ? "border-amber-800 bg-amber-950/30"
+      : "border-neutral-800 bg-neutral-900/40";
+  const icon =
+    alert.severity === "Critical" ? "🛑" : alert.severity === "Warning" ? "⚠️" : "ℹ️";
+  return (
+    <div className={`p-4 rounded-lg border ${accent}`}>
+      <div className="flex items-start gap-3">
+        <div className="text-lg leading-none mt-0.5">{icon}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{alert.title}</span>
+            <span className="text-xs text-neutral-500 font-mono">{alert.type}</span>
+          </div>
+          <div className="text-sm text-neutral-300 mt-1">{alert.message}</div>
+          <div className="text-xs text-neutral-500 mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
+            {alert.related_provider && <span>provider: {alert.related_provider}</span>}
+            {alert.related_project_name && (
+              <span>project: {alert.related_project_name}</span>
+            )}
+            <span>{new Date(alert.created_at).toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyAlertsHint() {
+  return (
+    <div className="p-6 rounded-lg border border-neutral-800 bg-neutral-900/30 text-sm text-neutral-400">
+      <div className="font-semibold text-neutral-300 mb-1">All quiet 🌙</div>
+      <p>
+        Alerts fire when daily / weekly budgets are exceeded or when a single AI CLI process
+        hits a CPU spike. Set your budget in <span className="font-semibold">Settings → Budget</span>.
+      </p>
+    </div>
+  );
+}
+
 function EntriesTable({ entries }: { entries: DailyEntry[] }) {
   if (entries.length === 0) {
     return <div className="text-sm text-neutral-500 italic">No usage today.</div>;
@@ -781,15 +1056,6 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
       <div className="text-xs text-neutral-500 mb-1">{label}</div>
       <div className="text-2xl font-mono">{value}</div>
       {hint && <div className="text-xs text-neutral-600 mt-1">{hint}</div>}
-    </div>
-  );
-}
-
-function Placeholder({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center text-center py-20">
-      <div className="text-lg font-semibold">{title}</div>
-      <div className="text-sm text-neutral-500 mt-2 max-w-md">{subtitle}</div>
     </div>
   );
 }

@@ -33,6 +33,16 @@ pub fn sync_failure_streak<R: Runtime>(app: &AppHandle<R>, consecutive: u32, err
     );
 }
 
+/// Fired once per (day, budget kind) — see `maybe_notify_budget_breach`
+/// in lib.rs for the de-dup logic. `title` and `body` are produced by
+/// `alerts::compute` and trusted to be human-readable.
+pub fn budget_breach<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
+    // Truncate extremely long messages so Windows Action Center / macOS
+    // Notification Center don't refuse the payload.
+    let body: String = body.chars().take(280).collect();
+    send(app, title, &body);
+}
+
 fn send<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
     let result = app.notification().builder().title(title).body(body).show();
     if let Err(e) = result {

@@ -23,6 +23,11 @@ pub struct HelperConfig {
     pub device_name: String,
     pub helper_version: String,
     pub helper_secret: String,
+    /// Budget alert thresholds. `None` on any field = never alert.
+    /// Added in v0.1.1 — old config files that don't have this will
+    /// default to `AlertThresholds::default()` via serde default.
+    #[serde(default)]
+    pub thresholds: crate::alerts::AlertThresholds,
 }
 
 pub fn config_dir() -> Option<PathBuf> {
