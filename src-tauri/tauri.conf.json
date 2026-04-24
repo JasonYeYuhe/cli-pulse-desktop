@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CLI Pulse",
+  "version": "0.1.0",
+  "identifier": "dev.clipulse.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CLI Pulse",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 840,
+        "minHeight": 560
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Track AI CLI usage and cost",
+    "longDescription": "CLI Pulse tracks usage, tokens, and cost for AI command-line tools like Claude Code, Codex, Gemini CLI, Cursor, Kimi, GLM and more — all from a native desktop app.",
+    "publisher": "Jason Ye",
+    "homepage": "https://github.com/JasonYeYuhe/cli-pulse",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  }
+}
