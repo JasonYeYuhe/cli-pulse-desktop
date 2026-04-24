@@ -25,6 +25,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "deb", "rpm", "appimage"],
     "category": "DeveloperTool",
     "shortDescription": "Track AI CLI usage and cost",
