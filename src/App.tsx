@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
@@ -19,6 +19,24 @@ type ScanResult = {
   total_tokens: number;
   today_key: string;
   days_scanned: number;
+  files_scanned: number;
+};
+
+type ConfigView = {
+  paired: boolean;
+  device_id: string | null;
+  device_name: string | null;
+  device_type: string;
+  helper_version: string;
+  user_id: string | null;
+};
+
+type SyncReport = {
+  sessions_synced: number;
+  alerts_synced: number;
+  metrics_uploaded: number;
+  total_cost_usd: number;
+  total_tokens: number;
   files_scanned: number;
 };
 
@@ -47,10 +65,30 @@ function formatInt(n: number): string {
 export default function App() {
   const [tab, setTab] = useState<TabKey>("overview");
   const [scan, setScan] = useState<ScanResult | null>(null);
+  const [config, setConfig] = useState<ConfigView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastSync, setLastSync] = useState<{ at: Date; report: SyncReport } | null>(null);
 
-  async function runScan() {
+  const refreshConfig = useCallback(async () => {
+    try {
+      const c = await invoke<ConfigView>("get_config");
+      setConfig(c);
+    } catch (e: any) {
+      // Config load failures shouldn't block the UI — fall back to unpaired
+      console.warn("get_config failed", e);
+      setConfig({
+        paired: false,
+        device_id: null,
+        device_name: null,
+        device_type: "Desktop",
+        helper_version: "?",
+        user_id: null,
+      });
+    }
+  }, []);
+
+  const runScan = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -61,11 +99,12 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
+    refreshConfig();
     runScan();
-  }, []);
+  }, [refreshConfig, runScan]);
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
@@ -74,16 +113,21 @@ export default function App() {
           <div className="w-7 h-7 rounded bg-gradient-to-br from-emerald-400 to-cyan-500" />
           <div>
             <div className="font-semibold text-sm">CLI Pulse</div>
-            <div className="text-xs text-neutral-500">Desktop · Sprint 0</div>
+            <div className="text-xs text-neutral-500">
+              Desktop · Sprint 1 · {config?.device_type ?? "…"}
+            </div>
           </div>
         </div>
-        <button
-          onClick={runScan}
-          disabled={loading}
-          className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
-        >
-          {loading ? "Scanning…" : "Rescan"}
-        </button>
+        <div className="flex items-center gap-2">
+          <PairBadge paired={!!config?.paired} />
+          <button
+            onClick={runScan}
+            disabled={loading}
+            className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loading ? "Scanning…" : "Rescan"}
+          </button>
+        </div>
       </header>
 
       <nav className="border-b border-neutral-800 px-6 flex gap-1">
@@ -110,11 +154,40 @@ export default function App() {
         )}
         {tab === "overview" && <Overview scan={scan} loading={loading} />}
         {tab === "providers" && <Providers scan={scan} />}
-        {tab === "sessions" && <Placeholder title="Sessions" subtitle="Live process list ships in Sprint 1." />}
-        {tab === "alerts" && <Placeholder title="Alerts" subtitle="CPU/quota/budget alerts ship in Sprint 2." />}
-        {tab === "settings" && <Placeholder title="Settings" subtitle="Pair with iPhone, login, autostart — Sprint 1." />}
+        {tab === "sessions" && (
+          <Placeholder title="Sessions" subtitle="Live process list ships in Sprint 2." />
+        )}
+        {tab === "alerts" && (
+          <Placeholder title="Alerts" subtitle="CPU/quota/budget alerts ship in Sprint 2." />
+        )}
+        {tab === "settings" && (
+          <Settings
+            config={config}
+            lastSync={lastSync}
+            onPaired={async () => {
+              await refreshConfig();
+            }}
+            onUnpaired={async () => {
+              setLastSync(null);
+              await refreshConfig();
+            }}
+            onSynced={(report) => setLastSync({ at: new Date(), report })}
+          />
+        )}
       </main>
     </div>
+  );
+}
+
+function PairBadge({ paired }: { paired: boolean }) {
+  return paired ? (
+    <span className="px-2 py-0.5 text-xs rounded-md bg-emerald-950/60 border border-emerald-900 text-emerald-300">
+      Paired
+    </span>
+  ) : (
+    <span className="px-2 py-0.5 text-xs rounded-md bg-neutral-800 border border-neutral-700 text-neutral-400">
+      Not paired
+    </span>
   );
 }
 
@@ -138,21 +211,9 @@ function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Today — Cost"
-          value={today ? formatUSD(today.cost) : "—"}
-          hint={scan.today_key}
-        />
-        <StatCard
-          label="Today — Tokens"
-          value={today ? formatInt(today.tokens) : "—"}
-          hint="input + output"
-        />
-        <StatCard
-          label="Today — Messages"
-          value={today ? formatInt(today.msgs) : "—"}
-          hint="Claude only"
-        />
+        <StatCard label="Today — Cost" value={today ? formatUSD(today.cost) : "—"} hint={scan.today_key} />
+        <StatCard label="Today — Tokens" value={today ? formatInt(today.tokens) : "—"} hint="input + output" />
+        <StatCard label="Today — Messages" value={today ? formatInt(today.msgs) : "—"} hint="Claude only" />
         <StatCard
           label={`Last ${scan.days_scanned}d — Cost`}
           value={formatUSD(scan.total_cost_usd)}
@@ -161,13 +222,9 @@ function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean
       </div>
 
       <section>
-        <h2 className="text-sm font-semibold text-neutral-400 mb-2">
-          Today's breakdown
-        </h2>
+        <h2 className="text-sm font-semibold text-neutral-400 mb-2">Today's breakdown</h2>
         <EntriesTable
-          entries={scan.entries.filter(
-            (e) => e.date === scan.today_key && e.model !== CLAUDE_MSG_BUCKET
-          )}
+          entries={scan.entries.filter((e) => e.date === scan.today_key && e.model !== CLAUDE_MSG_BUCKET)}
         />
       </section>
     </div>
@@ -217,14 +274,194 @@ function Providers({ scan }: { scan: ScanResult | null }) {
           </div>
           <div className="text-right">
             <div className="font-mono text-lg">{formatUSD(v.cost)}</div>
-            <div className="text-xs text-neutral-500">
-              {formatInt(v.input + v.output)} I/O tokens
-            </div>
+            <div className="text-xs text-neutral-500">{formatInt(v.input + v.output)} I/O tokens</div>
           </div>
         </div>
       ))}
       {grouped.length === 0 && (
         <div className="text-sm text-neutral-500">No usage found in last 30 days.</div>
+      )}
+    </div>
+  );
+}
+
+function Settings({
+  config,
+  lastSync,
+  onPaired,
+  onUnpaired,
+  onSynced,
+}: {
+  config: ConfigView | null;
+  lastSync: { at: Date; report: SyncReport } | null;
+  onPaired: () => Promise<void>;
+  onUnpaired: () => Promise<void>;
+  onSynced: (r: SyncReport) => void;
+}) {
+  const [code, setCode] = useState("");
+  const [deviceName, setDeviceName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function doPair(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const result = await invoke<{ device_id: string; user_id: string; device_name: string }>("pair_device", {
+        pairingCode: code.trim(),
+        deviceName: deviceName.trim() || null,
+      });
+      setMsg({
+        kind: "ok",
+        text: `Paired as "${result.device_name}" (${result.device_id.slice(0, 8)}…).`,
+      });
+      setCode("");
+      await onPaired();
+    } catch (e: any) {
+      setMsg({ kind: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doUnpair() {
+    if (!confirm("Unpair this device? You can pair again later using a new 6-digit code.")) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await invoke("unpair_device");
+      setMsg({ kind: "ok", text: "Device unpaired." });
+      await onUnpaired();
+    } catch (e: any) {
+      setMsg({ kind: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doSyncNow() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const report = await invoke<SyncReport>("sync_now");
+      onSynced(report);
+      setMsg({
+        kind: "ok",
+        text: `Synced ${report.metrics_uploaded} metrics, ${report.sessions_synced} sessions, ${report.alerts_synced} alerts.`,
+      });
+    } catch (e: any) {
+      setMsg({ kind: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const paired = !!config?.paired;
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+        <h2 className="text-sm font-semibold text-neutral-300 mb-2">Account</h2>
+        <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-sm">
+          <dt className="text-neutral-500">Status</dt>
+          <dd>
+            <PairBadge paired={paired} />
+          </dd>
+          <dt className="text-neutral-500">Device name</dt>
+          <dd className="font-mono text-xs">{config?.device_name ?? "—"}</dd>
+          <dt className="text-neutral-500">Device ID</dt>
+          <dd className="font-mono text-xs truncate">{config?.device_id ?? "—"}</dd>
+          <dt className="text-neutral-500">User ID</dt>
+          <dd className="font-mono text-xs truncate">{config?.user_id ?? "—"}</dd>
+          <dt className="text-neutral-500">Helper version</dt>
+          <dd className="font-mono text-xs">{config?.helper_version ?? "—"}</dd>
+        </dl>
+      </section>
+
+      {!paired && (
+        <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+          <h2 className="text-sm font-semibold text-neutral-300 mb-1">Pair with iPhone</h2>
+          <p className="text-xs text-neutral-500 mb-3">
+            Open CLI Pulse on iOS → Settings → Add device. Enter the 6-digit code shown on your phone.
+          </p>
+          <form onSubmit={doPair} className="space-y-3">
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1">Pairing code</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="\d{6}"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="123456"
+                className="w-32 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-center font-mono tracking-widest text-lg focus:outline-none focus:border-emerald-500"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1">Device name (optional)</label>
+              <input
+                type="text"
+                value={deviceName}
+                onChange={(e) => setDeviceName(e.target.value)}
+                placeholder="e.g. Jason's Surface"
+                className="w-full max-w-sm px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy || code.length !== 6}
+              className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
+            >
+              {busy ? "Pairing…" : "Pair device"}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {paired && (
+        <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
+          <h2 className="text-sm font-semibold text-neutral-300">Sync</h2>
+          {lastSync && (
+            <div className="text-xs text-neutral-500">
+              Last sync {lastSync.at.toLocaleTimeString()} — uploaded {lastSync.report.metrics_uploaded} metrics ·{" "}
+              {formatUSD(lastSync.report.total_cost_usd)} over {lastSync.report.files_scanned} files
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={doSyncNow}
+              disabled={busy}
+              className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
+            >
+              {busy ? "Syncing…" : "Sync now"}
+            </button>
+            <button
+              onClick={doUnpair}
+              disabled={busy}
+              className="px-4 py-2 rounded-md bg-red-950/60 hover:bg-red-900/60 text-sm border border-red-900 text-red-200 disabled:opacity-50"
+            >
+              Unpair device
+            </button>
+          </div>
+          <p className="text-xs text-neutral-600">
+            Auto-sync runs every 2 minutes. Local scan + helper_sync + upsert_daily_usage.
+          </p>
+        </section>
+      )}
+
+      {msg && (
+        <div
+          className={`px-4 py-3 rounded-md text-sm border ${
+            msg.kind === "ok"
+              ? "bg-emerald-950/50 border-emerald-900 text-emerald-200"
+              : "bg-red-950/60 border-red-900 text-red-200"
+          }`}
+        >
+          {msg.text}
+        </div>
       )}
     </div>
   );
