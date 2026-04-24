@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (must already exist, format vX.Y.Z)"
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build & publish (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            bundles: "nsis"
+            rust-target: x86_64-pc-windows-msvc
+          - platform: linux
+            os: ubuntu-latest
+            bundles: "deb,rpm,appimage"
+            rust-target: x86_64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Linux Tauri deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Build & sign & attach to Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: "CLI Pulse Desktop ${{ github.event.inputs.tag || github.ref_name }}"
+          releaseBody: |
+            Auto-generated release. See [CHANGELOG.md](https://github.com/JasonYeYuhe/cli-pulse-desktop/blob/main/CHANGELOG.md) for details.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: --bundles ${{ matrix.bundles }}

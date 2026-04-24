@@ -38,3 +38,11 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+
+# Tauri updater signing keys — must never land in the repo.
+# Private key lives at ~/.config/tauri/cli-pulse-desktop.key on dev
+# machine and is added to GitHub Actions secrets as TAURI_SIGNING_PRIVATE_KEY.
+*.key
+!src-tauri/capabilities/*.key
+*.key.pub.backup
+tauri-signing/

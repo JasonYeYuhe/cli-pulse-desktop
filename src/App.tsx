@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import "./App.css";
 
 type DailyEntry = {
@@ -356,6 +358,43 @@ function Settings({
   const [deviceName, setDeviceName] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [updater, setUpdater] = useState<
+    | { state: "idle" }
+    | { state: "checking" }
+    | { state: "up-to-date" }
+    | { state: "available"; version: string; body?: string }
+    | { state: "downloading"; pct: number }
+    | { state: "ready" }
+    | { state: "error"; text: string }
+  >({ state: "idle" });
+
+  async function doCheckUpdate() {
+    setUpdater({ state: "checking" });
+    try {
+      const upd = await checkUpdate();
+      if (!upd) {
+        setUpdater({ state: "up-to-date" });
+        return;
+      }
+      setUpdater({ state: "available", version: upd.version, body: upd.body });
+      let total = 0;
+      let downloaded = 0;
+      await upd.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? 0;
+          setUpdater({ state: "downloading", pct: 0 });
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+          setUpdater({ state: "downloading", pct });
+        } else if (event.event === "Finished") {
+          setUpdater({ state: "ready" });
+        }
+      });
+    } catch (e: any) {
+      setUpdater({ state: "error", text: String(e) });
+    }
+  }
 
   async function doPair(e: React.FormEvent) {
     e.preventDefault();
@@ -508,6 +547,25 @@ function Settings({
         </section>
       )}
 
+      <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
+        <h2 className="text-sm font-semibold text-neutral-300">Updates</h2>
+        <UpdaterPanel
+          state={updater}
+          onCheck={doCheckUpdate}
+          onRelaunch={async () => {
+            try {
+              await relaunch();
+            } catch (e: any) {
+              setUpdater({ state: "error", text: String(e) });
+            }
+          }}
+        />
+        <p className="text-xs text-neutral-600">
+          Updates are signed. Releases publish at{" "}
+          <span className="font-mono">github.com/JasonYeYuhe/cli-pulse-desktop/releases</span>.
+        </p>
+      </section>
+
       {msg && (
         <div
           className={`px-4 py-3 rounded-md text-sm border ${
@@ -521,6 +579,79 @@ function Settings({
       )}
     </div>
   );
+}
+
+function UpdaterPanel({
+  state,
+  onCheck,
+  onRelaunch,
+}: {
+  state:
+    | { state: "idle" }
+    | { state: "checking" }
+    | { state: "up-to-date" }
+    | { state: "available"; version: string; body?: string }
+    | { state: "downloading"; pct: number }
+    | { state: "ready" }
+    | { state: "error"; text: string };
+  onCheck: () => void;
+  onRelaunch: () => void;
+}) {
+  switch (state.state) {
+    case "idle":
+      return (
+        <button
+          onClick={onCheck}
+          className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700"
+        >
+          Check for updates
+        </button>
+      );
+    case "checking":
+      return <div className="text-sm text-neutral-400">Checking…</div>;
+    case "up-to-date":
+      return (
+        <div className="text-sm text-emerald-300">You're on the latest version.</div>
+      );
+    case "available":
+      return (
+        <div className="text-sm text-neutral-300">
+          Found {state.version} — downloading…
+        </div>
+      );
+    case "downloading":
+      return (
+        <div className="space-y-1">
+          <div className="text-xs text-neutral-400">Downloading {state.pct}%</div>
+          <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 transition-all"
+              style={{ width: `${state.pct}%` }}
+            />
+          </div>
+        </div>
+      );
+    case "ready":
+      return (
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-emerald-300">
+            Update installed. Restart to apply.
+          </span>
+          <button
+            onClick={onRelaunch}
+            className="px-3 py-1.5 text-xs rounded-md bg-emerald-600 hover:bg-emerald-500 text-white"
+          >
+            Restart now
+          </button>
+        </div>
+      );
+    case "error":
+      return (
+        <div className="text-sm text-red-300">
+          Update failed: {state.text.length > 160 ? state.text.slice(0, 160) + "…" : state.text}
+        </div>
+      );
+  }
 }
 
 function Sessions({
