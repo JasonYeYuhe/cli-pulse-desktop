@@ -9,7 +9,9 @@ pub mod creds;
 pub mod paths;
 pub mod pricing;
 pub mod scanner;
+pub mod sessions;
 pub mod supabase;
+pub mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -97,6 +99,13 @@ fn scan_usage(days: Option<u32>) -> Result<ScanResult, String> {
     scanner::scan(days).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn list_sessions() -> Result<sessions::SessionsSnapshot, String> {
+    async_runtime::spawn_blocking(sessions::collect_sessions)
+        .await
+        .map_err(|e| format!("sessions join error: {e}"))
+}
+
 #[derive(Debug, Serialize)]
 struct PairResult {
     device_id: String,
@@ -156,6 +165,8 @@ struct SyncReport {
     total_cost_usd: f64,
     total_tokens: i64,
     files_scanned: u32,
+    live_sessions_sent: usize,
+    live_processes_seen: usize,
 }
 
 #[tauri::command]
@@ -164,17 +175,20 @@ async fn sync_now() -> Result<SyncReport, String> {
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Device not paired yet".to_string())?;
 
-    // 1. Local scan
+    // 1. Local scan + live sessions snapshot
     let scan = async_runtime::spawn_blocking(|| scanner::scan(30))
         .await
         .map_err(|e| format!("scanner join error: {e}"))?
         .map_err(|e| e.to_string())?;
+    let snapshot = async_runtime::spawn_blocking(sessions::collect_sessions)
+        .await
+        .map_err(|e| format!("sessions join error: {e}"))?;
 
-    // 2. helper_sync (Sprint 1 — empty sessions/alerts, just heartbeat-equivalent round-trip)
+    // 2. helper_sync — ship live sessions + empty alerts/quotas (Sprint 2.5)
     let hs = supabase::helper_sync(&supabase::HelperSyncRequest {
         p_device_id: &cfg.device_id,
         p_helper_secret: &cfg.helper_secret,
-        p_sessions: json!([]),
+        p_sessions: sessions::sessions_payload(&snapshot),
         p_alerts: json!([]),
         p_provider_remaining: json!({}),
         p_provider_tiers: json!({}),
@@ -200,6 +214,8 @@ async fn sync_now() -> Result<SyncReport, String> {
         total_cost_usd: scan.total_cost_usd,
         total_tokens: scan.total_tokens,
         files_scanned: scan.files_scanned,
+        live_sessions_sent: snapshot.sessions.len(),
+        live_processes_seen: snapshot.total_processes_seen,
     })
 }
 
@@ -271,13 +287,20 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .setup(move |_app| {
+        .setup(move |app| {
             spawn_background_sync(stop_bg.clone());
+            // System tray — Windows first-class, Linux works with AppIndicator
+            // when libayatana-appindicator3 is installed, otherwise we log and
+            // continue window-first.
+            if let Err(e) = tray::install(app.handle()) {
+                log::warn!("tray init failed (continuing without tray): {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
             scan_usage,
+            list_sessions,
             pair_device,
             unpair_device,
             sync_now,

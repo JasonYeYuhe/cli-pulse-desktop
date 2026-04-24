@@ -38,6 +38,34 @@ type SyncReport = {
   total_cost_usd: number;
   total_tokens: number;
   files_scanned: number;
+  live_sessions_sent: number;
+  live_processes_seen: number;
+};
+
+type LiveSession = {
+  id: string;
+  name: string;
+  provider: string;
+  project: string;
+  status: string;
+  total_usage: number;
+  exact_cost: number | null;
+  requests: number;
+  error_count: number;
+  collection_confidence: "high" | "medium" | "low";
+  started_at: string;
+  last_active_at: string;
+  cpu_usage: number;
+  memory_mb: number;
+  pids: number[];
+  command: string;
+};
+
+type SessionsSnapshot = {
+  sessions: LiveSession[];
+  total_processes_seen: number;
+  matched_before_dedup: number;
+  collected_at: string;
 };
 
 type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
@@ -66,6 +94,8 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>("overview");
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
+  const [sessions, setSessions] = useState<SessionsSnapshot | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<{ at: Date; report: SyncReport } | null>(null);
@@ -101,10 +131,30 @@ export default function App() {
     }
   }, []);
 
+  const refreshSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    try {
+      const snap = await invoke<SessionsSnapshot>("list_sessions");
+      setSessions(snap);
+    } catch (e: any) {
+      console.warn("list_sessions failed", e);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     refreshConfig();
     runScan();
-  }, [refreshConfig, runScan]);
+    refreshSessions();
+  }, [refreshConfig, runScan, refreshSessions]);
+
+  // Sessions tab refreshes every 10s while visible
+  useEffect(() => {
+    if (tab !== "sessions") return;
+    const id = setInterval(refreshSessions, 10_000);
+    return () => clearInterval(id);
+  }, [tab, refreshSessions]);
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
@@ -155,10 +205,14 @@ export default function App() {
         {tab === "overview" && <Overview scan={scan} loading={loading} />}
         {tab === "providers" && <Providers scan={scan} />}
         {tab === "sessions" && (
-          <Placeholder title="Sessions" subtitle="Live process list ships in Sprint 2." />
+          <Sessions
+            snapshot={sessions}
+            loading={sessionsLoading}
+            onRefresh={refreshSessions}
+          />
         )}
         {tab === "alerts" && (
-          <Placeholder title="Alerts" subtitle="CPU/quota/budget alerts ship in Sprint 2." />
+          <Placeholder title="Alerts" subtitle="CPU/quota/budget alerts ship in Sprint 3." />
         )}
         {tab === "settings" && (
           <Settings
@@ -426,8 +480,10 @@ function Settings({
           <h2 className="text-sm font-semibold text-neutral-300">Sync</h2>
           {lastSync && (
             <div className="text-xs text-neutral-500">
-              Last sync {lastSync.at.toLocaleTimeString()} — uploaded {lastSync.report.metrics_uploaded} metrics ·{" "}
-              {formatUSD(lastSync.report.total_cost_usd)} over {lastSync.report.files_scanned} files
+              Last sync {lastSync.at.toLocaleTimeString()} — uploaded{" "}
+              {lastSync.report.metrics_uploaded} metrics · {lastSync.report.live_sessions_sent}{" "}
+              live sessions · {formatUSD(lastSync.report.total_cost_usd)} over{" "}
+              {lastSync.report.files_scanned} files
             </div>
           )}
           <div className="flex gap-2">
@@ -464,6 +520,92 @@ function Settings({
         </div>
       )}
     </div>
+  );
+}
+
+function Sessions({
+  snapshot,
+  loading,
+  onRefresh,
+}: {
+  snapshot: SessionsSnapshot | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  if (!snapshot && loading) {
+    return <Skeleton />;
+  }
+  if (!snapshot) return null;
+
+  const sessions = snapshot.sessions;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-neutral-500">
+          {sessions.length} active · {snapshot.total_processes_seen} processes scanned · refreshed{" "}
+          {new Date(snapshot.collected_at).toLocaleTimeString()}
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {loading ? "Refreshing…" : "Refresh now"}
+        </button>
+      </div>
+
+      {sessions.length === 0 ? (
+        <div className="text-sm text-neutral-500 italic py-10 text-center">
+          No AI CLI sessions running right now.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-neutral-800">
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-900/60 text-left text-xs text-neutral-400">
+              <tr>
+                <th className="px-3 py-2">Provider</th>
+                <th className="px-3 py-2">Project</th>
+                <th className="px-3 py-2">Name</th>
+                <th className="px-3 py-2 text-right">CPU</th>
+                <th className="px-3 py-2 text-right">Memory</th>
+                <th className="px-3 py-2 text-right">Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr key={s.id} className="border-t border-neutral-800">
+                  <td className="px-3 py-2 font-medium">{s.provider}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{s.project}</td>
+                  <td
+                    className="px-3 py-2 font-mono text-xs max-w-sm truncate"
+                    title={s.command}
+                  >
+                    {s.name}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">{s.cpu_usage.toFixed(1)}%</td>
+                  <td className="px-3 py-2 text-right font-mono">{s.memory_mb} MB</td>
+                  <td className="px-3 py-2 text-right">
+                    <ConfidenceDot c={s.collection_confidence} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfidenceDot({ c }: { c: "high" | "medium" | "low" }) {
+  const color =
+    c === "high" ? "bg-emerald-400" : c === "medium" ? "bg-amber-400" : "bg-neutral-500";
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-neutral-400">
+      <span className={`w-1.5 h-1.5 rounded-full ${color}`} />
+      {c}
+    </span>
   );
 }
 
