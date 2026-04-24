@@ -1,0 +1,122 @@
+{
+  "app": {
+    "name": "CLI Pulse",
+    "subtitle_desktop": "桌面版"
+  },
+  "badge": {
+    "paired": "已配对",
+    "not_paired": "未配对"
+  },
+  "action": {
+    "rescan": "重新扫描",
+    "scanning": "扫描中…",
+    "refresh": "刷新",
+    "refresh_now": "立即刷新",
+    "refreshing": "刷新中…",
+    "save": "保存",
+    "saving": "保存中…",
+    "restart_now": "立即重启",
+    "pair_device": "配对设备",
+    "pairing": "配对中…",
+    "sync_now": "立即同步",
+    "syncing": "同步中…",
+    "unpair_device": "解除配对",
+    "check_updates": "检查更新",
+    "checking": "检查中…"
+  },
+  "tab": {
+    "overview": "概览",
+    "providers": "服务商",
+    "sessions": "会话",
+    "alerts": "通知",
+    "settings": "设置"
+  },
+  "overview": {
+    "today_cost": "今日费用",
+    "today_tokens": "今日 Token",
+    "today_messages": "今日消息",
+    "tokens_hint": "输入 + 输出",
+    "claude_only_hint": "仅 Claude",
+    "last_n_days_cost": "近 {{days}} 天费用",
+    "files_scanned_hint": "已扫描 {{n}} 个文件",
+    "trend_title": "近 7 天费用",
+    "today_breakdown": "今日明细",
+    "no_usage_today": "今日暂无使用。",
+    "max_per_day": "峰值: {{value}}/ 天",
+    "label_today": "今天"
+  },
+  "providers": {
+    "active_days": "{{count}} 天活跃 · {{msgs}} 条消息",
+    "no_usage": "近 30 天未检测到使用。",
+    "io_tokens": "{{value}} 条 I/O Token"
+  },
+  "sessions": {
+    "header": "{{active}} 活跃 · 扫描 {{total}} 个进程 · 刷新于 {{time}}",
+    "empty": "当前无 AI CLI 会话运行。",
+    "col_provider": "服务商",
+    "col_project": "项目",
+    "col_name": "名称",
+    "col_cpu": "CPU",
+    "col_memory": "内存",
+    "col_confidence": "置信度",
+    "confidence_high": "高",
+    "confidence_medium": "中",
+    "confidence_low": "低"
+  },
+  "alerts": {
+    "nothing": "没什么紧急的 —— 无活跃通知。",
+    "active": "{{count}} 条活跃通知",
+    "active_plural": "{{count}} 条活跃通知",
+    "empty_title": "一片安静 🌙",
+    "empty_body": "当每日/每周预算被突破,或某个 AI CLI 进程 CPU 飙升时会触发通知。请在<strong>设置 → 预算</strong>中设定阈值。"
+  },
+  "settings": {
+    "account_heading": "账户",
+    "status": "状态",
+    "device_name": "设备名称",
+    "device_id": "设备 ID",
+    "user_id": "用户 ID",
+    "helper_version": "Helper 版本",
+    "pair_heading": "与 iPhone 配对",
+    "pair_hint": "在 iOS 上打开 CLI Pulse → 设置 → 添加设备。输入手机上显示的 6 位配对码。",
+    "pairing_code": "配对码",
+    "device_name_optional": "设备名称(可选)",
+    "device_name_placeholder": "例如:Jason 的 Surface",
+    "budget_heading": "预算",
+    "budget_hint": "当 CLI 花费超过这些限额时,每天(或每周)触发一次通知。留空则禁用。",
+    "daily_budget_usd": "每日预算(美元)",
+    "weekly_budget_usd": "每周预算(美元)",
+    "cpu_threshold_label": "CPU 飙升阈值 (%)",
+    "cpu_threshold_help": "某个 CLI 进程在一次扫描中超过此值时通知。",
+    "sync_heading": "同步",
+    "auto_sync_hint": "每 2 分钟自动同步。本地扫描 + helper_sync + upsert_daily_usage。",
+    "last_sync": "上次同步 {{time}} — 上传 {{metrics}} 条指标 · {{sessions}} 个实时会话 · {{cost}},共 {{files}} 个文件",
+    "updates_heading": "更新",
+    "updates_hint": "更新均已签名。发布地址:<code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>",
+    "unpair_confirm": "确认解除此设备配对吗?之后可用新的 6 位码重新配对。",
+    "language_heading": "语言"
+  },
+  "updater": {
+    "up_to_date": "已是最新版本。",
+    "available": "发现 {{version}},正在下载…",
+    "downloading": "下载 {{pct}}%",
+    "ready": "更新已安装,重启后生效。",
+    "error": "更新失败:{{error}}"
+  },
+  "messages": {
+    "paired_as": "已配对为\"{{name}}\" ({{id}}…)。",
+    "device_unpaired": "已解除配对。",
+    "sync_ok": "已同步 {{metrics}} 条指标、{{sessions}} 个会话、{{alerts}} 条通知。",
+    "budget_saved": "预算已保存。",
+    "err_budget_nonneg": "每日预算必须是非负数。",
+    "err_weekly_nonneg": "每周预算必须是非负数。",
+    "err_cpu_range": "CPU 阈值必须在 0–100 之间。",
+    "err_code_empty": "配对码为空"
+  },
+  "misc": {
+    "provider_label": "服务商:{{name}}",
+    "project_label": "项目:{{name}}",
+    "none": "—",
+    "loading": "加载中…"
+  }
+}

@@ -19,20 +19,32 @@ permissions:
 
 jobs:
   publish:
-    name: Build & publish (${{ matrix.platform }})
+    name: Build & publish (${{ matrix.platform }} / ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: windows
+            arch: x64
             os: windows-latest
             bundles: "nsis"
             rust-target: x86_64-pc-windows-msvc
+          - platform: windows
+            arch: arm64
+            os: windows-11-arm
+            bundles: "nsis"
+            rust-target: aarch64-pc-windows-msvc
           - platform: linux
+            arch: x64
             os: ubuntu-latest
             bundles: "deb,rpm,appimage"
             rust-target: x86_64-unknown-linux-gnu
+          - platform: linux
+            arch: arm64
+            os: ubuntu-24.04-arm
+            bundles: "deb,rpm,appimage"
+            rust-target: aarch64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v4
@@ -63,13 +75,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          key: ${{ matrix.rust-target }}
 
       - run: npm ci
 
       - name: Build & sign & attach to Release
-        # Pinned to v0.6.2 (latest as of 2026-04) — v0's default tag lagged
-        # behind Tauri 2.10's updater-artifact discovery, causing latest.json
-        # and .sig files to be dropped on upload.
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,7 +93,5 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
-          # Prefer NSIS .zip.sig over MSI .zip.sig when building latest.json
-          # — NSIS matches tauri.conf.json's nsis target.
           updaterJsonPreferNsis: true
-          args: --bundles ${{ matrix.bundles }}
+          args: --bundles ${{ matrix.bundles }} --target ${{ matrix.rust-target }}

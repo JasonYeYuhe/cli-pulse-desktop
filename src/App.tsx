@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { useTranslation } from "react-i18next";
+import { SUPPORTED_LANGS, setLang, type LangCode } from "./i18n";
 import "./App.css";
 
 type DailyEntry = {
@@ -97,14 +99,6 @@ type AlertThresholds = {
 
 type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "providers", label: "Providers" },
-  { key: "sessions", label: "Sessions" },
-  { key: "alerts", label: "Alerts" },
-  { key: "settings", label: "Settings" },
-];
-
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
 
 function formatUSD(n: number): string {
@@ -118,6 +112,14 @@ function formatInt(n: number): string {
 }
 
 export default function App() {
+  const { t } = useTranslation();
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: "overview", label: t("tab.overview") },
+    { key: "providers", label: t("tab.providers") },
+    { key: "sessions", label: t("tab.sessions") },
+    { key: "alerts", label: t("tab.alerts") },
+    { key: "settings", label: t("tab.settings") },
+  ];
   const [tab, setTab] = useState<TabKey>("overview");
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
@@ -211,9 +213,9 @@ export default function App() {
         <div className="flex items-center gap-3">
           <div className="w-7 h-7 rounded bg-gradient-to-br from-emerald-400 to-cyan-500" />
           <div>
-            <div className="font-semibold text-sm">CLI Pulse</div>
+            <div className="font-semibold text-sm">{t("app.name")}</div>
             <div className="text-xs text-neutral-500">
-              Desktop · Sprint 1 · {config?.device_type ?? "…"}
+              {t("app.subtitle_desktop")} · {config?.device_type ?? "…"}
             </div>
           </div>
         </div>
@@ -224,23 +226,23 @@ export default function App() {
             disabled={loading}
             className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
           >
-            {loading ? "Scanning…" : "Rescan"}
+            {loading ? t("action.scanning") : t("action.rescan")}
           </button>
         </div>
       </header>
 
       <nav className="border-b border-neutral-800 px-6 flex gap-1">
-        {TABS.map((t) => (
+        {tabs.map((tabItem) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={tabItem.key}
+            onClick={() => setTab(tabItem.key)}
             className={`px-3 py-2.5 text-sm border-b-2 transition-colors ${
-              tab === t.key
+              tab === tabItem.key
                 ? "border-emerald-500 text-white"
                 : "border-transparent text-neutral-400 hover:text-neutral-200"
             }`}
           >
-            {t.label}
+            {tabItem.label}
           </button>
         ))}
       </nav>
@@ -283,18 +285,20 @@ export default function App() {
 }
 
 function PairBadge({ paired }: { paired: boolean }) {
+  const { t } = useTranslation();
   return paired ? (
     <span className="px-2 py-0.5 text-xs rounded-md bg-emerald-950/60 border border-emerald-900 text-emerald-300">
-      Paired
+      {t("badge.paired")}
     </span>
   ) : (
     <span className="px-2 py-0.5 text-xs rounded-md bg-neutral-800 border border-neutral-700 text-neutral-400">
-      Not paired
+      {t("badge.not_paired")}
     </span>
   );
 }
 
 function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean }) {
+  const { t } = useTranslation();
   const today = useMemo(() => {
     if (!scan) return null;
     const todays = scan.entries.filter((e) => e.date === scan.today_key);
@@ -314,23 +318,23 @@ function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label="Today — Cost" value={today ? formatUSD(today.cost) : "—"} hint={scan.today_key} />
-        <StatCard label="Today — Tokens" value={today ? formatInt(today.tokens) : "—"} hint="input + output" />
-        <StatCard label="Today — Messages" value={today ? formatInt(today.msgs) : "—"} hint="Claude only" />
+        <StatCard label={t("overview.today_cost")} value={today ? formatUSD(today.cost) : "—"} hint={scan.today_key} />
+        <StatCard label={t("overview.today_tokens")} value={today ? formatInt(today.tokens) : "—"} hint={t("overview.tokens_hint")} />
+        <StatCard label={t("overview.today_messages")} value={today ? formatInt(today.msgs) : "—"} hint={t("overview.claude_only_hint")} />
         <StatCard
-          label={`Last ${scan.days_scanned}d — Cost`}
+          label={t("overview.last_n_days_cost", { days: scan.days_scanned })}
           value={formatUSD(scan.total_cost_usd)}
-          hint={`${scan.files_scanned} files scanned`}
+          hint={t("overview.files_scanned_hint", { n: scan.files_scanned })}
         />
       </div>
 
       <section>
-        <h2 className="text-sm font-semibold text-neutral-400 mb-2">Last 7 days — cost</h2>
+        <h2 className="text-sm font-semibold text-neutral-400 mb-2">{t("overview.trend_title")}</h2>
         <CostTrendChart scan={scan} />
       </section>
 
       <section>
-        <h2 className="text-sm font-semibold text-neutral-400 mb-2">Today's breakdown</h2>
+        <h2 className="text-sm font-semibold text-neutral-400 mb-2">{t("overview.today_breakdown")}</h2>
         <EntriesTable
           entries={scan.entries.filter((e) => e.date === scan.today_key && e.model !== CLAUDE_MSG_BUCKET)}
         />
@@ -340,6 +344,7 @@ function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean
 }
 
 function CostTrendChart({ scan }: { scan: ScanResult }) {
+  const { t } = useTranslation();
   const days = useMemo(() => {
     // Build the last 7 ISO dates relative to today_key
     const baseDate = new Date(scan.today_key + "T00:00:00Z");
@@ -357,8 +362,8 @@ function CostTrendChart({ scan }: { scan: ScanResult }) {
       const key = d.toISOString().slice(0, 10);
       const label =
         i === 0
-          ? "Today"
-          : d.toLocaleDateString("en-US", { weekday: "short" });
+          ? t("overview.label_today")
+          : d.toLocaleDateString(undefined, { weekday: "short" });
       const entries = scan.entries.filter(
         (e) => e.date === key && e.model !== CLAUDE_MSG_BUCKET
       );
@@ -479,7 +484,7 @@ function CostTrendChart({ scan }: { scan: ScanResult }) {
         <LegendDot color="#10b981" label="Claude" />
         <LegendDot color="#06b6d4" label="Codex" />
         <LegendDot color="#a855f7" label="Other" />
-        <span className="ml-auto font-mono">Max: {formatUSD(maxCost)}/day</span>
+        <span className="ml-auto font-mono">{t("overview.max_per_day", { value: formatUSD(maxCost) })}</span>
       </div>
     </div>
   );
@@ -495,6 +500,7 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 }
 
 function Providers({ scan }: { scan: ScanResult | null }) {
+  const { t } = useTranslation();
   const grouped = useMemo(() => {
     if (!scan) return null;
     const map = new Map<
@@ -532,17 +538,17 @@ function Providers({ scan }: { scan: ScanResult | null }) {
           <div>
             <div className="font-semibold">{provider}</div>
             <div className="text-xs text-neutral-500">
-              {v.days.size} active days · {formatInt(v.msgs)} msgs
+              {t("providers.active_days", { count: v.days.size, msgs: formatInt(v.msgs) })}
             </div>
           </div>
           <div className="text-right">
             <div className="font-mono text-lg">{formatUSD(v.cost)}</div>
-            <div className="text-xs text-neutral-500">{formatInt(v.input + v.output)} I/O tokens</div>
+            <div className="text-xs text-neutral-500">{t("providers.io_tokens", { value: formatInt(v.input + v.output) })}</div>
           </div>
         </div>
       ))}
       {grouped.length === 0 && (
-        <div className="text-sm text-neutral-500">No usage found in last 30 days.</div>
+        <div className="text-sm text-neutral-500">{t("providers.no_usage")}</div>
       )}
     </div>
   );
@@ -561,6 +567,7 @@ function Settings({
   onUnpaired: () => Promise<void>;
   onSynced: (r: SyncReport) => void;
 }) {
+  const { t } = useTranslation();
   const [code, setCode] = useState("");
   const [deviceName, setDeviceName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -614,7 +621,7 @@ function Settings({
       });
       setMsg({
         kind: "ok",
-        text: `Paired as "${result.device_name}" (${result.device_id.slice(0, 8)}…).`,
+        text: t("messages.paired_as", { name: result.device_name, id: result.device_id.slice(0, 8) }),
       });
       setCode("");
       await onPaired();
@@ -626,12 +633,12 @@ function Settings({
   }
 
   async function doUnpair() {
-    if (!confirm("Unpair this device? You can pair again later using a new 6-digit code.")) return;
+    if (!confirm(t("settings.unpair_confirm"))) return;
     setBusy(true);
     setMsg(null);
     try {
       await invoke("unpair_device");
-      setMsg({ kind: "ok", text: "Device unpaired." });
+      setMsg({ kind: "ok", text: t("messages.device_unpaired") });
       await onUnpaired();
     } catch (e: any) {
       setMsg({ kind: "err", text: String(e) });
@@ -648,7 +655,11 @@ function Settings({
       onSynced(report);
       setMsg({
         kind: "ok",
-        text: `Synced ${report.metrics_uploaded} metrics, ${report.sessions_synced} sessions, ${report.alerts_synced} alerts.`,
+        text: t("messages.sync_ok", {
+          metrics: report.metrics_uploaded,
+          sessions: report.sessions_synced,
+          alerts: report.alerts_synced,
+        }),
       });
     } catch (e: any) {
       setMsg({ kind: "err", text: String(e) });
@@ -661,35 +672,37 @@ function Settings({
 
   return (
     <div className="max-w-2xl space-y-6">
+      <LanguageSection />
+
       {paired && <BudgetSection />}
 
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
-        <h2 className="text-sm font-semibold text-neutral-300 mb-2">Account</h2>
+        <h2 className="text-sm font-semibold text-neutral-300 mb-2">{t("settings.account_heading")}</h2>
         <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-sm">
-          <dt className="text-neutral-500">Status</dt>
+          <dt className="text-neutral-500">{t("settings.status")}</dt>
           <dd>
             <PairBadge paired={paired} />
           </dd>
-          <dt className="text-neutral-500">Device name</dt>
-          <dd className="font-mono text-xs">{config?.device_name ?? "—"}</dd>
-          <dt className="text-neutral-500">Device ID</dt>
-          <dd className="font-mono text-xs truncate">{config?.device_id ?? "—"}</dd>
-          <dt className="text-neutral-500">User ID</dt>
-          <dd className="font-mono text-xs truncate">{config?.user_id ?? "—"}</dd>
-          <dt className="text-neutral-500">Helper version</dt>
-          <dd className="font-mono text-xs">{config?.helper_version ?? "—"}</dd>
+          <dt className="text-neutral-500">{t("settings.device_name")}</dt>
+          <dd className="font-mono text-xs">{config?.device_name ?? t("misc.none")}</dd>
+          <dt className="text-neutral-500">{t("settings.device_id")}</dt>
+          <dd className="font-mono text-xs truncate">{config?.device_id ?? t("misc.none")}</dd>
+          <dt className="text-neutral-500">{t("settings.user_id")}</dt>
+          <dd className="font-mono text-xs truncate">{config?.user_id ?? t("misc.none")}</dd>
+          <dt className="text-neutral-500">{t("settings.helper_version")}</dt>
+          <dd className="font-mono text-xs">{config?.helper_version ?? t("misc.none")}</dd>
         </dl>
       </section>
 
       {!paired && (
         <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
-          <h2 className="text-sm font-semibold text-neutral-300 mb-1">Pair with iPhone</h2>
+          <h2 className="text-sm font-semibold text-neutral-300 mb-1">{t("settings.pair_heading")}</h2>
           <p className="text-xs text-neutral-500 mb-3">
-            Open CLI Pulse on iOS → Settings → Add device. Enter the 6-digit code shown on your phone.
+            {t("settings.pair_hint")}
           </p>
           <form onSubmit={doPair} className="space-y-3">
             <div>
-              <label className="block text-xs text-neutral-400 mb-1">Pairing code</label>
+              <label className="block text-xs text-neutral-400 mb-1">{t("settings.pairing_code")}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -703,12 +716,12 @@ function Settings({
               />
             </div>
             <div>
-              <label className="block text-xs text-neutral-400 mb-1">Device name (optional)</label>
+              <label className="block text-xs text-neutral-400 mb-1">{t("settings.device_name_optional")}</label>
               <input
                 type="text"
                 value={deviceName}
                 onChange={(e) => setDeviceName(e.target.value)}
-                placeholder="e.g. Jason's Surface"
+                placeholder={t("settings.device_name_placeholder")}
                 className="w-full max-w-sm px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
               />
             </div>
@@ -717,7 +730,7 @@ function Settings({
               disabled={busy || code.length !== 6}
               className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
             >
-              {busy ? "Pairing…" : "Pair device"}
+              {busy ? t("action.pairing") : t("action.pair_device")}
             </button>
           </form>
         </section>
@@ -725,13 +738,16 @@ function Settings({
 
       {paired && (
         <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
-          <h2 className="text-sm font-semibold text-neutral-300">Sync</h2>
+          <h2 className="text-sm font-semibold text-neutral-300">{t("settings.sync_heading")}</h2>
           {lastSync && (
             <div className="text-xs text-neutral-500">
-              Last sync {lastSync.at.toLocaleTimeString()} — uploaded{" "}
-              {lastSync.report.metrics_uploaded} metrics · {lastSync.report.live_sessions_sent}{" "}
-              live sessions · {formatUSD(lastSync.report.total_cost_usd)} over{" "}
-              {lastSync.report.files_scanned} files
+              {t("settings.last_sync", {
+                time: lastSync.at.toLocaleTimeString(),
+                metrics: lastSync.report.metrics_uploaded,
+                sessions: lastSync.report.live_sessions_sent,
+                cost: formatUSD(lastSync.report.total_cost_usd),
+                files: lastSync.report.files_scanned,
+              })}
             </div>
           )}
           <div className="flex gap-2">
@@ -740,24 +756,24 @@ function Settings({
               disabled={busy}
               className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
             >
-              {busy ? "Syncing…" : "Sync now"}
+              {busy ? t("action.syncing") : t("action.sync_now")}
             </button>
             <button
               onClick={doUnpair}
               disabled={busy}
               className="px-4 py-2 rounded-md bg-red-950/60 hover:bg-red-900/60 text-sm border border-red-900 text-red-200 disabled:opacity-50"
             >
-              Unpair device
+              {t("action.unpair_device")}
             </button>
           </div>
           <p className="text-xs text-neutral-600">
-            Auto-sync runs every 2 minutes. Local scan + helper_sync + upsert_daily_usage.
+            {t("settings.auto_sync_hint")}
           </p>
         </section>
       )}
 
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
-        <h2 className="text-sm font-semibold text-neutral-300">Updates</h2>
+        <h2 className="text-sm font-semibold text-neutral-300">{t("settings.updates_heading")}</h2>
         <UpdaterPanel
           state={updater}
           onCheck={doCheckUpdate}
@@ -769,10 +785,7 @@ function Settings({
             }
           }}
         />
-        <p className="text-xs text-neutral-600">
-          Updates are signed. Releases publish at{" "}
-          <span className="font-mono">github.com/JasonYeYuhe/cli-pulse-desktop/releases</span>.
-        </p>
+        <p className="text-xs text-neutral-600" dangerouslySetInnerHTML={{ __html: t("settings.updates_hint") }} />
       </section>
 
       {msg && (
@@ -790,7 +803,29 @@ function Settings({
   );
 }
 
+function LanguageSection() {
+  const { t, i18n } = useTranslation();
+  const current = (i18n.language || "en") as LangCode;
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <h2 className="text-sm font-semibold text-neutral-300 mb-2">{t("settings.language_heading")}</h2>
+      <select
+        value={current}
+        onChange={(e) => setLang(e.target.value as LangCode)}
+        className="px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-sm focus:outline-none focus:border-emerald-500"
+      >
+        {SUPPORTED_LANGS.map((l) => (
+          <option key={l.code} value={l.code}>
+            {l.label}
+          </option>
+        ))}
+      </select>
+    </section>
+  );
+}
+
 function BudgetSection() {
+  const { t } = useTranslation();
   const [thresholds, setThresholds] = useState<AlertThresholds | null>(null);
   const [daily, setDaily] = useState<string>("");
   const [weekly, setWeekly] = useState<string>("");
@@ -821,13 +856,13 @@ function BudgetSection() {
       const weeklyNum = weekly.trim() === "" ? null : Number(weekly);
       const cpuNum = cpu.trim() === "" ? 80 : Number(cpu);
       if (dailyNum != null && (isNaN(dailyNum) || dailyNum < 0)) {
-        throw new Error("Daily budget must be a non-negative number.");
+        throw new Error(t("messages.err_budget_nonneg"));
       }
       if (weeklyNum != null && (isNaN(weeklyNum) || weeklyNum < 0)) {
-        throw new Error("Weekly budget must be a non-negative number.");
+        throw new Error(t("messages.err_weekly_nonneg"));
       }
       if (isNaN(cpuNum) || cpuNum < 0 || cpuNum > 100) {
-        throw new Error("CPU threshold must be between 0 and 100.");
+        throw new Error(t("messages.err_cpu_range"));
       }
       const next: AlertThresholds = {
         daily_budget_usd: dailyNum,
@@ -836,7 +871,7 @@ function BudgetSection() {
       };
       await invoke("set_thresholds", { thresholds: next });
       setThresholds(next);
-      setMsg({ kind: "ok", text: "Budget saved." });
+      setMsg({ kind: "ok", text: t("messages.budget_saved") });
     } catch (e: any) {
       setMsg({ kind: "err", text: String(e?.message ?? e) });
     } finally {
@@ -847,48 +882,45 @@ function BudgetSection() {
   if (!thresholds) {
     return (
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
-        <h2 className="text-sm font-semibold text-neutral-300 mb-2">Budget</h2>
-        <div className="text-sm text-neutral-500">Loading…</div>
+        <h2 className="text-sm font-semibold text-neutral-300 mb-2">{t("settings.budget_heading")}</h2>
+        <div className="text-sm text-neutral-500">{t("misc.loading")}</div>
       </section>
     );
   }
 
   return (
     <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
-      <h2 className="text-sm font-semibold text-neutral-300 mb-1">Budget</h2>
-      <p className="text-xs text-neutral-500 mb-3">
-        Alerts fire once per day (or per week) when your CLI spend goes above these limits.
-        Leave blank to disable.
-      </p>
+      <h2 className="text-sm font-semibold text-neutral-300 mb-1">{t("settings.budget_heading")}</h2>
+      <p className="text-xs text-neutral-500 mb-3">{t("settings.budget_hint")}</p>
       <form onSubmit={save} className="space-y-3 max-w-md">
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className="block text-xs text-neutral-400 mb-1">Daily budget (USD)</span>
+            <span className="block text-xs text-neutral-400 mb-1">{t("settings.daily_budget_usd")}</span>
             <input
               type="number"
               step="0.01"
               min="0"
               value={daily}
               onChange={(e) => setDaily(e.target.value)}
-              placeholder="e.g. 25"
+              placeholder="25"
               className="w-full px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
             />
           </label>
           <label className="block">
-            <span className="block text-xs text-neutral-400 mb-1">Weekly budget (USD)</span>
+            <span className="block text-xs text-neutral-400 mb-1">{t("settings.weekly_budget_usd")}</span>
             <input
               type="number"
               step="0.01"
               min="0"
               value={weekly}
               onChange={(e) => setWeekly(e.target.value)}
-              placeholder="e.g. 150"
+              placeholder="150"
               className="w-full px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
             />
           </label>
         </div>
         <label className="block">
-          <span className="block text-xs text-neutral-400 mb-1">CPU spike threshold (%)</span>
+          <span className="block text-xs text-neutral-400 mb-1">{t("settings.cpu_threshold_label")}</span>
           <input
             type="number"
             min="0"
@@ -898,16 +930,14 @@ function BudgetSection() {
             onChange={(e) => setCpu(e.target.value)}
             className="w-24 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
           />
-          <span className="text-xs text-neutral-600 ml-2">
-            Alerts when one CLI process exceeds this for one scan.
-          </span>
+          <span className="text-xs text-neutral-600 ml-2">{t("settings.cpu_threshold_help")}</span>
         </label>
         <button
           type="submit"
           disabled={busy}
           className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
         >
-          {busy ? "Saving…" : "Save"}
+          {busy ? t("action.saving") : t("action.save")}
         </button>
       </form>
       {msg && (
@@ -941,6 +971,7 @@ function UpdaterPanel({
   onCheck: () => void;
   onRelaunch: () => void;
 }) {
+  const { t } = useTranslation();
   switch (state.state) {
     case "idle":
       return (
@@ -948,25 +979,25 @@ function UpdaterPanel({
           onClick={onCheck}
           className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700"
         >
-          Check for updates
+          {t("action.check_updates")}
         </button>
       );
     case "checking":
-      return <div className="text-sm text-neutral-400">Checking…</div>;
+      return <div className="text-sm text-neutral-400">{t("action.checking")}</div>;
     case "up-to-date":
       return (
-        <div className="text-sm text-emerald-300">You're on the latest version.</div>
+        <div className="text-sm text-emerald-300">{t("updater.up_to_date")}</div>
       );
     case "available":
       return (
         <div className="text-sm text-neutral-300">
-          Found {state.version} — downloading…
+          {t("updater.available", { version: state.version })}
         </div>
       );
     case "downloading":
       return (
         <div className="space-y-1">
-          <div className="text-xs text-neutral-400">Downloading {state.pct}%</div>
+          <div className="text-xs text-neutral-400">{t("updater.downloading", { pct: state.pct })}</div>
           <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
             <div
               className="h-full bg-emerald-500 transition-all"
@@ -978,21 +1009,21 @@ function UpdaterPanel({
     case "ready":
       return (
         <div className="flex items-center gap-3">
-          <span className="text-sm text-emerald-300">
-            Update installed. Restart to apply.
-          </span>
+          <span className="text-sm text-emerald-300">{t("updater.ready")}</span>
           <button
             onClick={onRelaunch}
             className="px-3 py-1.5 text-xs rounded-md bg-emerald-600 hover:bg-emerald-500 text-white"
           >
-            Restart now
+            {t("action.restart_now")}
           </button>
         </div>
       );
     case "error":
       return (
         <div className="text-sm text-red-300">
-          Update failed: {state.text.length > 160 ? state.text.slice(0, 160) + "…" : state.text}
+          {t("updater.error", {
+            error: state.text.length > 160 ? state.text.slice(0, 160) + "…" : state.text,
+          })}
         </div>
       );
   }
@@ -1007,6 +1038,7 @@ function Sessions({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   if (!snapshot && loading) {
     return <Skeleton />;
   }
@@ -1018,33 +1050,36 @@ function Sessions({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-xs text-neutral-500">
-          {sessions.length} active · {snapshot.total_processes_seen} processes scanned · refreshed{" "}
-          {new Date(snapshot.collected_at).toLocaleTimeString()}
+          {t("sessions.header", {
+            active: sessions.length,
+            total: snapshot.total_processes_seen,
+            time: new Date(snapshot.collected_at).toLocaleTimeString(),
+          })}
         </div>
         <button
           onClick={onRefresh}
           disabled={loading}
           className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
         >
-          {loading ? "Refreshing…" : "Refresh now"}
+          {loading ? t("action.refreshing") : t("action.refresh_now")}
         </button>
       </div>
 
       {sessions.length === 0 ? (
         <div className="text-sm text-neutral-500 italic py-10 text-center">
-          No AI CLI sessions running right now.
+          {t("sessions.empty")}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-neutral-800">
           <table className="w-full text-sm">
             <thead className="bg-neutral-900/60 text-left text-xs text-neutral-400">
               <tr>
-                <th className="px-3 py-2">Provider</th>
-                <th className="px-3 py-2">Project</th>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2 text-right">CPU</th>
-                <th className="px-3 py-2 text-right">Memory</th>
-                <th className="px-3 py-2 text-right">Confidence</th>
+                <th className="px-3 py-2">{t("sessions.col_provider")}</th>
+                <th className="px-3 py-2">{t("sessions.col_project")}</th>
+                <th className="px-3 py-2">{t("sessions.col_name")}</th>
+                <th className="px-3 py-2 text-right">{t("sessions.col_cpu")}</th>
+                <th className="px-3 py-2 text-right">{t("sessions.col_memory")}</th>
+                <th className="px-3 py-2 text-right">{t("sessions.col_confidence")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1074,12 +1109,13 @@ function Sessions({
 }
 
 function ConfidenceDot({ c }: { c: "high" | "medium" | "low" }) {
+  const { t } = useTranslation();
   const color =
     c === "high" ? "bg-emerald-400" : c === "medium" ? "bg-amber-400" : "bg-neutral-500";
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-neutral-400">
       <span className={`w-1.5 h-1.5 rounded-full ${color}`} />
-      {c}
+      {t(`sessions.confidence_${c}`)}
     </span>
   );
 }
@@ -1093,6 +1129,7 @@ function Alerts({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   if (!alerts && loading) return <Skeleton />;
   if (!alerts) return null;
 
@@ -1106,15 +1143,15 @@ function Alerts({
       <div className="flex items-center justify-between">
         <div className="text-xs text-neutral-500">
           {alerts.length === 0
-            ? "Nothing pressing — no active alerts."
-            : `${alerts.length} active alert${alerts.length === 1 ? "" : "s"}`}
+            ? t("alerts.nothing")
+            : t("alerts.active", { count: alerts.length })}
         </div>
         <button
           onClick={onRefresh}
           disabled={loading}
           className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50"
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? t("action.refreshing") : t("action.refresh")}
         </button>
       </div>
 
@@ -1132,6 +1169,7 @@ function Alerts({
 }
 
 function AlertCard({ alert }: { alert: Alert }) {
+  const { t } = useTranslation();
   const accent =
     alert.severity === "Critical"
       ? "border-red-800 bg-red-950/40"
@@ -1151,9 +1189,9 @@ function AlertCard({ alert }: { alert: Alert }) {
           </div>
           <div className="text-sm text-neutral-300 mt-1">{alert.message}</div>
           <div className="text-xs text-neutral-500 mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
-            {alert.related_provider && <span>provider: {alert.related_provider}</span>}
+            {alert.related_provider && <span>{t("misc.provider_label", { name: alert.related_provider })}</span>}
             {alert.related_project_name && (
-              <span>project: {alert.related_project_name}</span>
+              <span>{t("misc.project_label", { name: alert.related_project_name })}</span>
             )}
             <span>{new Date(alert.created_at).toLocaleString()}</span>
           </div>
@@ -1164,20 +1202,19 @@ function AlertCard({ alert }: { alert: Alert }) {
 }
 
 function EmptyAlertsHint() {
+  const { t } = useTranslation();
   return (
     <div className="p-6 rounded-lg border border-neutral-800 bg-neutral-900/30 text-sm text-neutral-400">
-      <div className="font-semibold text-neutral-300 mb-1">All quiet 🌙</div>
-      <p>
-        Alerts fire when daily / weekly budgets are exceeded or when a single AI CLI process
-        hits a CPU spike. Set your budget in <span className="font-semibold">Settings → Budget</span>.
-      </p>
+      <div className="font-semibold text-neutral-300 mb-1">{t("alerts.empty_title")}</div>
+      <p dangerouslySetInnerHTML={{ __html: t("alerts.empty_body") }} />
     </div>
   );
 }
 
 function EntriesTable({ entries }: { entries: DailyEntry[] }) {
+  const { t } = useTranslation();
   if (entries.length === 0) {
-    return <div className="text-sm text-neutral-500 italic">No usage today.</div>;
+    return <div className="text-sm text-neutral-500 italic">{t("overview.no_usage_today")}</div>;
   }
   const sorted = [...entries].sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0));
   return (

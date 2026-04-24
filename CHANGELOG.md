@@ -2,6 +2,30 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.0] — 2026-04-25
+
+### Added
+- **🌏 Internationalization.** UI now ships in English, **简体中文**, and
+  **日本語**. Choice persists in `localStorage` and respects the OS
+  language on first launch. Switch any time from *Settings → Language*.
+  Infra is `i18next` + `react-i18next` (~62 KB gz added to bundle).
+- **🖥️ ARM64 builds.** Release + CI workflows now matrix-build on four
+  platforms: Windows x64, **Windows ARM64**, Linux x64, **Linux ARM64**.
+  Native builds (no QEMU / cross-compile), so the runtime is as fast as
+  x64 on equivalent silicon. Latest.json includes all four signatures.
+
+### Build
+- CI matrix additions: `windows-11-arm`, `ubuntu-24.04-arm`. Rust cache
+  is partitioned by OS key so parallel matrix jobs don't trample each
+  other's target directories.
+- Release artifacts grow from 4 to 8 installers + 8 .sig files + 1
+  latest.json = 17 assets per release.
+
+### Notes
+- **Minor version bump (0.1 → 0.2)** because i18n is a substantive new
+  user-facing surface. Auto-update path from any 0.1.x continues to
+  work — the signing key is unchanged.
+
 ## [0.1.3] — 2026-04-25
 
 ### Performance

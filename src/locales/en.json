@@ -1,0 +1,122 @@
+{
+  "app": {
+    "name": "CLI Pulse",
+    "subtitle_desktop": "Desktop"
+  },
+  "badge": {
+    "paired": "Paired",
+    "not_paired": "Not paired"
+  },
+  "action": {
+    "rescan": "Rescan",
+    "scanning": "Scanning…",
+    "refresh": "Refresh",
+    "refresh_now": "Refresh now",
+    "refreshing": "Refreshing…",
+    "save": "Save",
+    "saving": "Saving…",
+    "restart_now": "Restart now",
+    "pair_device": "Pair device",
+    "pairing": "Pairing…",
+    "sync_now": "Sync now",
+    "syncing": "Syncing…",
+    "unpair_device": "Unpair device",
+    "check_updates": "Check for updates",
+    "checking": "Checking…"
+  },
+  "tab": {
+    "overview": "Overview",
+    "providers": "Providers",
+    "sessions": "Sessions",
+    "alerts": "Alerts",
+    "settings": "Settings"
+  },
+  "overview": {
+    "today_cost": "Today — Cost",
+    "today_tokens": "Today — Tokens",
+    "today_messages": "Today — Messages",
+    "tokens_hint": "input + output",
+    "claude_only_hint": "Claude only",
+    "last_n_days_cost": "Last {{days}}d — Cost",
+    "files_scanned_hint": "{{n}} files scanned",
+    "trend_title": "Last 7 days — cost",
+    "today_breakdown": "Today's breakdown",
+    "no_usage_today": "No usage today.",
+    "max_per_day": "Max: {{value}}/day",
+    "label_today": "Today"
+  },
+  "providers": {
+    "active_days": "{{count}} active days · {{msgs}} msgs",
+    "no_usage": "No usage found in last 30 days.",
+    "io_tokens": "{{value}} I/O tokens"
+  },
+  "sessions": {
+    "header": "{{active}} active · {{total}} processes scanned · refreshed {{time}}",
+    "empty": "No AI CLI sessions running right now.",
+    "col_provider": "Provider",
+    "col_project": "Project",
+    "col_name": "Name",
+    "col_cpu": "CPU",
+    "col_memory": "Memory",
+    "col_confidence": "Confidence",
+    "confidence_high": "high",
+    "confidence_medium": "medium",
+    "confidence_low": "low"
+  },
+  "alerts": {
+    "nothing": "Nothing pressing — no active alerts.",
+    "active": "{{count}} active alert",
+    "active_plural": "{{count}} active alerts",
+    "empty_title": "All quiet 🌙",
+    "empty_body": "Alerts fire when daily / weekly budgets are exceeded or when a single AI CLI process hits a CPU spike. Set your budget in <strong>Settings → Budget</strong>."
+  },
+  "settings": {
+    "account_heading": "Account",
+    "status": "Status",
+    "device_name": "Device name",
+    "device_id": "Device ID",
+    "user_id": "User ID",
+    "helper_version": "Helper version",
+    "pair_heading": "Pair with iPhone",
+    "pair_hint": "Open CLI Pulse on iOS → Settings → Add device. Enter the 6-digit code shown on your phone.",
+    "pairing_code": "Pairing code",
+    "device_name_optional": "Device name (optional)",
+    "device_name_placeholder": "e.g. Jason's Surface",
+    "budget_heading": "Budget",
+    "budget_hint": "Alerts fire once per day (or per week) when your CLI spend goes above these limits. Leave blank to disable.",
+    "daily_budget_usd": "Daily budget (USD)",
+    "weekly_budget_usd": "Weekly budget (USD)",
+    "cpu_threshold_label": "CPU spike threshold (%)",
+    "cpu_threshold_help": "Alerts when one CLI process exceeds this for one scan.",
+    "sync_heading": "Sync",
+    "auto_sync_hint": "Auto-sync runs every 2 minutes. Local scan + helper_sync + upsert_daily_usage.",
+    "last_sync": "Last sync {{time}} — uploaded {{metrics}} metrics · {{sessions}} live sessions · {{cost}} over {{files}} files",
+    "updates_heading": "Updates",
+    "updates_hint": "Updates are signed. Releases publish at <code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>.",
+    "unpair_confirm": "Unpair this device? You can pair again later using a new 6-digit code.",
+    "language_heading": "Language"
+  },
+  "updater": {
+    "up_to_date": "You're on the latest version.",
+    "available": "Found {{version}} — downloading…",
+    "downloading": "Downloading {{pct}}%",
+    "ready": "Update installed. Restart to apply.",
+    "error": "Update failed: {{error}}"
+  },
+  "messages": {
+    "paired_as": "Paired as \"{{name}}\" ({{id}}…).",
+    "device_unpaired": "Device unpaired.",
+    "sync_ok": "Synced {{metrics}} metrics, {{sessions}} sessions, {{alerts}} alerts.",
+    "budget_saved": "Budget saved.",
+    "err_budget_nonneg": "Daily budget must be a non-negative number.",
+    "err_weekly_nonneg": "Weekly budget must be a non-negative number.",
+    "err_cpu_range": "CPU threshold must be between 0 and 100.",
+    "err_code_empty": "Pairing code is empty"
+  },
+  "misc": {
+    "provider_label": "provider: {{name}}",
+    "project_label": "project: {{name}}",
+    "none": "—",
+    "loading": "Loading…"
+  }
+}

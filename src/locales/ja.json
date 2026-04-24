@@ -1,0 +1,122 @@
+{
+  "app": {
+    "name": "CLI Pulse",
+    "subtitle_desktop": "デスクトップ"
+  },
+  "badge": {
+    "paired": "ペアリング済み",
+    "not_paired": "未ペアリング"
+  },
+  "action": {
+    "rescan": "再スキャン",
+    "scanning": "スキャン中…",
+    "refresh": "更新",
+    "refresh_now": "今すぐ更新",
+    "refreshing": "更新中…",
+    "save": "保存",
+    "saving": "保存中…",
+    "restart_now": "今すぐ再起動",
+    "pair_device": "デバイスをペアリング",
+    "pairing": "ペアリング中…",
+    "sync_now": "今すぐ同期",
+    "syncing": "同期中…",
+    "unpair_device": "ペアリング解除",
+    "check_updates": "アップデート確認",
+    "checking": "確認中…"
+  },
+  "tab": {
+    "overview": "概要",
+    "providers": "プロバイダ",
+    "sessions": "セッション",
+    "alerts": "通知",
+    "settings": "設定"
+  },
+  "overview": {
+    "today_cost": "本日の費用",
+    "today_tokens": "本日のトークン",
+    "today_messages": "本日のメッセージ",
+    "tokens_hint": "入力 + 出力",
+    "claude_only_hint": "Claude のみ",
+    "last_n_days_cost": "直近 {{days}} 日間の費用",
+    "files_scanned_hint": "{{n}} ファイルスキャン済み",
+    "trend_title": "直近 7 日間 — 費用",
+    "today_breakdown": "本日の内訳",
+    "no_usage_today": "本日はまだ利用がありません。",
+    "max_per_day": "最大: {{value}}/日",
+    "label_today": "今日"
+  },
+  "providers": {
+    "active_days": "{{count}} 日間アクティブ · {{msgs}} メッセージ",
+    "no_usage": "直近 30 日間の利用はありません。",
+    "io_tokens": "{{value}} I/O トークン"
+  },
+  "sessions": {
+    "header": "{{active}} アクティブ · {{total}} プロセス走査 · 更新 {{time}}",
+    "empty": "現在実行中の AI CLI セッションはありません。",
+    "col_provider": "プロバイダ",
+    "col_project": "プロジェクト",
+    "col_name": "名前",
+    "col_cpu": "CPU",
+    "col_memory": "メモリ",
+    "col_confidence": "信頼度",
+    "confidence_high": "高",
+    "confidence_medium": "中",
+    "confidence_low": "低"
+  },
+  "alerts": {
+    "nothing": "特に問題ありません — アクティブな通知はありません。",
+    "active": "{{count}} 件のアクティブ通知",
+    "active_plural": "{{count}} 件のアクティブ通知",
+    "empty_title": "静かなもの 🌙",
+    "empty_body": "日次/週次の予算を超えた場合、または単一の AI CLI プロセスの CPU が急上昇した場合に通知が発生します。<strong>設定 → 予算</strong>で予算を設定できます。"
+  },
+  "settings": {
+    "account_heading": "アカウント",
+    "status": "ステータス",
+    "device_name": "デバイス名",
+    "device_id": "デバイス ID",
+    "user_id": "ユーザー ID",
+    "helper_version": "Helper バージョン",
+    "pair_heading": "iPhone とペアリング",
+    "pair_hint": "iOS の CLI Pulse → 設定 → デバイスを追加 を開き、スマートフォンに表示された 6 桁のコードを入力してください。",
+    "pairing_code": "ペアリングコード",
+    "device_name_optional": "デバイス名 (任意)",
+    "device_name_placeholder": "例: Jason の Surface",
+    "budget_heading": "予算",
+    "budget_hint": "これらの上限を超えると 1 日 1 回(または週 1 回)通知が送られます。空欄で無効化。",
+    "daily_budget_usd": "日次予算 (USD)",
+    "weekly_budget_usd": "週次予算 (USD)",
+    "cpu_threshold_label": "CPU 急上昇しきい値 (%)",
+    "cpu_threshold_help": "CLI プロセスが 1 スキャンでこの値を超えた場合に通知します。",
+    "sync_heading": "同期",
+    "auto_sync_hint": "2 分ごとに自動同期 (ローカルスキャン + helper_sync + upsert_daily_usage)。",
+    "last_sync": "最終同期 {{time}} — {{metrics}} 件の指標 · {{sessions}} セッション · {{cost}} / {{files}} ファイル",
+    "updates_heading": "アップデート",
+    "updates_hint": "アップデートは署名付きです。公開先: <code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>",
+    "unpair_confirm": "このデバイスのペアリングを解除しますか? あとで新しい 6 桁コードで再度ペアリングできます。",
+    "language_heading": "言語"
+  },
+  "updater": {
+    "up_to_date": "最新バージョンです。",
+    "available": "{{version}} を発見 — ダウンロード中…",
+    "downloading": "ダウンロード中 {{pct}}%",
+    "ready": "アップデートをインストールしました。再起動で適用されます。",
+    "error": "アップデート失敗: {{error}}"
+  },
+  "messages": {
+    "paired_as": "「{{name}}」としてペアリングしました ({{id}}…)。",
+    "device_unpaired": "ペアリングを解除しました。",
+    "sync_ok": "{{metrics}} 件の指標、{{sessions}} セッション、{{alerts}} 件の通知を同期しました。",
+    "budget_saved": "予算を保存しました。",
+    "err_budget_nonneg": "日次予算は 0 以上の数値である必要があります。",
+    "err_weekly_nonneg": "週次予算は 0 以上の数値である必要があります。",
+    "err_cpu_range": "CPU しきい値は 0 から 100 の間である必要があります。",
+    "err_code_empty": "ペアリングコードが空です"
+  },
+  "misc": {
+    "provider_label": "プロバイダ: {{name}}",
+    "project_label": "プロジェクト: {{name}}",
+    "none": "—",
+    "loading": "読み込み中…"
+  }
+}
