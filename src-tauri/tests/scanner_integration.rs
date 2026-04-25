@@ -254,26 +254,31 @@ fn claude_streaming_chunks_deduped_for_tokens_but_counted_for_msgs() {
 // Date range — TIMEZONE bug regression (v0.2.2)
 // ========================================================================
 
-const CLAUDE_LATE_NIGHT: &str = r#"{"type":"user","timestamp":"2026-04-25T05:00:00+09:00"}
-{"type":"assistant","timestamp":"2026-04-25T05:00:01+09:00","requestId":"r1","message":{"id":"m1","model":"claude-haiku-4-5","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":50}}}
+// TZ-stable timestamp — mid-day UTC stays on 2026-04-25 in every
+// reasonable timezone (UTC-12 to UTC+14). The previous version used
+// `2026-04-25T05:00:00+09:00` which resolves to 2026-04-25 in JST but
+// 2026-04-24 on a UTC CI runner — the test passed on my dev Mac (JST)
+// and failed on all four CI platforms (UTC). Lesson: never let a
+// test's outcome depend on the host's local timezone.
+const CLAUDE_TZ_STABLE: &str = r#"{"type":"user","timestamp":"2026-04-25T12:00:00Z"}
+{"type":"assistant","timestamp":"2026-04-25T12:00:01Z","requestId":"r1","message":{"id":"m1","model":"claude-haiku-4-5","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":50}}}
 "#;
 
 #[test]
 fn timezone_anchor_uses_today_override_consistently() {
     // Regression for v0.2.2: prior to the fix, `today` was anchored on
     // Utc::now() while parse_day_key_local converted timestamps to local.
-    // Here we pin `today_override` to 2026-04-25 — the event timestamp
-    // resolves to 2026-04-25 in JST (UTC+9) but to 2026-04-24 in UTC.
-    // With a consistent local anchor + override the event is in range.
+    // Now both share `today_override`. Pinning today=2026-04-25 with a
+    // mid-day-UTC event stamp guarantees the event lands on 2026-04-25
+    // regardless of the test host's TZ — what we actually want to
+    // verify is consistency between today_key and the range filter.
     let env = TempEnv::new("tz_anchor");
-    env.write_claude("proj", "session.jsonl", CLAUDE_LATE_NIGHT);
-    // Ask for today=2026-04-25 (matches the local-frame day of the event)
+    env.write_claude("proj", "session.jsonl", CLAUDE_TZ_STABLE);
     let today = NaiveDate::from_ymd_opt(2026, 4, 25).unwrap();
     let result = scanner::scan_with_options(env.options(1, Some(today))).unwrap();
 
     assert_eq!(result.today_key, "2026-04-25");
     let _e = pick(&result.entries, "2026-04-25", "Claude", "claude-haiku-4-5");
-    // Event survived the range filter — ✓
 }
 
 // ========================================================================
