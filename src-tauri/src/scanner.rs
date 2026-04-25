@@ -64,6 +64,15 @@ pub struct ScanOptions {
     pub days: u32,
     pub force_rescan: bool,
     pub cache_dir: Option<PathBuf>,
+    /// Test-only: override the Codex sessions roots scanned. Production
+    /// callers leave this `None` so the platform-default paths are used.
+    pub codex_roots_override: Option<Vec<PathBuf>>,
+    /// Test-only: override the Claude projects roots scanned.
+    pub claude_roots_override: Option<Vec<PathBuf>>,
+    /// Test-only: pin "today" so the date-range derivation is deterministic
+    /// regardless of the CI runner's clock or timezone. Production leaves
+    /// this `None` and the scanner reads `chrono::Local::now()`.
+    pub today_override: Option<NaiveDate>,
 }
 
 impl Default for ScanOptions {
@@ -72,6 +81,9 @@ impl Default for ScanOptions {
             days: 30,
             force_rescan: false,
             cache_dir: None,
+            codex_roots_override: None,
+            claude_roots_override: None,
+            today_override: None,
         }
     }
 }
@@ -92,7 +104,9 @@ pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
     // so "today's" events were tagged 2026-04-25 by parse_day_key_local
     // but the filter range only ran through 2026-04-24 — entire morning of
     // usage went missing). Caught by Codex review post v0.2.1.
-    let today = chrono::Local::now().date_naive();
+    let today = opts
+        .today_override
+        .unwrap_or_else(|| chrono::Local::now().date_naive());
     let since = today
         .checked_sub_signed(chrono::Duration::days(opts.days as i64))
         .unwrap_or(today);
@@ -194,7 +208,11 @@ fn scan_codex_provider(
     let mut files_cached = 0u32;
     let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for root in paths::codex_sessions_roots() {
+    let roots: Vec<PathBuf> = opts
+        .codex_roots_override
+        .clone()
+        .unwrap_or_else(paths::codex_sessions_roots);
+    for root in roots {
         if !root.exists() {
             continue;
         }
@@ -503,7 +521,11 @@ fn scan_claude_provider(
     let mut files_cached = 0u32;
     let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for root in paths::claude_projects_roots() {
+    let roots: Vec<PathBuf> = opts
+        .claude_roots_override
+        .clone()
+        .unwrap_or_else(paths::claude_projects_roots);
+    for root in roots {
         if !root.exists() {
             continue;
         }
@@ -836,47 +858,36 @@ fn json_i64_or(v: &serde_json::Value, keys: &[&str]) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     /// Regression test for the timezone bug Codex caught post v0.2.1:
     /// `today` was anchored to `Utc::now()` while `today_key` and the
-    /// per-event day classification used `Local::now()`. JST (and other
-    /// non-UTC) users between local 00:00 and 09:00 had today's events
-    /// tagged with the local date but filtered out because the range
-    /// only ran through the UTC date.
-    ///
-    /// Property under test: today_key returned in the ScanResult must
-    /// equal the upper bound of the scan range. With the fix in place
-    /// they're both `chrono::Local::now().date_naive()`. Without the
-    /// fix this assertion fails ~9 hours/day in JST and similar.
+    /// per-event day classification used `Local::now()`. With the fix,
+    /// today_key reflects whatever anchor we pin via `today_override`
+    /// (in production: `chrono::Local::now()`). This is the FAST unit
+    /// test — see `tests/scanner_integration.rs` for the full
+    /// fixture-based regression that asserts the event survives the
+    /// range filter.
     #[test]
-    fn today_key_matches_range_until_key() {
-        // Use a temp cache dir so we don't interfere with the user's
-        // real scan cache during `cargo test`.
+    fn today_key_matches_today_override() {
         let tmp = std::env::temp_dir().join(format!(
             "cli-pulse-tz-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
+                .map(|d| d.as_nanos())
                 .unwrap_or(0),
         ));
+        let pinned = chrono::NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
         let opts = ScanOptions {
             days: 1,
             force_rescan: true,
-            cache_dir: Some(PathBuf::from(&tmp)),
+            cache_dir: Some(tmp.clone()),
+            codex_roots_override: Some(vec![tmp.join("codex_empty")]),
+            claude_roots_override: Some(vec![tmp.join("claude_empty")]),
+            today_override: Some(pinned),
         };
         let result = scan_with_options(opts).expect("scan should succeed");
-
-        // The scan computes today and until in the same call. With the
-        // fix they must be equal regardless of local TZ.
-        let local_today = fmt_date(chrono::Local::now().date_naive());
-        assert_eq!(
-            result.today_key, local_today,
-            "today_key should anchor on Local::now()"
-        );
-
-        // Cleanup
+        assert_eq!(result.today_key, "2026-01-15");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

@@ -2,6 +2,31 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.3] — 2026-04-25
+
+### Build / internals (no user-facing changes)
+- **Integration test framework** in `src-tauri/tests/scanner_integration.rs`.
+  10 fixture-based end-to-end tests that build synthetic JSONL files in
+  a temp dir and assert the scanner emits the expected `DailyEntry`
+  shapes. Coverage:
+  - Codex cumulative `total_token_usage` delta math (3-turn case)
+  - Codex pricing applied at the right granularity
+  - **Claude per-message tiered pricing** (the bug we caught back in
+    Sprint 0 — two 150K-token Sonnet messages must price as 2× $0.45,
+    NOT as 300K aggregate which would cross the 200K tier)
+  - Streaming-chunk token dedup via `(message.id, requestId)` while the
+    `__claude_msg__` synthetic bucket counts every event
+  - **Timezone date-range filter** with explicit `today_override`
+    (would have caught the v0.2.2 bug)
+  - Out-of-range files excluded from the result
+  - Cache makes repeat scans idempotent (cold → warm transition)
+  - Multi-day events grouped correctly by local date
+- `ScanOptions` gained 3 test-only fields: `codex_roots_override`,
+  `claude_roots_override`, `today_override`. Production code passes
+  `None` and behavior is unchanged. Frontend types untouched.
+- 52 / 52 Rust tests pass on macOS (4 platforms × CI matrix similar).
+  Up from 42 in v0.2.2.
+
 ## [0.2.2] — 2026-04-25
 
 ### Fixed
