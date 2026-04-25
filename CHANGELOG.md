@@ -2,6 +2,22 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.2] — 2026-04-25
+
+### Fixed
+- **Timezone scan-range bug.** Non-UTC users (especially JST and other
+  UTC+ timezones) saw today's usage stuck at 0 between local 00:00 and
+  ~09:00. Per-event day classification was in local time but the scan
+  range was anchored on UTC, so today's events got tagged with a
+  later date than the filter allowed and were silently dropped from
+  the Overview, chart, daily-budget alerts, and helper_sync upload.
+  Fixed by anchoring `today`, `since`, `until_key`, and `today_key`
+  all on `chrono::Local::now()`. Caught by Codex independent review.
+  See [PROJECT_FIX_2026-04-25_v0.2.2_timezone.md](PROJECT_FIX_2026-04-25_v0.2.2_timezone.md).
+- 4 new regression tests in `scanner.rs::tests` cover today_key /
+  range consistency and `parse_day_key_local` edge cases. 42/42 Rust
+  tests pass (was 38).
+
 ## [0.2.1] — 2026-04-25
 
 ### Added

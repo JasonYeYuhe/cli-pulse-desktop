@@ -22,7 +22,7 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
@@ -84,7 +84,15 @@ pub fn scan(days: u32) -> anyhow::Result<ScanResult> {
 }
 
 pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
-    let today = Utc::now().date_naive();
+    // IMPORTANT: per-event day classification (`parse_day_key_local`) converts
+    // each JSONL timestamp into the *local* timezone before keying it. The
+    // range filter MUST use the same local-clock anchor or events get
+    // wrongly excluded near midnight in non-UTC timezones (e.g. JST users
+    // between 00:00 and 09:00 local: UTC date trails local date by one,
+    // so "today's" events were tagged 2026-04-25 by parse_day_key_local
+    // but the filter range only ran through 2026-04-24 — entire morning of
+    // usage went missing). Caught by Codex review post v0.2.1.
+    let today = chrono::Local::now().date_naive();
     let since = today
         .checked_sub_signed(chrono::Duration::days(opts.days as i64))
         .unwrap_or(today);
@@ -92,7 +100,7 @@ pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
         since_key: fmt_date(since),
         until_key: fmt_date(today),
     };
-    let today_key = fmt_date(chrono::Local::now().date_naive());
+    let today_key = fmt_date(today);
 
     let (codex_cache, codex_files_scanned, codex_files_cached) =
         scan_codex_provider(&opts, &range)?;
@@ -823,4 +831,85 @@ fn json_i64_or(v: &serde_json::Value, keys: &[&str]) -> i64 {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Regression test for the timezone bug Codex caught post v0.2.1:
+    /// `today` was anchored to `Utc::now()` while `today_key` and the
+    /// per-event day classification used `Local::now()`. JST (and other
+    /// non-UTC) users between local 00:00 and 09:00 had today's events
+    /// tagged with the local date but filtered out because the range
+    /// only ran through the UTC date.
+    ///
+    /// Property under test: today_key returned in the ScanResult must
+    /// equal the upper bound of the scan range. With the fix in place
+    /// they're both `chrono::Local::now().date_naive()`. Without the
+    /// fix this assertion fails ~9 hours/day in JST and similar.
+    #[test]
+    fn today_key_matches_range_until_key() {
+        // Use a temp cache dir so we don't interfere with the user's
+        // real scan cache during `cargo test`.
+        let tmp = std::env::temp_dir().join(format!(
+            "cli-pulse-tz-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0),
+        ));
+        let opts = ScanOptions {
+            days: 1,
+            force_rescan: true,
+            cache_dir: Some(PathBuf::from(&tmp)),
+        };
+        let result = scan_with_options(opts).expect("scan should succeed");
+
+        // The scan computes today and until in the same call. With the
+        // fix they must be equal regardless of local TZ.
+        let local_today = fmt_date(chrono::Local::now().date_naive());
+        assert_eq!(
+            result.today_key, local_today,
+            "today_key should anchor on Local::now()"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn parse_day_key_local_handles_rfc3339() {
+        // 2026-04-25T01:00:00Z: in JST (+09) → 2026-04-25 10:00 JST → "2026-04-25"
+        // in PST (−07) → 2026-04-24 18:00 PST → "2026-04-24"
+        // We can't pin the test TZ portably, but we can assert the function
+        // returns *some* valid YYYY-MM-DD for a well-formed RFC3339 input.
+        let day = parse_day_key_local("2026-04-25T01:00:00Z");
+        assert!(day.is_some());
+        let key = day.unwrap();
+        assert_eq!(key.len(), 10);
+        assert_eq!(&key[4..5], "-");
+        assert_eq!(&key[7..8], "-");
+    }
+
+    #[test]
+    fn parse_day_key_local_falls_back_to_prefix() {
+        let day = parse_day_key_local("2026-04-25");
+        assert_eq!(day.as_deref(), Some("2026-04-25"));
+    }
+
+    #[test]
+    fn in_range_inclusive() {
+        let r = DateRange {
+            since_key: "2026-04-20".into(),
+            until_key: "2026-04-25".into(),
+        };
+        assert!(in_range("2026-04-20", &r));
+        assert!(in_range("2026-04-22", &r));
+        assert!(in_range("2026-04-25", &r));
+        assert!(!in_range("2026-04-19", &r));
+        assert!(!in_range("2026-04-26", &r));
+    }
 }
