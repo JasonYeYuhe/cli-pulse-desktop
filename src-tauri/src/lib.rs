@@ -131,6 +131,38 @@ fn set_thresholds(thresholds: alerts::AlertThresholds) -> Result<(), String> {
     config::save(&cfg).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize)]
+struct DiagnosticSnapshot {
+    app_version: String,
+    os: String,
+    arch: String,
+    family: String, // "windows" | "linux" | "macos" — std::env::consts::OS
+    paired: bool,
+    device_id_short: Option<String>,
+    cache_dir: Option<String>,
+}
+
+/// Used by the About panel to render a copyable diagnostic block when
+/// users report issues. Avoids leaking the full helper_secret or
+/// user_id — only the first 8 chars of device_id are exposed.
+#[tauri::command]
+fn diagnostic_snapshot() -> Result<DiagnosticSnapshot, String> {
+    let cfg = config::load().map_err(|e| e.to_string())?;
+    let cache_dir =
+        cache::cache_path("codex", None).and_then(|p| p.parent().map(|d| d.display().to_string()));
+    Ok(DiagnosticSnapshot {
+        app_version: HELPER_VERSION.to_string(),
+        os: device_type().to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        family: std::env::consts::OS.to_string(),
+        paired: cfg.is_some(),
+        device_id_short: cfg
+            .as_ref()
+            .map(|c| c.device_id.chars().take(8).collect::<String>()),
+        cache_dir,
+    })
+}
+
 /// Compute client-side alerts from the current scan + sessions snapshot.
 /// Frontend uses this to populate the Alerts tab without waiting for the
 /// 2-minute background sync.
@@ -418,6 +450,7 @@ pub fn run() {
             get_thresholds,
             set_thresholds,
             preview_alerts,
+            diagnostic_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

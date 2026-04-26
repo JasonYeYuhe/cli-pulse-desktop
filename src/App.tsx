@@ -750,6 +750,8 @@ function Settings({
 
   return (
     <div className="max-w-2xl space-y-6">
+      <AboutSection />
+
       <LanguageSection />
 
       {paired && <BudgetSection />}
@@ -948,6 +950,91 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
           {t("settings.export_json")}
         </button>
       </div>
+    </section>
+  );
+}
+
+type DiagnosticSnapshot = {
+  app_version: string;
+  os: string;
+  arch: string;
+  family: string;
+  paired: boolean;
+  device_id_short: string | null;
+  cache_dir: string | null;
+};
+
+function AboutSection() {
+  const { t } = useTranslation();
+  const [diag, setDiag] = useState<DiagnosticSnapshot | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    invoke<DiagnosticSnapshot>("diagnostic_snapshot")
+      .then(setDiag)
+      .catch((e) => console.warn("diagnostic_snapshot failed", e));
+  }, []);
+
+  function diagText(d: DiagnosticSnapshot): string {
+    return [
+      `CLI Pulse Desktop ${d.app_version}`,
+      `Platform: ${d.family} (${d.arch})`,
+      `OS label: ${d.os}`,
+      `Paired: ${d.paired ? `yes (device ${d.device_id_short ?? "?"}…)` : "no"}`,
+      `Cache dir: ${d.cache_dir ?? "(none)"}`,
+      `User agent: ${navigator.userAgent}`,
+    ].join("\n");
+  }
+
+  async function copyDiag() {
+    if (!diag) return;
+    try {
+      await navigator.clipboard.writeText(diagText(diag));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch (e) {
+      console.warn("clipboard write failed", e);
+    }
+  }
+
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
+      <h2 className="text-sm font-semibold text-neutral-300">{t("settings.about_heading")}</h2>
+      {diag ? (
+        <>
+          <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-sm">
+            <dt className="text-neutral-500">{t("settings.about_version")}</dt>
+            <dd className="font-mono text-xs">{diag.app_version}</dd>
+            <dt className="text-neutral-500">{t("settings.about_platform")}</dt>
+            <dd className="font-mono text-xs">{diag.family} · {diag.arch}</dd>
+            <dt className="text-neutral-500">
+              {diag.paired ? t("settings.about_paired_for") : t("settings.about_not_paired")}
+            </dt>
+            <dd className="font-mono text-xs truncate">
+              {diag.paired ? `${diag.device_id_short}…` : t("misc.none")}
+            </dd>
+          </dl>
+          <p className="text-xs text-neutral-500">{t("settings.about_diagnostics_hint")}</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={copyDiag}
+              className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800"
+            >
+              {copied ? `✓ ${t("settings.about_copied")}` : t("settings.about_copy_diagnostics")}
+            </button>
+            <a
+              href="https://github.com/JasonYeYuhe/cli-pulse-desktop"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-emerald-400 hover:underline"
+            >
+              {t("settings.about_repo_link")} ↗
+            </a>
+          </div>
+        </>
+      ) : (
+        <div className="text-sm text-neutral-500">{t("misc.loading")}</div>
+      )}
     </section>
   );
 }

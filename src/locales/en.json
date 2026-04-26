@@ -98,7 +98,18 @@
     "updates_heading": "Updates",
     "updates_hint": "Updates are signed. Releases publish at <code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>.",
     "unpair_confirm": "Unpair this device? You can pair again later using a new 6-digit code.",
-    "language_heading": "Language"
+    "language_heading": "Language",
+    "about_heading": "About",
+    "about_version": "Version",
+    "about_platform": "Platform",
+    "about_paired_for": "Paired",
+    "about_not_paired": "Not paired",
+    "about_last_scan": "Last scan",
+    "about_cached_files": "Cached files",
+    "about_diagnostics_hint": "Copy this block when reporting an issue.",
+    "about_copy_diagnostics": "Copy diagnostics",
+    "about_copied": "Copied!",
+    "about_repo_link": "Open repository on GitHub"
   },
   "updater": {
     "up_to_date": "You're on the latest version.",

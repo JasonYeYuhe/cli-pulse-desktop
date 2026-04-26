@@ -98,7 +98,18 @@
     "updates_heading": "更新",
     "updates_hint": "更新均已签名。发布地址:<code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>",
     "unpair_confirm": "确认解除此设备配对吗?之后可用新的 6 位码重新配对。",
-    "language_heading": "语言"
+    "language_heading": "语言",
+    "about_heading": "关于",
+    "about_version": "版本",
+    "about_platform": "平台",
+    "about_paired_for": "已配对",
+    "about_not_paired": "未配对",
+    "about_last_scan": "上次扫描",
+    "about_cached_files": "缓存文件",
+    "about_diagnostics_hint": "提交问题时把这块信息复制进去。",
+    "about_copy_diagnostics": "复制诊断信息",
+    "about_copied": "已复制!",
+    "about_repo_link": "在 GitHub 打开仓库"
   },
   "updater": {
     "up_to_date": "已是最新版本。",

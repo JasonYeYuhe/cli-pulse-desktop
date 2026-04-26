@@ -2,6 +2,26 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.6] — 2026-04-26
+
+### Added
+- **Settings → About** panel. Shows app version, platform family +
+  arch, paired status (with truncated device id, no secret leakage),
+  and a one-click "Copy diagnostics" button that puts a structured
+  text block in your clipboard — paste it into a GitHub issue when
+  reporting a bug. Includes a link to the repo.
+- New Tauri command `diagnostic_snapshot` returns the structured
+  data the About panel renders. Sensitive fields (helper_secret,
+  user_id, full device_id) are deliberately not exposed.
+- `about_*` translation keys added to en / zh-CN / ja.
+
+### Why
+First-line support friction: when a user reports an issue I have no
+way to confirm what version they're on, what arch / OS, whether
+they're paired, etc. without a back-and-forth. The About panel is
+also the natural home for any "what's this app" UX a new user
+needs.
+
 ## [0.2.5] — 2026-04-26
 
 ### Added
