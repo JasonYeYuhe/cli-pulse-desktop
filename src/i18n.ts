@@ -49,13 +49,32 @@ i18n.use(initReactI18next).init({
   returnNull: false,
 });
 
-export function setLang(code: LangCode) {
-  i18n.changeLanguage(code);
+/**
+ * Switch the active UI language. `i18next.changeLanguage` returns a
+ * Promise that resolves once resources for `code` are loaded, but
+ * because all three locales are bundled at build time (statically
+ * imported above), resolution is effectively synchronous in practice.
+ * We still track the Promise so any future resource-loading error
+ * surfaces as a console warning instead of an unhandled rejection.
+ *
+ * Caller can `await` if it cares about completion (Settings panel
+ * doesn't — it triggers a re-render via React state change anyway).
+ */
+export function setLang(code: LangCode): Promise<void> {
+  // Persist BEFORE switching — if changeLanguage somehow throws, we
+  // still want the choice remembered for the next launch.
   try {
     (globalThis as any).localStorage?.setItem(STORAGE_KEY, code);
   } catch {
     /* localStorage can be unavailable in weird contexts — ignore */
   }
+  return Promise.resolve(i18n.changeLanguage(code))
+    .then(() => undefined)
+    .catch((err) => {
+      // Don't propagate — language switch failures shouldn't crash the
+      // app. Log so they're not silently swallowed.
+      console.warn("setLang(", code, ") failed:", err);
+    });
 }
 
 export default i18n;

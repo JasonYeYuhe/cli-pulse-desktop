@@ -1494,14 +1494,18 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 }
 
 function Skeleton() {
+  const { t } = useTranslation();
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-      {[0, 1, 2, 3].map((i) => (
-        <div
-          key={i}
-          className="h-24 rounded-lg border border-neutral-800 bg-neutral-900/40 animate-pulse"
-        />
-      ))}
+    <div className="space-y-4">
+      <div className="text-xs text-neutral-500">{t("misc.scanning_hint")}</div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="h-24 rounded-lg border border-neutral-800 bg-neutral-900/40 animate-pulse"
+          />
+        ))}
+      </div>
     </div>
   );
 }

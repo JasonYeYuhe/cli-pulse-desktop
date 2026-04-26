@@ -132,6 +132,7 @@
     "provider_label": "服务商:{{name}}",
     "project_label": "项目:{{name}}",
     "none": "—",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "scanning_hint": "正在扫描 ~/.claude 和 ~/.codex 近 30 天数据…"
   }
 }

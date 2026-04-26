@@ -8,15 +8,23 @@
 //! they can leave the machine. Users on dev builds run with no DSN
 //! and incur zero network overhead.
 //!
-//! Privacy stance — matches Swift `SentryLogger`:
+//! Privacy stance — matches Swift `SentryLogger` config knobs:
 //!   - sendDefaultPii = false
 //!   - tracesSampleRate = 0 (no perf tracing)
-//!   - `before_send` scrubs JWTs, OAuth tokens, helper_secrets, and
-//!     local home-directory paths from event payloads. Anything that
-//!     might contain `token / secret / password / api_key / supabase
-//!     / claude_api / anthropic / codex / openai / gemini / dsn /
-//!     keychain / pairing / refresh_token / access_token / id_token`
-//!     in the field name gets nuked.
+//!   - Client-side `before_send` scrubs the user's `$HOME` path from
+//!     event payloads (so file paths read `<home>/code/foo` instead
+//!     of `/Users/jason/code/foo`).
+//!
+//! The aggressive **field-name** scrubbing (token / secret / password
+//! / api_key / supabase / claude_api / anthropic / codex / openai /
+//! gemini / dsn / keychain / pairing / refresh_token / access_token /
+//! id_token) is delegated to the Sentry **org-level** Data Scrubber
+//! settings — same arrangement the Swift / Kotlin apps use per
+//! `~/.claude/projects/.../memory/reference_sentry.md`. We don't try
+//! to maintain a parallel client-side allow-list because keeping it in
+//! sync across four codebases (Swift / Kotlin / Python helper / Rust
+//! desktop) would be more risky than relying on the org default
+//! scrubbers, which are opt-in-on by Jason's account.
 //!
 //! No new Sentry project is created by this code. Reuse the
 //! `apple-macos` project's DSN if you want desktop events to land

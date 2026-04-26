@@ -2,6 +2,38 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.7] — 2026-04-26
+
+### Fixed
+- **`setLang` no longer fires-and-forgets the i18next promise.**
+  `i18next.changeLanguage()` returns a Promise that we previously
+  invoked without awaiting or handling rejection — works in
+  practice because all locales are bundled at build time, but a
+  rejected promise would surface as an unhandled-rejection warning
+  in the console. Now returns a Promise (caller can await if it
+  cares about completion) and converts any error into a
+  `console.warn` so it never crashes the app. Caught by Codex
+  review of v0.2.6: *"src/i18n.ts:52: changeLanguage() is not
+  awaited, and the tests assume sync language flips."*
+- localStorage persistence now happens **before** `changeLanguage`
+  so a thrown error during the language switch still leaves the
+  user's choice remembered for the next launch.
+
+### Polished
+- Empty-state Overview now reads "Scanning ~/.claude and ~/.codex
+  for the past 30 days…" while the first scan is in flight, instead
+  of showing four mute pulsing rectangles. New `misc.scanning_hint`
+  key added in en / zh-CN / ja.
+- `sentry_init.rs` doc comment trimmed: was claiming the
+  `before_send` filter scrubs `token / secret / password / api_key
+  / supabase / claude_api / anthropic / codex / openai / gemini /
+  dsn / keychain / pairing / ...` field names client-side, but the
+  actual implementation only scrubs `$HOME` paths. Field-name
+  scrubbing is delegated to the Sentry org-level Data Scrubber
+  settings (matches Swift / Kotlin arrangement, per
+  `reference_sentry.md`). Doc now accurately reflects the
+  implementation. No behavior change.
+
 ## [0.2.6] — 2026-04-26
 
 ### Added

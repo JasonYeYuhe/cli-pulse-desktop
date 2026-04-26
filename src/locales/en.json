@@ -132,6 +132,7 @@
     "provider_label": "provider: {{name}}",
     "project_label": "project: {{name}}",
     "none": "—",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "scanning_hint": "Scanning ~/.claude and ~/.codex for the past 30 days…"
   }
 }

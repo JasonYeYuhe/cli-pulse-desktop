@@ -132,6 +132,7 @@
     "provider_label": "プロバイダ: {{name}}",
     "project_label": "プロジェクト: {{name}}",
     "none": "—",
-    "loading": "読み込み中…"
+    "loading": "読み込み中…",
+    "scanning_hint": "~/.claude と ~/.codex の直近 30 日間をスキャン中…"
   }
 }
