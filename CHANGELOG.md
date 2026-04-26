@@ -2,6 +2,33 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.4] — 2026-04-26
+
+### Added
+- **Brand icons.** Replaced the Tauri scaffold default icons with the
+  proper CLI Pulse 1024×1024 brand mark (sourced from the iOS app's
+  `AppIcon.appiconset`). Tauri regenerated the per-platform variants
+  (NSIS / .icns / Windows tiles / Android mipmaps).
+- **Sentry crash + error reporting** wired (`src-tauri/src/sentry_init.rs`).
+  No-op when `CLI_PULSE_SENTRY_DSN` is unset (default), so privacy stance
+  is "opt-in only." Privacy filter matches the Swift / Kotlin
+  counterparts: `sendDefaultPii = false`, `tracesSampleRate = 0`,
+  `before_send` scrubs `$HOME` paths. See README → "Optional: Sentry."
+- **Pre-push git hook** (`scripts/git-hooks/pre-push`) that runs the
+  same gates as CI (rustfmt + clippy + tests + frontend build) before
+  every push. One-time install: `scripts/install-git-hooks.sh`. Skip
+  with `--no-verify`. Motivation: the v0.2.3 host-TZ-dependent test
+  bug should never have hit CI.
+- README rewritten — full layout map + sprint history + Sentry setup.
+
+### Fixed
+- N/A — no production bugs reported since v0.2.3.
+
+### Internal
+- `PROJECT_FIX_2026-04-26_v0.2.3_test_tz_dependency.md` archives the
+  v0.2.3 test-harness host-TZ-dependency bug (per the project's
+  "every fix gets a write-up" policy).
+
 ## [0.2.3] — 2026-04-25
 
 ### Build / internals (no user-facing changes)

@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.2.3"
+version = "0.2.4"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -34,6 +34,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 uuid = { version = "1", features = ["v4"] }
 sysinfo = "0.32"
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 
 [profile.release]
 panic = "abort"

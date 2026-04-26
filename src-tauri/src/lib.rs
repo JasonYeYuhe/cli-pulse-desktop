@@ -12,6 +12,7 @@ pub mod notify;
 pub mod paths;
 pub mod pricing;
 pub mod scanner;
+pub mod sentry_init;
 pub mod sessions;
 pub mod supabase;
 pub mod tray;
@@ -383,6 +384,11 @@ async fn background_tick(app: &tauri::AppHandle) -> Result<Option<SyncReport>, S
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    // Sentry — no-op when CLI_PULSE_SENTRY_DSN is unset (the default).
+    // Install before tauri::Builder so the panic handler is registered
+    // for the lifetime of the process.
+    sentry_init::install();
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_bg = stop.clone();

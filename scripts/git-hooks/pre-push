@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# pre-push: run the same gates CI runs, locally, before code leaves
+# the laptop. Catches:
+#   - rustfmt drift
+#   - clippy errors
+#   - Rust unit + integration tests (host-TZ-stable ones, at least)
+#   - frontend type / build errors
+#
+# Skip with `git push --no-verify` if you're consciously pushing
+# work-in-progress.
+#
+# Original motivation: v0.2.3 first push had a host-TZ-dependent
+# integration test that passed on my dev Mac (JST) and failed on all
+# 4 CI runners (UTC). A 30-second pre-push gate doesn't catch that
+# specific case, but it does catch the routine fmt / clippy / test
+# regressions that should never reach CI. Net delta: faster
+# iteration, less wasted CI minutes.
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+
+step() {
+    printf '\n%s== %s ==%s\n' "$DIM" "$1" "$RESET"
+}
+
+fail() {
+    printf '\n%s✘ pre-push failed at: %s%s\n' "$RED" "$1" "$RESET"
+    printf '   re-run with %sgit push --no-verify%s if intentional.\n' "$DIM" "$RESET"
+    exit 1
+}
+
+step "rustfmt"
+( cd src-tauri && cargo fmt --all -- --check ) || fail "cargo fmt"
+
+step "clippy"
+( cd src-tauri && cargo clippy --all-targets -- -D warnings ) || fail "cargo clippy"
+
+step "tests (cargo test)"
+( cd src-tauri && cargo test --quiet ) || fail "cargo test"
+
+step "frontend tsc + vite build"
+npm run build > /tmp/cli-pulse-frontend-build.log 2>&1 || {
+    echo "  frontend build failed — last 20 lines:"
+    tail -20 /tmp/cli-pulse-frontend-build.log
+    fail "frontend build"
+}
+
+printf '\n%s✓ pre-push gates green — pushing%s\n' "$GREEN" "$RESET"
