@@ -118,6 +118,7 @@ export default function App() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [alertsLoading, setAlertsLoading] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<{ at: Date; report: SyncReport } | null>(null);
@@ -182,6 +183,19 @@ export default function App() {
     runScan();
     refreshSessions();
     refreshAlerts();
+
+    // Silent update check on first mount. We DON'T auto-download —
+    // user still controls the install via Settings → Updates.
+    // Failure is non-fatal (offline, GitHub down, etc.) — stay quiet
+    // so the user isn't pestered.
+    (async () => {
+      try {
+        const upd = await checkUpdate();
+        if (upd) setUpdateAvailable(upd.version);
+      } catch (e) {
+        console.warn("update check failed:", e);
+      }
+    })();
   }, [refreshConfig, runScan, refreshSessions, refreshAlerts]);
 
   // Sessions tab refreshes every 10s while visible
@@ -211,6 +225,16 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {updateAvailable && (
+            <button
+              onClick={() => setTab("settings")}
+              className="px-2.5 py-1 text-xs rounded-md bg-emerald-950/60 border border-emerald-700 text-emerald-200 hover:bg-emerald-900/60"
+              title={t("updater.banner_available", { version: updateAvailable })}
+            >
+              ⬆ {t("updater.banner_available", { version: updateAvailable })} ·{" "}
+              <span className="font-semibold">{t("updater.banner_action")}</span>
+            </button>
+          )}
           <PairBadge paired={!!config?.paired} />
           <button
             onClick={runScan}

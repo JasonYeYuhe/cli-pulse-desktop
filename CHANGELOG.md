@@ -2,6 +2,27 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.8] — 2026-04-26
+
+### Added
+- **"Update available" banner in the header.** On every app launch
+  the frontend silently calls the updater and, if a newer version
+  is published, shows a small green pill in the top-right that
+  reads `⬆ v0.2.X is available · Update`. Clicking it switches to
+  *Settings → Updates* where the user can confirm + install. The
+  download is **never** triggered automatically — same consent
+  model as v0.1.0, just made discoverable.
+- Failure of the update check is silent (offline, GitHub Releases
+  edge cache lag, etc.) — no scary error toasts on startup.
+- New `updater.banner_available` / `updater.banner_action` keys in
+  en / zh-CN / ja.
+
+### Why
+Before: the "auto-update" feature required users to remember to
+poke *Settings → Updates → Check for updates*. Many users never
+will. Now: the visual nudge surfaces whenever a release is available
+without breaking the "no surprise installs" privacy stance.
+
 ## [0.2.7] — 2026-04-26
 
 ### Fixed

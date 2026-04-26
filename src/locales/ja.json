@@ -116,7 +116,9 @@
     "available": "{{version}} を発見 — ダウンロード中…",
     "downloading": "ダウンロード中 {{pct}}%",
     "ready": "アップデートをインストールしました。再起動で適用されます。",
-    "error": "アップデート失敗: {{error}}"
+    "error": "アップデート失敗: {{error}}",
+    "banner_available": "v{{version}} が利用可能です",
+    "banner_action": "更新"
   },
   "messages": {
     "paired_as": "「{{name}}」としてペアリングしました ({{id}}…)。",

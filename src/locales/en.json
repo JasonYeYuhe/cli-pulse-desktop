@@ -116,7 +116,9 @@
     "available": "Found {{version}} — downloading…",
     "downloading": "Downloading {{pct}}%",
     "ready": "Update installed. Restart to apply.",
-    "error": "Update failed: {{error}}"
+    "error": "Update failed: {{error}}",
+    "banner_available": "v{{version}} is available",
+    "banner_action": "Update"
   },
   "messages": {
     "paired_as": "Paired as \"{{name}}\" ({{id}}…).",

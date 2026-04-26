@@ -116,7 +116,9 @@
     "available": "发现 {{version}},正在下载…",
     "downloading": "下载 {{pct}}%",
     "ready": "更新已安装,重启后生效。",
-    "error": "更新失败:{{error}}"
+    "error": "更新失败:{{error}}",
+    "banner_available": "有新版本 v{{version}}",
+    "banner_action": "更新"
   },
   "messages": {
     "paired_as": "已配对为\"{{name}}\" ({{id}}…)。",
