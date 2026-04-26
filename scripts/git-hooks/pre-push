@@ -48,4 +48,11 @@ npm run build > /tmp/cli-pulse-frontend-build.log 2>&1 || {
     fail "frontend build"
 }
 
+step "frontend tests (vitest)"
+npm test > /tmp/cli-pulse-frontend-tests.log 2>&1 || {
+    echo "  frontend tests failed — last 30 lines:"
+    tail -30 /tmp/cli-pulse-frontend-tests.log
+    fail "vitest"
+}
+
 printf '\n%s✓ pre-push gates green — pushing%s\n' "$GREEN" "$RESET"

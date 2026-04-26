@@ -4,6 +4,7 @@ import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useTranslation } from "react-i18next";
 import { SUPPORTED_LANGS, setLang, type LangCode } from "./i18n";
+import { formatInt, formatUSD, rowsToCsv } from "./lib/format";
 import "./App.css";
 
 type DailyEntry = {
@@ -100,16 +101,6 @@ type AlertThresholds = {
 type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
 
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
-
-function formatUSD(n: number): string {
-  if (n === 0) return "$0.00";
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  return `$${n.toFixed(2)}`;
-}
-
-function formatInt(n: number): string {
-  return n.toLocaleString("en-US");
-}
 
 export default function App() {
   const { t } = useTranslation();
@@ -907,20 +898,13 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
-  function csvEscape(value: string | number | null | undefined): string {
-    if (value === null || value === undefined) return "";
-    const s = String(value);
-    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-    return s;
-  }
-
   function exportCsv() {
     if (!scan) return;
-    const rows = [
+    const rows: (string | number | null)[][] = [
       ["date", "provider", "model", "input_tokens", "cached_tokens", "output_tokens", "cost_usd", "message_count"],
       ...scan.entries
         .filter((e) => e.model !== CLAUDE_MSG_BUCKET)
-        .map((e) => [
+        .map((e): (string | number | null)[] => [
           e.date,
           e.provider,
           e.model,
@@ -931,9 +915,8 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
           e.message_count,
         ]),
     ];
-    const text = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
     const stamp = new Date().toISOString().slice(0, 10);
-    triggerDownload(text + "\n", `cli-pulse-usage-${stamp}.csv`, "text/csv");
+    triggerDownload(rowsToCsv(rows), `cli-pulse-usage-${stamp}.csv`, "text/csv");
   }
 
   function exportJson() {

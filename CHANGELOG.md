@@ -2,6 +2,27 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.5] — 2026-04-26
+
+### Added
+- **Frontend test suite** via Vitest + jsdom + Testing Library. 25
+  tests covering pure presentation helpers (USD / int formatters, CSV
+  escape, RFC-4180 row rendering) and i18n behaviour (localStorage
+  persistence, fallback when stored code is unsupported, every required
+  UI key resolves non-empty across en / zh-CN / ja).
+- `src/lib/format.ts` extracted from `App.tsx` so the formatters are
+  importable and testable. App.tsx behaviour byte-identical.
+- `npm test` script wired to the CI `frontend` job + `pre-push` hook.
+  Frontend regressions now caught before they hit `main`, matching
+  the bar Rust already cleared.
+
+### Internal
+- `src/test/setup.ts` ships an in-memory localStorage shim so tests
+  don't depend on jsdom version quirks (Vitest 2.x + jsdom 25
+  occasionally exposes incomplete Storage).
+- 53 Rust tests + 25 frontend tests = **78 total tests** across 5
+  CI runners.
+
 ## [0.2.4] — 2026-04-26
 
 ### Added
