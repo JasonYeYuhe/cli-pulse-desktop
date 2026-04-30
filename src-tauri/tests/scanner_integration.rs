@@ -285,6 +285,88 @@ fn timezone_anchor_uses_today_override_consistently() {
 // Aggregate sanity
 // ========================================================================
 
+// ========================================================================
+// CRLF byte-offset regression — flagged by Codex deep review of v0.2.8 as
+// the highest-value correctness risk in the shipped product. Pre-fix,
+// `parsed_bytes` was incremented as `line.len() + 1` after stripping
+// the line terminator with `BufRead::lines()`, but on Windows JSONLs the
+// terminator is `\r\n` (2 bytes). One byte/line drift compounded over
+// 2700+ files; the next incremental scan would seek mid-line and drop
+// the first event of every grown file. This test writes a CRLF fixture
+// and verifies the cumulative-delta math doesn't lose any token.
+// ========================================================================
+
+const CODEX_CRLF: &str = "{\"type\":\"event_msg\",\"timestamp\":\"2026-04-25T10:00:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":0,\"output_tokens\":500},\"model\":\"gpt-5\"}}}\r\n{\"type\":\"event_msg\",\"timestamp\":\"2026-04-25T10:00:10Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2500,\"cached_input_tokens\":0,\"output_tokens\":1100},\"model\":\"gpt-5\"}}}\r\n";
+
+#[test]
+fn crlf_codex_jsonl_parses_identically_to_lf() {
+    // Build the same fixture twice — once with CRLF, once with LF — and
+    // assert the scanner produces identical (input_tokens, output_tokens).
+    // If the byte-offset bookkeeping is wrong for CRLF the warm-cache
+    // case below would diverge from the LF version.
+    let crlf = TempEnv::new("crlf");
+    crlf.write_codex("2026", "04", "25", "s.jsonl", CODEX_CRLF);
+    let today = NaiveDate::from_ymd_opt(2026, 4, 25).unwrap();
+    let r_crlf = scanner::scan_with_options(crlf.options(1, Some(today))).unwrap();
+
+    let lf = TempEnv::new("lf");
+    lf.write_codex(
+        "2026",
+        "04",
+        "25",
+        "s.jsonl",
+        &CODEX_CRLF.replace("\r\n", "\n"),
+    );
+    let r_lf = scanner::scan_with_options(lf.options(1, Some(today))).unwrap();
+
+    let crlf_e = pick(&r_crlf.entries, "2026-04-25", "Codex", "gpt-5");
+    let lf_e = pick(&r_lf.entries, "2026-04-25", "Codex", "gpt-5");
+
+    assert_eq!(crlf_e.input_tokens, lf_e.input_tokens);
+    assert_eq!(crlf_e.output_tokens, lf_e.output_tokens);
+    // 1st turn baseline 1000/500, 2nd turn delta 1500/600 → totals 2500/1100
+    assert_eq!(crlf_e.input_tokens, 2500);
+    assert_eq!(crlf_e.output_tokens, 1100);
+}
+
+#[test]
+fn crlf_incremental_resume_does_not_drop_lines() {
+    // Simulate a CRLF file growing between two scans. Pre-fix, the cached
+    // `parsed_bytes` would be N less than the true byte count after N
+    // lines, and the second scan would seek into the middle of line N+1,
+    // dropping the FIRST event of the appended tail.
+    let env = TempEnv::new("crlf_grow");
+    let today = NaiveDate::from_ymd_opt(2026, 4, 25).unwrap();
+
+    // Initial state: one line.
+    let first = "{\"type\":\"event_msg\",\"timestamp\":\"2026-04-25T10:00:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":0,\"output_tokens\":500},\"model\":\"gpt-5\"}}}\r\n";
+    env.write_codex("2026", "04", "25", "s.jsonl", first);
+
+    // Cold scan, populates cache. Use force_rescan=false so the cache
+    // path is the one we actually exercise in production.
+    let mut opts = env.options(1, Some(today));
+    opts.force_rescan = false;
+    let r1 = scanner::scan_with_options(opts.clone()).unwrap();
+    let r1_entry = pick(&r1.entries, "2026-04-25", "Codex", "gpt-5");
+    assert_eq!(r1_entry.input_tokens, 1000);
+    assert_eq!(r1_entry.output_tokens, 500);
+
+    // Append one more line. The bug would cause this delta to land off
+    // by one byte; the new "line N+1" would lose its first character
+    // and fail to parse.
+    let appended = format!(
+        "{first}{}",
+        "{\"type\":\"event_msg\",\"timestamp\":\"2026-04-25T10:00:10Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2500,\"cached_input_tokens\":0,\"output_tokens\":1100},\"model\":\"gpt-5\"}}}\r\n"
+    );
+    env.write_codex("2026", "04", "25", "s.jsonl", &appended);
+
+    let r2 = scanner::scan_with_options(opts).unwrap();
+    let r2_entry = pick(&r2.entries, "2026-04-25", "Codex", "gpt-5");
+    // After incremental parse: same totals as the LF-equivalent scan.
+    assert_eq!(r2_entry.input_tokens, 2500);
+    assert_eq!(r2_entry.output_tokens, 1100);
+}
+
 #[test]
 fn empty_roots_yields_empty_result_no_panics() {
     let env = TempEnv::new("empty");

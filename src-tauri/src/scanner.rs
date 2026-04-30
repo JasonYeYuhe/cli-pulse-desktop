@@ -363,30 +363,45 @@ fn parse_codex_file(
     if start_offset > 0 && file.seek(SeekFrom::Start(start_offset as u64)).is_err() {
         return out;
     }
-    let reader = BufReader::with_capacity(256 * 1024, file);
+    let mut reader = BufReader::with_capacity(256 * 1024, file);
 
     let mut current_model = initial_model;
     let mut prev_total = initial_totals.unwrap_or_default();
     let mut has_prev = initial_totals.is_some();
     let mut bytes_seen: i64 = 0;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
+    // IMPORTANT: don't use `reader.lines()` here — it strips `\r\n` AND `\n`
+    // but doesn't tell us how many bytes were actually consumed. On Windows
+    // CRLF JSONLs that under-counted by 1 byte per line, so the cached
+    // `parsed_bytes` drifted and the next incremental scan would seek into
+    // the middle of a line. read_until returns the exact byte count
+    // including the terminator, which we strip ourselves.
+    loop {
+        buf.clear();
+        let n = match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
             Err(_) => continue,
         };
-        bytes_seen += line.len() as i64 + 1; // +1 for the newline consumed
-
-        if line.is_empty() {
+        bytes_seen += n as i64;
+        while matches!(buf.last(), Some(&b'\n') | Some(&b'\r')) {
+            buf.pop();
+        }
+        if buf.is_empty() {
             continue;
         }
+        let line: &str = match std::str::from_utf8(&buf) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
         if !line.contains("\"type\":\"event_msg\"")
             && !line.contains("\"type\":\"turn_context\"")
             && !line.contains("\"type\":\"session_meta\"")
         {
             continue;
         }
-        let obj: serde_json::Value = match serde_json::from_str(&line) {
+        let obj: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => continue,
         };
@@ -638,28 +653,39 @@ fn parse_claude_file(path: &Path, range: &DateRange, start_offset: i64) -> Claud
     if start_offset > 0 && file.seek(SeekFrom::Start(start_offset as u64)).is_err() {
         return out;
     }
-    let reader = BufReader::with_capacity(256 * 1024, file);
+    let mut reader = BufReader::with_capacity(256 * 1024, file);
 
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut bytes_seen: i64 = 0;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
+    // CRLF-safe line iteration. See parse_codex_file for why we don't use
+    // `reader.lines()`.
+    loop {
+        buf.clear();
+        let n = match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
             Err(_) => continue,
         };
-        bytes_seen += line.len() as i64 + 1;
-
-        if line.is_empty() {
+        bytes_seen += n as i64;
+        while matches!(buf.last(), Some(&b'\n') | Some(&b'\r')) {
+            buf.pop();
+        }
+        if buf.is_empty() {
             continue;
         }
+        let line: &str = match std::str::from_utf8(&buf) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
         let is_assistant = line.contains("\"type\":\"assistant\"");
         let is_user = line.contains("\"type\":\"user\"");
         if !is_assistant && !is_user {
             continue;
         }
 
-        let obj: serde_json::Value = match serde_json::from_str(&line) {
+        let obj: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => continue,
         };

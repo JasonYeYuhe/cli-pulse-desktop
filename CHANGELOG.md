@@ -2,6 +2,49 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.9] — 2026-04-27
+
+### Fixed
+- **CRLF byte-offset drift in incremental scan cache.** On Windows,
+  JSONL files written with `\r\n` line terminators caused the
+  `parsed_bytes` cache to under-count by 1 byte per line. After N
+  scans, the next incremental resumption would seek N bytes too
+  early — into the middle of the next line — and silently drop its
+  first event. Replaced `BufRead::lines()` (which loses the
+  terminator's exact byte count) with `read_until(b'\n', &mut buf)`
+  + explicit CR/LF stripping. macOS and Linux LF-only users were
+  unaffected.
+  - Caught by Codex deep review of v0.2.8: *"Next sprint
+    recommendation: fix the incremental scanner offset bookkeeping
+    first; it's the highest-value correctness risk in the shipped
+    product."*
+  - 2 new regression tests in `scanner_integration.rs`
+    (`crlf_codex_jsonl_parses_identically_to_lf`,
+    `crlf_incremental_resume_does_not_drop_lines`) — both fail
+    pre-fix, pass post-fix.
+  - Forensic write-up:
+    [`PROJECT_FIX_2026-04-27_v0.2.9_crlf_offset.md`](PROJECT_FIX_2026-04-27_v0.2.9_crlf_offset.md)
+
+### Added
+- **Sentry crash reporting is now LIVE.** Created `desktop` project
+  in the existing `jason-yeyuhe.sentry.io` org (alongside `apple-ios`,
+  `apple-macos`, `android`). DSN baked into release builds via
+  `CLI_PULSE_SENTRY_DSN` GitHub Actions secret. Privacy stance
+  unchanged from v0.2.4: `sendDefaultPii=false`,
+  `tracesSampleRate=0`, client-side `$HOME` path scrubbing,
+  org-level Data Scrubber + Default Scrubbers active. Dev builds
+  with no DSN env var continue to be a clean no-op (verified by
+  `install_without_dsn_is_a_noop` test).
+- Tagged events: `platform=desktop`, `os={windows|linux|macos}`,
+  `arch={x86_64|aarch64}`, `app_version=0.2.9` so the dashboard can
+  filter cleanly.
+
+### Numbers
+- 90 tests now (53 Rust + 25 frontend + 12 integration, was 78).
+- Sentry crate adds ~1 MB to release binary; was already in v0.2.4
+  but unused. Now actually emits events for crashes / panics on
+  release builds.
+
 ## [0.2.8] — 2026-04-26
 
 ### Added

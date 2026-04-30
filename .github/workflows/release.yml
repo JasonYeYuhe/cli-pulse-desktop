@@ -86,6 +86,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Bake the DSN at compile time via `option_env!` in
+          # src-tauri/src/sentry_init.rs. The DSN is a public key (per
+          # Sentry docs) — the privacy guarantees come from org-level
+          # Data Scrubbers + client-side $HOME path scrubbing in
+          # before_send. PRs and forks build with no DSN by default →
+          # Sentry init is a no-op for those builds.
+          CLI_PULSE_SENTRY_DSN: ${{ secrets.CLI_PULSE_SENTRY_DSN }}
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "CLI Pulse Desktop ${{ github.event.inputs.tag || github.ref_name }}"
