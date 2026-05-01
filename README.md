@@ -1,9 +1,22 @@
 # CLI Pulse — Desktop (Windows + Linux)
 
-Cross-platform companion to the [CLI Pulse](https://github.com/JasonYeYuhe/cli-pulse)
-macOS / iOS / Android apps. Tracks usage, tokens, and cost for 26 AI command-line
-tools (Claude Code, Codex, Gemini CLI, Cursor, Kimi, GLM, and more) from a
-single native desktop app.
+The Windows + Linux build of **CLI Pulse**. Tracks usage, tokens, and cost for
+26 AI command-line tools (Claude Code, Codex, Gemini CLI, Cursor, Kimi, GLM,
+and more) from a single native desktop app, and syncs aggregated history with
+the iPhone / Apple Watch / Android / macOS apps via a shared Supabase backend.
+
+## Part of CLI Pulse
+
+| Platform                        | Source                                                                      | Distribution        |
+| ------------------------------- | --------------------------------------------------------------------------- | ------------------- |
+| macOS · iOS · iPadOS · watchOS  | [JasonYeYuhe/cli-pulse](https://github.com/JasonYeYuhe/cli-pulse) (`CLI Pulse Bar/`) | App Store           |
+| Android                         | [JasonYeYuhe/cli-pulse](https://github.com/JasonYeYuhe/cli-pulse) (`android/`) | Google Play         |
+| **Windows · Linux**             | **this repo** (Rust + Tauri 2)                                              | GitHub Releases     |
+
+This repo is separate from the main one because it shares no client code with
+the Apple/Android apps (Rust + Tauri vs Swift/Kotlin) and has its own CI
+matrix + release channel. The on-device JSONL scanner here is bit-exact
+parity with the Swift implementation in the main repo.
 
 **Latest release**: see
 [Releases](https://github.com/JasonYeYuhe/cli-pulse-desktop/releases).
