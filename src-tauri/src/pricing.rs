@@ -212,6 +212,8 @@ static CLAUDE_MODELS: Lazy<HashMap<&'static str, ClaudeModel>> = Lazy::new(|| {
     m.insert("claude-opus-4-5-20251101", opus_45_46);
     m.insert("claude-opus-4-6", opus_45_46);
     m.insert("claude-opus-4-6-20260205", opus_45_46);
+    // Opus 4.7 — same pricing tier as 4.5 / 4.6
+    m.insert("claude-opus-4-7", opus_45_46);
 
     // Sonnet 4.5 / 4.6 — tiered above 200K
     let sonnet_tiered = ClaudeModel {
@@ -410,6 +412,16 @@ mod tests {
         // Haiku has no threshold — 1M input @ $1/M = $1.00
         let c = claude_cost_usd("claude-haiku-4-5", 1_000_000, 0, 0, 0).unwrap();
         assert!((c - 1.00).abs() < 1e-9, "expected 1.00, got {}", c);
+    }
+
+    #[test]
+    fn claude_cost_opus_4_7_priced_like_4_5_4_6() {
+        // Opus 4.7 was missing from the table in v0.2.11, causing per-row Cost
+        // to render "—" and the 7-day chart / Provider quota bar to collapse
+        // to zero. Same per-token rates as Opus 4.5 / 4.6.
+        // 1M input @ $5/M + 100K output @ $25/M = $5.00 + $2.50 = $7.50
+        let c = claude_cost_usd("claude-opus-4-7", 1_000_000, 0, 0, 100_000).unwrap();
+        assert!((c - 7.50).abs() < 1e-9, "expected 7.50, got {}", c);
     }
 
     #[test]

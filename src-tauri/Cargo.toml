@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.2.11"
+version = "0.2.12"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"

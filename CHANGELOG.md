@@ -2,6 +2,39 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.12] — 2026-05-02
+
+### Fixed
+- **Opus 4.7 missing from pricing table (P1).** Real-world test on Windows
+  surfaced three symptoms that all traced to the same root cause:
+  per-row Cost in the Today's Detail table rendered as `—`, the 7-day
+  cost trend chart drew an empty frame with no bars, and the Provider
+  quota bar in the Providers tab collapsed to invisible. Each pathway
+  reads `cost_usd` (or aggregates of it) from the scan result; for any
+  unrecognized model, `pricing::claude_cost_usd` returns `None` →
+  frontend gets `null` → Cost cell shows `—`, daily totals are 0,
+  `maxCost` is 1, all bar heights are 0%. The `claude-opus-4-7` model
+  ID was missing from `CLAUDE_MODELS` (the table only covered Opus
+  4.5 / 4.6 / 4 / 4.1).
+  - Fix: `src-tauri/src/pricing.rs` — add `claude-opus-4-7` entry
+    using the same per-token rates as Opus 4.5 / 4.6 (Anthropic's
+    pricing pattern for the 4.5+ generation).
+  - Test: `claude_cost_opus_4_7_priced_like_4_5_4_6` regression test
+    locks the rate in. 8/8 pricing tests pass; 53/53 total Rust tests.
+  - User-visible impact: anyone running Claude Code on Opus 4.7 (the
+    current default) saw $0.00 / dash everywhere. After upgrading,
+    Cost / chart / quota bar all populate from the same scan data
+    that was already being collected — no rescan needed; the cache
+    holds raw token counts and cost is recomputed on read.
+
+### Notes
+- v0.2.11 was held in `prerelease` and never promoted to `latest` once
+  this issue surfaced during VM verification. v0.2.12 is the
+  first-promotable build of the Sessions-tab fix line.
+- Swift / iOS / macOS apps in the main `cli pulse` repo also lack
+  Opus 4.7 in their pricing table — tracked separately for the next
+  Mac release. Not a desktop blocker.
+
 ## [0.2.11] — 2026-05-01
 
 ### Fixed
