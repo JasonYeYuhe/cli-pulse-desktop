@@ -106,11 +106,17 @@ jobs:
 
       # WHY: v0.1.0–v0.2.9 silently shipped Windows NSIS / Linux .deb / .rpm
       # containing only the `scan_cli` sidecar diagnostic binary (cargo picked
-      # the wrong default bin in a multi-bin crate). Sizes were ~600 KB instead
-      # of ~7 MB. AppImage bundler resolves binaries differently and was
-      # unaffected. This step is the regression guard: assert size + inspect
-      # archive for the GUI binary by name. Failure here makes the matrix job
-      # red so the human un-draft gate catches it.
+      # the wrong default bin in a multi-bin crate). The fixed v0.2.10 sizes:
+      # NSIS LZMA ~2.7 MB (broken was ~0.6 MB), .deb gzip ~4.6 MB (broken was
+      # ~0.7 MB), .rpm ~4.5 MB (broken was ~0.7 MB). Thresholds chosen at ~3×
+      # broken size — far enough above broken-baseline to fail loud, far enough
+      # below typical to allow normal growth. Content check is the rigorous
+      # signal; size is just the first cheap check.
+      #
+      # NB: pipefail + grep -q + an upstream that produces lots of output
+      # (dpkg-deb -c, 7z l) is a footgun: grep -q exits early, the upstream
+      # gets SIGPIPE, the pipeline returns non-zero, the script aborts. Buffer
+      # the listing to a tempfile and grep the file instead.
       - name: Verify bundle contains GUI binary (regression guard)
         shell: bash
         run: |
@@ -121,19 +127,24 @@ jobs:
           echo "=== checks ==="
           stat_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1"; }
           fail() { echo "::error::$1"; exit 1; }
+          LIST=$(mktemp)
+          trap 'rm -f "$LIST"' EXIT
           case "${{ matrix.platform }}" in
             windows)
               EXE=$(ls nsis/*-setup.exe 2>/dev/null | head -1) || true
               [ -n "${EXE:-}" ] || fail "no NSIS *-setup.exe found"
               SIZE=$(stat_size "$EXE")
               echo "NSIS $EXE: $SIZE bytes"
-              [ "$SIZE" -ge 3000000 ] || fail "NSIS < 3MB ($SIZE B) — likely missing GUI binary"
-              # 7z is preinstalled on windows-latest and windows-11-arm
-              if 7z l "$EXE" | grep -qE "cli-pulse-desktop\.exe$"; then
+              # NSIS uses LZMA, ~2.7 MB is a healthy GUI build; broken was 0.6 MB
+              [ "$SIZE" -ge 1500000 ] || fail "NSIS < 1.5MB ($SIZE B) — likely missing GUI binary"
+              # 7z is preinstalled on windows-latest and windows-11-arm. Buffer
+              # the listing to avoid SIGPIPE under pipefail.
+              7z l "$EXE" > "$LIST"
+              if grep -E 'cli-pulse-desktop\.exe' "$LIST" > /dev/null; then
                 echo "✅ NSIS contains cli-pulse-desktop.exe"
               else
                 echo "::group::NSIS file list"
-                7z l "$EXE" | tail -50
+                tail -60 "$LIST"
                 echo "::endgroup::"
                 fail "NSIS does NOT contain cli-pulse-desktop.exe"
               fi
@@ -144,11 +155,14 @@ jobs:
               SIZE=$(stat_size "$DEB")
               echo ".deb $DEB: $SIZE bytes"
               [ "$SIZE" -ge 3000000 ] || fail ".deb < 3MB ($SIZE B) — likely missing GUI binary"
-              if dpkg-deb -c "$DEB" | grep -qE "usr/bin/cli-pulse-desktop$"; then
+              # Buffer dpkg-deb -c output; piping into grep -q under pipefail
+              # gets SIGPIPE-killed and reports false negative.
+              dpkg-deb -c "$DEB" > "$LIST"
+              if grep -E 'usr/bin/cli-pulse-desktop$' "$LIST" > /dev/null; then
                 echo "✅ .deb contains usr/bin/cli-pulse-desktop"
               else
                 echo "::group::.deb file list"
-                dpkg-deb -c "$DEB" | tail -30
+                cat "$LIST"
                 echo "::endgroup::"
                 fail ".deb does NOT contain usr/bin/cli-pulse-desktop"
               fi
