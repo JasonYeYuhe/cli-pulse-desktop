@@ -103,3 +103,67 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --bundles ${{ matrix.bundles }} --target ${{ matrix.rust-target }}
+
+      # WHY: v0.1.0–v0.2.9 silently shipped Windows NSIS / Linux .deb / .rpm
+      # containing only the `scan_cli` sidecar diagnostic binary (cargo picked
+      # the wrong default bin in a multi-bin crate). Sizes were ~600 KB instead
+      # of ~7 MB. AppImage bundler resolves binaries differently and was
+      # unaffected. This step is the regression guard: assert size + inspect
+      # archive for the GUI binary by name. Failure here makes the matrix job
+      # red so the human un-draft gate catches it.
+      - name: Verify bundle contains GUI binary (regression guard)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/src-tauri/target/${{ matrix.rust-target }}/release/bundle"
+          echo "=== bundle/ contents ==="
+          find . -maxdepth 4 -type f -size +1c | head -40
+          echo "=== checks ==="
+          stat_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1"; }
+          fail() { echo "::error::$1"; exit 1; }
+          case "${{ matrix.platform }}" in
+            windows)
+              EXE=$(ls nsis/*-setup.exe 2>/dev/null | head -1) || true
+              [ -n "${EXE:-}" ] || fail "no NSIS *-setup.exe found"
+              SIZE=$(stat_size "$EXE")
+              echo "NSIS $EXE: $SIZE bytes"
+              [ "$SIZE" -ge 3000000 ] || fail "NSIS < 3MB ($SIZE B) — likely missing GUI binary"
+              # 7z is preinstalled on windows-latest and windows-11-arm
+              if 7z l "$EXE" | grep -qE "cli-pulse-desktop\.exe$"; then
+                echo "✅ NSIS contains cli-pulse-desktop.exe"
+              else
+                echo "::group::NSIS file list"
+                7z l "$EXE" | tail -50
+                echo "::endgroup::"
+                fail "NSIS does NOT contain cli-pulse-desktop.exe"
+              fi
+              ;;
+            linux)
+              DEB=$(ls deb/*.deb 2>/dev/null | head -1) || true
+              [ -n "${DEB:-}" ] || fail "no .deb found"
+              SIZE=$(stat_size "$DEB")
+              echo ".deb $DEB: $SIZE bytes"
+              [ "$SIZE" -ge 3000000 ] || fail ".deb < 3MB ($SIZE B) — likely missing GUI binary"
+              if dpkg-deb -c "$DEB" | grep -qE "usr/bin/cli-pulse-desktop$"; then
+                echo "✅ .deb contains usr/bin/cli-pulse-desktop"
+              else
+                echo "::group::.deb file list"
+                dpkg-deb -c "$DEB" | tail -30
+                echo "::endgroup::"
+                fail ".deb does NOT contain usr/bin/cli-pulse-desktop"
+              fi
+              RPM=$(ls rpm/*.rpm 2>/dev/null | head -1) || true
+              if [ -n "${RPM:-}" ]; then
+                SIZE=$(stat_size "$RPM")
+                echo ".rpm $RPM: $SIZE bytes"
+                [ "$SIZE" -ge 3000000 ] || fail ".rpm < 3MB ($SIZE B)"
+              fi
+              APPIMG=$(ls appimage/*.AppImage 2>/dev/null | head -1) || true
+              if [ -n "${APPIMG:-}" ]; then
+                SIZE=$(stat_size "$APPIMG")
+                echo "AppImage $APPIMG: $SIZE bytes"
+                [ "$SIZE" -ge 30000000 ] || fail "AppImage < 30MB ($SIZE B)"
+              fi
+              ;;
+          esac
+          echo "✅ All bundle checks passed"

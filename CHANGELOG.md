@@ -2,7 +2,45 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
-## [0.2.9] — 2026-04-27
+## [0.2.10] — 2026-05-01
+
+### Fixed
+- **CATASTROPHIC PACKAGING REGRESSION (P0): all v0.1.0–v0.2.9 NSIS,
+  `.deb`, and `.rpm` installers shipped without the GUI binary.**
+  They contained only `scan_cli` (a sidecar diagnostic CLI tool)
+  instead of the main `cli-pulse-desktop` Tauri app. Sizes were
+  ~600 KB instead of the expected ~7 MB. Symptom: installer ran
+  successfully, registered Start Menu / `.desktop` entries, but
+  launching produced a flash of console and no GUI.
+  - Root cause: `src-tauri/src/bin/{scan_cli,sessions_smoke}.rs`
+    auto-register as cargo bins. Without `default-run` in
+    `[package]`, `cargo tauri build` had no canonical "main"
+    binary and silently picked `scan_cli` (alphabetically first
+    among the auto-detected bins) for the Linux/Windows
+    bundlers. AppImage bundler resolves binaries differently and
+    was unaffected — that's why no automated test caught it for
+    14 versions and the AppImage's 70+ MB size hid the others'
+    breakage.
+  - Fix: added `default-run = "cli-pulse-desktop"` to
+    `src-tauri/Cargo.toml`. Forces a single canonical default
+    binary across `cargo build`, `cargo tauri build`, and the
+    bundler.
+  - **CI guard added** (`.github/workflows/release.yml`):
+    post-build verification step now asserts NSIS ≥ 3 MB,
+    `.deb`/`.rpm` ≥ 3 MB, AppImage ≥ 30 MB, AND inspects each
+    archive for the GUI binary by name (`7z l` for NSIS,
+    `dpkg-deb -c` for .deb). Failure makes the matrix job red
+    so the human un-draft gate notices.
+  - Caught by first real human Windows GUI test on Azure VM —
+    13 prior releases passed CI matrix because CI only built,
+    never installed-and-launched. Adopting "real-VM smoke gate
+    before un-drafting" as part of the release contract.
+  - v0.2.9 was yanked to draft; `latest.json` redirects to v0.2.8
+    until v0.2.10 is verified.
+  - Forensic write-up:
+    [`PROJECT_FIX_2026-05-01_v0.2.10_default_run.md`](PROJECT_FIX_2026-05-01_v0.2.10_default_run.md)
+
+## [0.2.9] — 2026-04-27 (YANKED — broken NSIS/.deb/.rpm, see v0.2.10)
 
 ### Fixed
 - **CRLF byte-offset drift in incremental scan cache.** On Windows,

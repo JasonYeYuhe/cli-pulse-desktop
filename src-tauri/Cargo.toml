@@ -1,10 +1,17 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.2.9"
+version = "0.2.10"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
 rust-version = "1.88"
+# WHY: src/bin/{scan_cli,sessions_smoke}.rs auto-register as cargo bins.
+# Without `default-run`, `cargo tauri build` cannot disambiguate which binary
+# to bundle and (across all v0.1.0–v0.2.9 releases) silently picked
+# `scan_cli` for NSIS/.deb/.rpm — shipping diagnostic-only installers with
+# no GUI. AppImage was unaffected because its bundler resolves the binary
+# differently. See PROJECT_FIX_2026-05-01_v0.2.10_default_run.md.
+default-run = "cli-pulse-desktop"
 
 [lib]
 name = "cli_pulse_desktop_lib"
