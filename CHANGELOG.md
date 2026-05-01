@@ -2,6 +2,50 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.11] — 2026-05-01
+
+### Fixed
+- **Sessions tab white-screen on Windows (P1).** Clicking the Sessions tab
+  unmounted the entire React tree, leaving only the Tauri window chrome
+  visible. No log trail, no crash dump — initial diagnosis (Rust panic /
+  WebView2 renderer crash / OS kill) all came up empty during multi-hour
+  forensic on the test VM. Real cause was a frontend `TypeError`:
+  `App.tsx` rendered `{s.cpu_usage.toFixed(1)}%`, but the backend marked
+  `LiveSession::cpu_usage` and `memory_mb` as `#[serde(skip_serializing)]`
+  (intent: strip them from the supabase `helper_sync` payload). That
+  attribute also stripped them from the Tauri IPC response, so the
+  frontend received `undefined` for these fields. `undefined.toFixed()`
+  threw at React render time, and React 18's default behavior with no
+  `ErrorBoundary` is to unmount the whole tree.
+  - Latent since v0.1.0. Not surfaced because the Windows GUI never
+    started in any prior release (v0.2.10 was the first version where
+    the bundle actually contained the GUI binary). On Linux the bug
+    would also fire if the Sessions tab found a matched process; the
+    test VM happened to be running Claude Code which the regex picked up.
+  - Backend fix (`src-tauri/src/sessions.rs`): split the data model.
+    `LiveSession` is now fully serializable (used for Tauri IPC, frontend
+    sees all fields). A new `SyncableSession` view is built only when
+    constructing the `helper_sync.p_sessions` payload — same fields
+    stripped as before, but via an explicit struct boundary instead of
+    a serde attribute that affected both consumers.
+  - Defense-in-depth #1: NaN sanitization on `cpu_usage`. `sysinfo` on
+    Windows can return NaN for short-lived / protected processes where
+    the CPU% delta isn't computable. `serde_json` refuses to serialize
+    NaN; downstream arithmetic taints with NaN. Floor non-finite values
+    to `0.0`.
+  - Defense-in-depth #2: `(s.cpu_usage ?? 0).toFixed(1)` in `App.tsx` so
+    a missing field becomes `0.0%` rather than a render-time crash.
+  - Defense-in-depth #3: new `src/ErrorBoundary.tsx` wraps the App root
+    in `main.tsx`. Future render-time exceptions show a structured
+    fallback panel (error message + stack + component stack) instead of
+    silently unmounting the tree. Click a button to attempt recovery.
+  - Tooling fix: enable the Tauri `devtools` feature in `Cargo.toml` so
+    Ctrl+Shift+I / F12 opens DOM/console devtools in release builds.
+    The v0.2.10 diagnostic was harder than it needed to be because
+    devtools were disabled and we couldn't see the JS exception live.
+  - Forensic write-up:
+    [`PROJECT_FIX_2026-05-01_v0.2.11_sessions_white_screen.md`](PROJECT_FIX_2026-05-01_v0.2.11_sessions_white_screen.md)
+
 ## [0.2.10] — 2026-05-01
 
 ### Fixed

@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.2.10"
+version = "0.2.11"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -21,7 +21,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# `devtools` enables Ctrl+Shift+I / F12 to open Edge WebView2 / WebKit
+# devtools at runtime in release builds. The default release config
+# disables them, which made debugging the v0.2.10 Sessions-tab white-screen
+# crash on Windows much harder than it needed to be (no console, no JS
+# stack, no DOM inspector). Bundle size cost: negligible (the runtime
+# already includes the devtools shell on Windows; we just unblock the
+# keyboard hotkey).
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"

@@ -1353,8 +1353,10 @@ function Sessions({
                   >
                     {s.name}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono">{s.cpu_usage.toFixed(1)}%</td>
-                  <td className="px-3 py-2 text-right font-mono">{s.memory_mb} MB</td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {(s.cpu_usage ?? 0).toFixed(1)}%
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">{s.memory_mb ?? 0} MB</td>
                   <td className="px-3 py-2 text-right">
                     <ConfidenceDot c={s.collection_confidence} />
                   </td>

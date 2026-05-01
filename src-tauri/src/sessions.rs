@@ -129,8 +129,19 @@ static COMPILED_IGNORED: Lazy<Vec<Regex>> = Lazy::new(|| {
 static PATH_EXTRACT: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"(?:[A-Z]:\\|/(?:Users|home|opt|var|tmp|srv))[^\s"']+"#).unwrap());
 
-/// Payload shape sent to `helper_sync.p_sessions`. Fields mirror the
-/// Python collector output exactly (see `CollectedSession`).
+/// Payload shape returned via Tauri IPC AND mirrored to
+/// `helper_sync.p_sessions`. The IPC path needs ALL fields (the Sessions
+/// tab UI renders `cpu_usage`, `memory_mb`, etc.); the supabase path
+/// needs them stripped. We keep this struct fully-serializable and
+/// strip via the dedicated `SyncableSession` view in `sessions_payload`.
+///
+/// History: pre-v0.2.11 these UI fields were marked
+/// `#[serde(skip_serializing)]` for the supabase reason. That broke the
+/// IPC path too — the frontend got `undefined` for `cpu_usage`, and
+/// `App.tsx`'s `{s.cpu_usage.toFixed(1)}` threw at React render time,
+/// unmounting the whole app to white screen on Windows (the only OS
+/// where the GUI had ever launched, exposing the latent bug). Latent
+/// since v0.1.0; surfaced when v0.2.10 finally shipped a working NSIS.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiveSession {
     pub id: String,
@@ -146,15 +157,48 @@ pub struct LiveSession {
     pub started_at: String,
     pub last_active_at: String,
 
-    // CPU kept for the local Sessions tab UI; stripped before helper_sync
-    #[serde(skip_serializing)]
     pub cpu_usage: f32,
-    #[serde(skip_serializing)]
     pub memory_mb: u64,
-    #[serde(skip_serializing)]
     pub pids: Vec<u32>,
-    #[serde(skip_serializing)]
     pub command: String,
+}
+
+/// Stripped view of `LiveSession` used only for the `helper_sync.p_sessions`
+/// payload sent to Supabase. Omits the UI-only fields (cpu / memory / pids /
+/// command) so we don't leak local process state to the server.
+#[derive(Debug, Serialize)]
+struct SyncableSession<'a> {
+    id: &'a str,
+    name: &'a str,
+    provider: &'a str,
+    project: &'a str,
+    status: &'a str,
+    total_usage: i64,
+    exact_cost: Option<f64>,
+    requests: i64,
+    error_count: i64,
+    collection_confidence: &'a str,
+    started_at: &'a str,
+    last_active_at: &'a str,
+}
+
+impl<'a> From<&'a LiveSession> for SyncableSession<'a> {
+    fn from(s: &'a LiveSession) -> Self {
+        SyncableSession {
+            id: &s.id,
+            name: &s.name,
+            provider: &s.provider,
+            project: &s.project,
+            status: &s.status,
+            total_usage: s.total_usage,
+            exact_cost: s.exact_cost,
+            requests: s.requests,
+            error_count: s.error_count,
+            collection_confidence: &s.collection_confidence,
+            started_at: &s.started_at,
+            last_active_at: &s.last_active_at,
+        }
+    }
 }
 
 /// One snapshot of the running AI CLI processes on this machine.
@@ -217,7 +261,13 @@ pub fn collect_sessions() -> SessionsSnapshot {
         let started_at = DateTime::<Utc>::from_timestamp(proc.start_time() as i64, 0)
             .unwrap_or(now)
             .to_rfc3339();
+        // sysinfo on Windows can return NaN for short-lived / protected
+        // processes where the CPU% delta isn't computable. NaN serialises
+        // to non-JSON-compliant `NaN` literal which serde_json refuses;
+        // even when stripped, downstream arithmetic (total_usage below)
+        // taints with NaN. Floor to 0.0 defensively.
         let cpu = proc.cpu_usage();
+        let cpu = if cpu.is_finite() { cpu } else { 0.0 };
         let elapsed_secs = now
             .signed_duration_since(
                 DateTime::<Utc>::from_timestamp(proc.start_time() as i64, 0).unwrap_or(now),
@@ -478,10 +528,18 @@ fn deduplicate(sessions: Vec<LiveSession>) -> Vec<LiveSession> {
     merged
 }
 
-// Used by helper_sync payload — a stripped-down JSON with only server
-// fields (omits CPU / memory / pids which are UI-only).
+// Used by helper_sync payload. Maps each LiveSession through SyncableSession
+// to strip UI-only fields (cpu_usage, memory_mb, pids, command). Pre-v0.2.11
+// this used `#[serde(skip_serializing)]` on the LiveSession fields, which
+// also stripped them from the Tauri IPC response and crashed the Sessions
+// tab — see LiveSession doc comment.
 pub fn sessions_payload(snapshot: &SessionsSnapshot) -> serde_json::Value {
-    serde_json::to_value(&snapshot.sessions).unwrap_or(serde_json::json!([]))
+    let stripped: Vec<SyncableSession<'_>> = snapshot
+        .sessions
+        .iter()
+        .map(SyncableSession::from)
+        .collect();
+    serde_json::to_value(&stripped).unwrap_or(serde_json::json!([]))
 }
 
 #[cfg(test)]
