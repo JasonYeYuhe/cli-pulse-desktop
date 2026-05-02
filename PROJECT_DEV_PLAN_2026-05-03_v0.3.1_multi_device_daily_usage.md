@@ -314,46 +314,53 @@ $$ language plpgsql security definer
   set search_path = pg_catalog, public, extensions;
 ```
 
-### 4.3 `helper_sync` — replace 6-arg signature with 7-arg
+### 4.3 `helper_sync_daily_usage` — sibling RPC (NOT extending `helper_sync`)
 
-Same overload concern as §4.2 (Codex review): the 6-arg signature must
-be explicitly dropped before the 7-arg version is created. PostgREST
-will resolve old-shape 6-arg calls (from v0.2.13/v0.2.14 desktop
-builds in the wild) to the new 7-arg function via the default for the
-new parameter.
+**Pivot from spec v1.** When pulling the live `helper_sync` body to
+write the migration, the existing function turned out to be much
+richer than this spec assumed: per-device `pg_advisory_xact_lock`,
+sophisticated session/alert column shapes (with `name` / `requests`
+/ `error_count` / `collection_confidence` / `project_hash` / future-date
+clamps), and a two-loop provider-quotas model that handles `tiers` +
+`remaining` separately. Replacing that body wholesale to add a
+`p_daily_usage` parameter would carry too much regression risk for
+v0.3.1 — a single missed clamp or column-name typo would break the
+existing Mac scanner / Tauri client sync path immediately on deploy.
+
+So v0.3.1 introduces a **sibling RPC** instead:
 
 ```sql
-drop function if exists public.helper_sync(
-  uuid, text, jsonb, jsonb, jsonb, jsonb
-);
-
-create or replace function public.helper_sync(
+create or replace function public.helper_sync_daily_usage(
   p_device_id uuid,
   p_helper_secret text,
-  p_sessions jsonb default '[]'::jsonb,
-  p_alerts jsonb default '[]'::jsonb,
-  p_provider_remaining jsonb default '{}'::jsonb,
-  p_provider_tiers jsonb default '{}'::jsonb,
-  p_daily_usage jsonb default '[]'::jsonb   -- NEW (v0.3.1)
-)
-returns jsonb as $$
+  p_metrics jsonb default '[]'::jsonb
+) returns jsonb language plpgsql security definer
+  set search_path = pg_catalog, public, extensions
+as $$
 declare
   v_user_id uuid;
   v_metric jsonb;
   v_metric_count integer := 0;
   v_metric_error_count integer := 0;
-  -- (existing locals for sessions / alerts / etc.)
 begin
-  -- Existing auth check via SHA-256(p_helper_secret) match against
-  -- devices.helper_secret. Sets v_user_id from the device row.
+  -- Auth via device secret (SHA-256 hash match). Same pattern as
+  -- helper_sync / helper_heartbeat.
+  select user_id into v_user_id
+  from public.devices
+  where id = p_device_id
+    and helper_secret = encode(digest(p_helper_secret, 'sha256'), 'hex');
 
-  if jsonb_array_length(p_daily_usage) > 200 then
+  if v_user_id is null then
+    raise exception 'Device not found or unauthorized';
+  end if;
+
+  if jsonb_array_length(p_metrics) > 200 then
     raise exception 'Too many daily usage metrics (max 200)';
   end if;
 
-  -- (Existing sessions / alerts / provider sync loops here.)
-
-  for v_metric in select * from jsonb_array_elements(p_daily_usage) loop
+  -- Per-row sub-transaction so a single bad metric (malformed date,
+  -- null model, etc.) doesn't unwind the whole call.
+  for v_metric in select * from jsonb_array_elements(p_metrics) loop
     begin
       insert into public.daily_usage_metrics (
         user_id, device_id, metric_date, provider, model,
@@ -384,14 +391,27 @@ begin
   end loop;
 
   return jsonb_build_object(
-    -- Existing fields: sessions_synced, alerts_synced, ...
     'metrics_synced', v_metric_count,
     'metrics_errored', v_metric_error_count
   );
 end;
-$$ language plpgsql security definer
-  set search_path = pg_catalog, public, extensions;
+$$;
+
+grant execute on function public.helper_sync_daily_usage(uuid, text, jsonb)
+  to anon, authenticated;
 ```
+
+**Cost analysis.** 2 RPCs per Tauri sync cycle (helper_sync +
+helper_sync_daily_usage) instead of 1, at 2-min cadence. ≈ 720
+extra calls/day per active desktop; even at 100K active users
+that's 72M/day, well within Supabase's per-project rate limits and
+materially smaller than the current sessions/alerts traffic.
+
+**Rollback for the sibling RPC** is trivial: `drop function
+helper_sync_daily_usage`. Existing callers (Tauri v0.2.x) never
+called it. The bigger rollback concern (data loss when
+`device_id`-keyed rows collapse back to per-user PK) is unchanged
+from §4.1.
 
 ### 4.4 Read-path RPCs — aggregate across device_id
 

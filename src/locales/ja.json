@@ -124,7 +124,7 @@
     "paired_as": "「{{name}}」としてペアリングしました ({{id}}…)。",
     "device_unpaired": "ペアリングを解除しました。",
     "signed_in_as": "「{{name}}」で {{email}} としてサインインしました。",
-    "sync_ok": "{{sessions}} セッション、{{alerts}} 件の通知を同期しました。",
+    "sync_ok": "{{sessions}} セッション、{{alerts}} 件の通知、{{metrics}} 件の日次指標を同期しました。",
     "budget_saved": "予算を保存しました。",
     "err_budget_nonneg": "日次予算は 0 以上の数値である必要があります。",
     "err_weekly_nonneg": "週次予算は 0 以上の数値である必要があります。",

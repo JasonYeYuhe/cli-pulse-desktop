@@ -2,6 +2,77 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.3.1] — 2026-05-02
+
+### Fixed
+- **Multi-device daily-usage clobbering (P0)**. The previous schema
+  keyed `daily_usage_metrics` on `(user_id, metric_date, provider,
+  model)` — per-user, no device dimension. With v0.3.0 onboarding new
+  pure-Win/Linux users alongside their existing Mac scanner, every
+  device's 2-minute sync would race-clobber the same row, so dashboard
+  totals reflected whichever device synced last instead of the sum.
+  v0.3.1 adds `device_id` to the schema PK and aggregates across devices
+  in the dashboard read paths.
+
+### Added
+- **Tauri daily-usage upload restored** via a new
+  `helper_sync_daily_usage` RPC (sibling to `helper_sync` —
+  helper-credential auth, 200-row cap, per-row sub-transactions for
+  fault isolation). Reports `metrics_synced` / `metrics_errored`
+  counts in the manual-sync confirmation message.
+- **`get_daily_usage_by_device`** server-side RPC for a future
+  per-device breakdown UI ("Mac $5.20 + Win $1.80 = $7.00"). The
+  RPC is in place; the UI surface ships separately when ready.
+
+### Server-side migration
+Deployed via `migrate_v0.37_daily_usage_device_id.sql` in the main repo:
+- Add `device_id uuid` column with the nil-UUID sentinel
+  (`'00000000-0000-0000-0000-000000000000'`) as default; existing
+  rows backfill to the sentinel without a table rewrite.
+- Swap PK to `(user_id, device_id, metric_date, provider, model)`.
+- Add `devices_id_not_nil_uuid` check constraint so no real device
+  row can ever take the sentinel value (Codex review: explicit
+  INSERTs could supply nil despite the `gen_random_uuid()` default).
+- Replace `upsert_daily_usage` with a 2-arg version (`metrics`,
+  `p_device_id` default null). Validates device ownership against
+  `auth.uid()` when an explicit device_id is supplied (closes Codex's
+  device-name-leak vector through the new `get_daily_usage_by_device`
+  join).
+- Update `get_daily_usage` to SUM across `device_id` so the public
+  JSON shape stays unchanged for iOS/Android consumers.
+- Add `get_daily_usage_by_device(days)` RPC, joined on
+  `(id, user_id)` so the JOIN cannot leak foreign device names.
+- Old 1-arg `upsert_daily_usage(jsonb)` is explicitly DROPed before
+  the new 2-arg version is created (Codex review:
+  `CREATE OR REPLACE FUNCTION` with extra args creates a new overload
+  alongside the old, leaving a broken function callable in production).
+
+### macOS scanner
+- `APIClient.syncDailyUsage` now passes `HelperConfig.load()?.deviceId`
+  as `p_device_id` so the Mac contributes its own row alongside any
+  Tauri devices on the same account. Pre-pair / nil cases fall through
+  to the sentinel UUID for backward compatibility.
+
+### Architecture decision (recorded in spec)
+- Original spec proposed extending `helper_sync` with `p_daily_usage`.
+  When pulling the live `helper_sync` body to write the migration, the
+  existing function turned out to be much richer than the spec
+  assumed (per-device `pg_advisory_xact_lock`, sophisticated session
+  column shapes, future-date clamps, two-loop provider-quota model).
+  Replacing that body wholesale to add a parameter would carry
+  regression risk for v0.3.1. v0.3.1 uses a **sibling RPC**
+  (`helper_sync_daily_usage`) instead — 2 RPCs/cycle for Tauri
+  (negligible at 2-min cadence). Future v0.4.0 cleanup may unify
+  paths once both are stable.
+
+### Reviews
+- Gemini 3.1 Pro (product/UX): caught broken rollback strategy when
+  multi-device rows exist; spec now has a SUM-collapse rollback
+  script.
+- Codex GPT-5.4 (SQL/security): caught three FIX-FIRSTs (overload
+  semantics, nil-UUID device insertion, foreign device-name leak via
+  JOIN). All resolved before deploy.
+
 ## [0.3.0] — 2026-05-02
 
 ### Added

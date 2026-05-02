@@ -217,11 +217,66 @@ pub async fn helper_sync(req: &HelperSyncRequest<'_>) -> SupabaseResult<HelperSy
 }
 
 // ========================================================================
-// (Removed in v0.2.14) upsert_daily_usage — the RPC requires auth.uid()
-// but Tauri callers only have the helper's anon-key credentials, so the
-// call would always fail and surface as a sync error. Per-device daily
-// usage metrics return in v0.3.1 via a multi-device-aware path.
+// helper_sync_daily_usage (v0.3.1) — sibling RPC to helper_sync that
+// handles multi-device daily-usage upload via the helper credential
+// path. server-side derives user_id from (p_device_id, p_helper_secret)
+// match, so we cannot spoof another device. v0.2.14 had removed this
+// path; v0.3.1 reintroduces it through this dedicated RPC instead of
+// extending helper_sync (avoids touching the live helper_sync body).
 // ========================================================================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DailyUsageMetric {
+    pub metric_date: String,
+    pub provider: String,
+    pub model: String,
+    pub input_tokens: i64,
+    pub cached_tokens: i64,
+    pub output_tokens: i64,
+    pub cost: f64,
+}
+
+impl DailyUsageMetric {
+    pub fn from_entry(e: &crate::scanner::DailyEntry) -> Option<Self> {
+        // Swift APIClient explicitly filters out the `__claude_msg__` bucket
+        // so the server doesn't see a synthetic model row.
+        if e.model == crate::scanner::CLAUDE_MSG_BUCKET_MODEL {
+            return None;
+        }
+        Some(Self {
+            metric_date: e.date.clone(),
+            provider: e.provider.clone(),
+            model: e.model.clone(),
+            input_tokens: e.input_tokens,
+            cached_tokens: e.cached_tokens,
+            output_tokens: e.output_tokens,
+            cost: e.cost_usd.unwrap_or(0.0),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HelperSyncDailyUsageRequest<'a> {
+    pub p_device_id: &'a str,
+    pub p_helper_secret: &'a str,
+    pub p_metrics: Vec<DailyUsageMetric>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HelperSyncDailyUsageResponse {
+    #[serde(default)]
+    pub metrics_synced: i64,
+    #[serde(default)]
+    pub metrics_errored: i64,
+}
+
+pub async fn helper_sync_daily_usage(
+    req: &HelperSyncDailyUsageRequest<'_>,
+) -> SupabaseResult<HelperSyncDailyUsageResponse> {
+    let v = rpc("helper_sync_daily_usage", req).await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
 
 // ========================================================================
 // helper_heartbeat

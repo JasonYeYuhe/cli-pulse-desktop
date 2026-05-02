@@ -415,6 +415,14 @@ fn auth_friendly(e: auth::AuthError) -> String {
 struct SyncReport {
     sessions_synced: i64,
     alerts_synced: i64,
+    /// v0.3.1: rows the server accepted into daily_usage_metrics for
+    /// this device. 0 when the local scan produced no rows or when
+    /// helper_sync_daily_usage failed (logged, non-fatal).
+    metrics_synced: i64,
+    /// v0.3.1: rows the server rejected per-row inside
+    /// helper_sync_daily_usage. Non-zero indicates a malformed local
+    /// scan entry, not a client-wide failure.
+    metrics_errored: i64,
     total_cost_usd: f64,
     total_tokens: i64,
     files_scanned: u32,
@@ -460,15 +468,45 @@ async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
     .await
     .map_err(friendly)?;
 
-    // Daily-usage upload (the previous `upsert_daily_usage` step) is removed
-    // in v0.2.14. The RPC required a user JWT but Tauri only has the helper's
-    // anon-key credentials, so every call returned an error and bubbled up as
-    // a sync failure even when sessions+alerts had landed. v0.3.1 routes
-    // daily metrics through a multi-device-aware path.
+    // 5. helper_sync_daily_usage (v0.3.1) — multi-device-aware daily
+    //    metrics push. Sibling RPC to helper_sync; uses the same
+    //    device credentials. The server derives user_id from
+    //    (device_id, helper_secret) so callers can't spoof.
+    //
+    //    Best-effort: a daily-usage failure shouldn't fail the whole
+    //    sync (sessions + alerts already landed via helper_sync). We
+    //    log and continue; the next tick retries.
+    let metrics: Vec<_> = scan
+        .entries
+        .iter()
+        .filter_map(supabase::DailyUsageMetric::from_entry)
+        .collect();
+    let (metrics_synced, metrics_errored) = if metrics.is_empty() {
+        (0, 0)
+    } else {
+        match supabase::helper_sync_daily_usage(&supabase::HelperSyncDailyUsageRequest {
+            p_device_id: &cfg.device_id,
+            p_helper_secret: &cfg.helper_secret,
+            p_metrics: metrics,
+        })
+        .await
+        {
+            Ok(resp) => (resp.metrics_synced, resp.metrics_errored),
+            Err(e) => {
+                log::warn!(
+                    "helper_sync_daily_usage failed (non-fatal): {}",
+                    friendly(e)
+                );
+                (0, 0)
+            }
+        }
+    };
 
     Ok(SyncReport {
         sessions_synced: hs.sessions_synced,
         alerts_synced: hs.alerts_synced,
+        metrics_synced,
+        metrics_errored,
         total_cost_usd: scan.total_cost_usd,
         total_tokens: scan.total_tokens,
         files_scanned: scan.files_scanned,
@@ -535,9 +573,11 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
             match background_tick(&app).await {
                 Ok(Some(report)) => {
                     log::info!(
-                        "background sync ok — {} sessions, {} alerts",
+                        "background sync ok — {} sessions, {} alerts, {} metrics ({} errored)",
                         report.sessions_synced,
-                        report.alerts_synced
+                        report.alerts_synced,
+                        report.metrics_synced,
+                        report.metrics_errored
                     );
                     consecutive_failures = 0;
                 }

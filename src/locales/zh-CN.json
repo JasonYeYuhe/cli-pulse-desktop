@@ -124,7 +124,7 @@
     "paired_as": "已配对为\"{{name}}\" ({{id}}…)。",
     "device_unpaired": "已解除配对。",
     "signed_in_as": "已使用 {{email}} 在「{{name}}」登录。",
-    "sync_ok": "已同步 {{sessions}} 个会话、{{alerts}} 条通知。",
+    "sync_ok": "已同步 {{sessions}} 个会话、{{alerts}} 条通知、{{metrics}} 条每日指标。",
     "budget_saved": "预算已保存。",
     "err_budget_nonneg": "每日预算必须是非负数。",
     "err_weekly_nonneg": "每周预算必须是非负数。",
