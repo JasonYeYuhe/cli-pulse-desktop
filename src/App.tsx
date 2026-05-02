@@ -1439,6 +1439,7 @@ type DiagnosticSnapshot = {
   paired: boolean;
   device_id_short: string | null;
   cache_dir: string | null;
+  log_dir: string | null;
 };
 
 function AboutSection({ paired }: { paired: boolean }) {
@@ -1466,6 +1467,7 @@ function AboutSection({ paired }: { paired: boolean }) {
       `OS label: ${d.os}`,
       `Paired: ${d.paired ? `yes (device ${d.device_id_short ?? "?"}…)` : "no"}`,
       `Cache dir: ${d.cache_dir ?? "(none)"}`,
+      `Logs: ${d.log_dir ?? "(unavailable)"}`,
       `User agent: ${navigator.userAgent}`,
     ].join("\n");
   }

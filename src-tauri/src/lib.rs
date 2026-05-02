@@ -864,6 +864,10 @@ const SYNC_FAILURE_NOTIFY_THRESHOLD: u32 = 3;
 
 fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
     async_runtime::spawn(async move {
+        log::info!(
+            "Background sync loop started — first tick in 20s, then every {}s",
+            SYNC_INTERVAL.as_secs()
+        );
         // First tick after 20s so the UI feels responsive on startup
         // without racing the initial human pairing flow.
         tokio::time::sleep(Duration::from_secs(20)).await;
@@ -1034,6 +1038,30 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(move |app| {
+            // v0.3.5 — write a guaranteed-flushed startup banner so users
+            // always have SOMETHING in the log file regardless of paired
+            // state. v0.3.4 VM E2E found the log file was 0 bytes for an
+            // unpaired desktop because background_tick at debug level
+            // gets filtered, and Sentry init only logs when DSN is set.
+            // The banner runs after all plugins have installed, so the
+            // logger is guaranteed live.
+            use tauri::Manager;
+            log::info!(
+                "CLI Pulse Desktop v{} starting on {} ({})",
+                HELPER_VERSION,
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            );
+            if let Ok(dir) = app.path().app_log_dir() {
+                log::info!("Log directory: {}", dir.display());
+            }
+            match config::load() {
+                Ok(Some(cfg)) => log::info!(
+                    "Paired (device {}…)",
+                    &cfg.device_id.chars().take(8).collect::<String>()
+                ),
+                _ => log::info!("Not paired — sign in via Settings to start syncing"),
+            }
             spawn_background_sync(app.handle().clone(), stop_bg.clone());
             // System tray — Windows first-class, Linux works with AppIndicator
             // when libayatana-appindicator3 is installed, otherwise we log and

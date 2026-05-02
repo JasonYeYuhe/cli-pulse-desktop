@@ -2,6 +2,24 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.3.5] — 2026-05-02
+
+### Fixed
+- **Copy-diagnostics block missing the `Logs:` line.** v0.3.4 added
+  `log_dir` to the Rust `DiagnosticSnapshot` but the TypeScript
+  diagText() never rendered it. Found during v0.3.4 Win VM E2E.
+- **Log file appeared empty for unpaired desktops.** All Info-level
+  log calls in the v0.3.4 code path were gated on a successful sync,
+  which requires pairing — so a fresh-install unpaired user saw 0 KB
+  in `cli-pulse.log`. Now writes a guaranteed startup banner from
+  `.setup()` after all plugins install (so the logger is live):
+  `CLI Pulse Desktop vX.Y.Z starting on <os> (<arch>)`,
+  `Log directory: <path>`,
+  `Paired (device 12345678…)` or `Not paired — sign in via Settings`,
+  `Background sync loop started — first tick in 20s, then every 120s`.
+  Users now have evidence-of-life in the log file regardless of
+  paired state.
+
 ## [0.3.4] — 2026-05-02
 
 ### Added
