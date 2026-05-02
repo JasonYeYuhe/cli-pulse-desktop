@@ -134,12 +134,12 @@
   "auth": {
     "signin": {
       "heading": "登录 CLI Pulse",
-      "hint": "请输入邮箱,我们将发送 6 位验证码。新用户会自动注册。",
+      "hint": "请输入邮箱,我们将发送验证码。新用户会自动注册。",
       "email_label": "邮箱",
       "send_code": "发送验证码",
       "sending": "发送中…",
       "code_sent": "已向 {{email}} 发送验证码。",
-      "code_label": "6 位验证码",
+      "code_label": "验证码",
       "verify": "验证",
       "verifying": "验证中…",
       "resend": "重新发送",

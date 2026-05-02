@@ -2,6 +2,24 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.3.2] — 2026-05-02
+
+### Fixed
+- **OTP code field truncated to 6 digits, blocking sign-in (P0,
+  found during v0.3.1 Win VM E2E).** The Supabase Auth project this
+  desktop talks to is configured for 8-digit OTPs (verified against
+  the iOS + Android sign-in views, both of which accept variable
+  length). The desktop client hardcoded `maxLength={6}` and a
+  `.slice(0, 6)` truncation in the OTP input handler, so the last 2
+  digits of every code were silently dropped and verification failed.
+  Removed the hardcoded length cap on the OTP path; input now accepts
+  any digit-only string with a minimum of 4 to enable Verify. Updated
+  `auth.signin.code_label` / `auth.signin.hint` strings (en / zh-CN
+  / ja) to drop the "6-digit" wording.
+  - The legacy "pair from Mac menu bar" path keeps its 6-digit cap;
+    that code is server-minted by `generatePairingCode()` on the Mac
+    and is genuinely fixed-length.
+
 ## [0.3.1] — 2026-05-02
 
 ### Fixed

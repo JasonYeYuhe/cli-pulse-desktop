@@ -134,12 +134,12 @@
   "auth": {
     "signin": {
       "heading": "CLI Pulse にサインイン",
-      "hint": "メールアドレスを入力すると、6 桁のコードを送信します。新規ユーザーは自動的に登録されます。",
+      "hint": "メールアドレスを入力すると、認証コードを送信します。新規ユーザーは自動的に登録されます。",
       "email_label": "メールアドレス",
       "send_code": "コードを送信",
       "sending": "送信中…",
       "code_sent": "{{email}} にコードを送信しました。",
-      "code_label": "6 桁のコード",
+      "code_label": "認証コード",
       "verify": "認証",
       "verifying": "認証中…",
       "resend": "再送信",

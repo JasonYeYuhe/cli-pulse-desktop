@@ -134,12 +134,12 @@
   "auth": {
     "signin": {
       "heading": "Sign in to CLI Pulse",
-      "hint": "Enter your email — we'll send a 6-digit code. New users sign up automatically.",
+      "hint": "Enter your email — we'll send a verification code. New users sign up automatically.",
       "email_label": "Email",
       "send_code": "Send code",
       "sending": "Sending…",
       "code_sent": "We sent a code to {{email}}.",
-      "code_label": "6-digit code",
+      "code_label": "Verification code",
       "verify": "Verify",
       "verifying": "Verifying…",
       "resend": "Resend",

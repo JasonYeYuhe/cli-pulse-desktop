@@ -939,12 +939,11 @@ function Settings({
                 <input
                   type="text"
                   inputMode="numeric"
-                  pattern="\d{6}"
-                  maxLength={6}
+                  pattern="\d+"
                   value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="123456"
-                  className="w-32 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-center font-mono tracking-widest text-lg focus:outline-none focus:border-emerald-500"
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder=""
+                  className="w-44 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-center font-mono tracking-widest text-lg focus:outline-none focus:border-emerald-500"
                   autoFocus
                 />
               </div>
@@ -963,7 +962,7 @@ function Settings({
               <div className="flex gap-2">
                 <button
                   type="submit"
-                  disabled={busy || otpCode.length !== 6}
+                  disabled={busy || otpCode.length < 4}
                   className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
                 >
                   {busy ? t("auth.signin.verifying") : t("auth.signin.verify")}
