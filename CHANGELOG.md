@@ -2,6 +2,64 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.2] — 2026-05-02
+
+### Fixed
+- **Dual-writer payload alignment with Mac scanner.** `provider_quotas`
+  is keyed `(user_id, provider)` and helper_sync does a full-replace
+  upsert on `tiers` / `plan_type` / `reset_time`. v0.4.0 quota.rs
+  diverged from Mac's `ClaudeOAuthStrategy.swift` /
+  `ClaudeSourceStrategy.swift` in four places, so when both clients
+  were active for the same account, the row flickered every time the
+  alternate writer polled. v0.4.2 closes the gaps:
+  - **Sonnet/Opus fallback.** Mac emits the "Sonnet only" tier using
+    `seven_day_sonnet` OR `seven_day_opus`. v0.4.x previously only
+    read `seven_day_sonnet` and skipped the tier whenever Anthropic
+    served opus instead. quota.rs now adds a `seven_day_opus` field
+    and falls back to it (sonnet wins when both present).
+  - **Launch-window null semantics.** Mac's `parseLaunchWindow`
+    distinguishes "key absent" (skip the tier) from "key present
+    but null" (rolled out, unused — emit at 100% remaining). v0.4.x
+    used `Option<UsageWindow>` which collapses both to `None`.
+    Replaced with a `LaunchWindow` three-state enum + custom
+    deserializer mirroring the Swift semantics; applied to
+    `iguana_necktie` (Designs) and `seven_day_omelette` (Daily
+    Routines).
+  - **Plan-type formatting buckets.** Mac normalizes via lowercase
+    substring match across 8 buckets ("Max 20x", "Max 5x", "Ultra",
+    "Pro", "Team", "Enterprise", "Free", "Unknown"); v0.4.x used
+    exact equality + verbatim fallback. Re-implemented `format_plan`
+    to match Mac line-for-line.
+  - **Outer `reset_time` field.** Mac's helper payload includes a
+    top-level `reset_time` keyed off the 5h Window reset
+    (`ClaudeSourceStrategy.swift:217`); v0.4.x lib.rs::sync_now
+    omitted it. helper_sync writes whatever it sees to
+    `provider_quotas.reset_time`, so the absence flipped the column
+    NULL on every Win sync. quota.rs now exposes `session_reset` on
+    `QuotaSnapshot` and lib.rs threads it into the upload body.
+
+### Added
+- 6 new unit tests covering: opus fallback when sonnet absent, sonnet
+  precedence when both present, launch-window present-null at 100%,
+  launch-window absent skip, outer session_reset taken from 5h, outer
+  session_reset None when 5h missing. Existing tests updated for the
+  new plan-type bucket logic ("garbage_tier" → "Unknown" not verbatim,
+  None → "Unknown" not "Claude").
+
+### Reviews
+- **Codex GPT-5.4 (architecture review, 2026-05-02)** — independent
+  audit of dual-writer correctness vs Mac Swift collector. Verdict:
+  INV-1 PASS (tier names match), INV-3 PASS (0–100 percentage scale
+  matches), INV-2/4/5 FAIL with concrete file:line evidence. All
+  three FAILs resolved in this release. Without these fixes,
+  promoting v0.4.1 to Latest would have caused row flicker on any
+  account where Mac Swift menu-bar app and Win/Linux Tauri desktop
+  ran simultaneously.
+
+### Notes
+- No server-side schema changes. iOS / Android / Mac unaffected.
+- v0.4.x desktops on auto-update pick this up automatically.
+
 ## [0.4.1] — 2026-05-02
 
 ### Added

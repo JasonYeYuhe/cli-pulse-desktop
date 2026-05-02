@@ -766,11 +766,18 @@ async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
     let (p_provider_remaining, p_provider_tiers) = match &claude_quota {
         Some(snap) => {
             let remaining = json!({ "Claude": snap.remaining });
+            // v0.4.2 — outer `reset_time` mirrors Mac's
+            // `ClaudeSourceStrategy.swift:217` (5h Window reset) so
+            // helper_sync's `(v_tier_data->>'reset_time')::timestamptz`
+            // upsert produces the same column value Mac writes. Without
+            // it, the column flips NULL on every Win sync, flickering
+            // against Mac's writes for accounts with both clients active.
             let tiers = json!({
                 "Claude": {
                     "quota": snap.quota,
                     "remaining": snap.remaining,
                     "plan_type": snap.plan_type,
+                    "reset_time": snap.session_reset,
                     "tiers": snap.tiers,
                 }
             });
