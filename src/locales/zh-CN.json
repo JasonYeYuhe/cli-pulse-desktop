@@ -43,12 +43,28 @@
     "today_breakdown": "今日明细",
     "no_usage_today": "今日暂无使用。",
     "max_per_day": "峰值: {{value}}/ 天",
-    "label_today": "今天"
+    "label_today": "今天",
+    "account_today": "全部设备 · 今日",
+    "this_device": "本设备",
+    "tile_today_cost": "今日费用",
+    "tile_today_usage": "今日 Token",
+    "tile_today_sessions": "今日会话",
+    "tile_active_sessions": "活跃会话",
+    "tile_online_devices": "在线设备",
+    "tile_unresolved_alerts": "未解决告警"
   },
   "providers": {
     "active_days": "{{count}} 天活跃 · {{msgs}} 条消息",
     "no_usage": "近 30 天未检测到使用。",
-    "io_tokens": "{{value}} 条 I/O Token"
+    "io_tokens": "{{value}} 条 I/O Token",
+    "tier_left": "剩余 {{remaining}}/{{quota}}",
+    "quota_label": "配额",
+    "quota_unavailable": "暂无配额数据,请在手机端登录或配对 Mac。",
+    "server_unavailable": "无法从服务器加载套餐/配额,仅显示本地扫描汇总。",
+    "col_model": "模型",
+    "col_input": "输入",
+    "col_output": "输出",
+    "col_cost": "费用"
   },
   "sessions": {
     "header": "{{active}} 活跃 · 扫描 {{total}} 个进程 · 刷新于 {{time}}",

@@ -160,6 +160,48 @@ pub async fn register_desktop_helper(
 }
 
 // ========================================================================
+// unregister_desktop_helper (v0.3.4) — server-side unpair. Deletes the
+// device row gated on (device_id, helper_secret) match. See spec
+// PROJECT_DEV_PLAN_2026-05-02_v0.3.4_dashboard_parity.md §4.1.
+//
+// Privacy: returns the same `{deleted: false, reason: 'not_found'}`
+// shape for both genuinely-missing and hash-mismatch — callers without
+// a valid secret cannot enumerate device UUIDs.
+//
+// Recomputes profiles.paired from post-DELETE count in the same
+// RPC tx so a multi-device account whose Laptop A unregisters while
+// Laptop B is still active does not get its paired flag flipped to
+// false (Codex review fix).
+// ========================================================================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnregisterDesktopHelperRequest<'a> {
+    pub p_device_id: &'a str,
+    pub p_helper_secret: &'a str,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnregisterDesktopHelperResponse {
+    #[serde(default)]
+    pub deleted: bool,
+    /// Number of devices remaining for this user after the call. Only
+    /// meaningful when `deleted` is true.
+    #[serde(default)]
+    pub remaining_devices: i64,
+    /// Present when `deleted` is false; "not_found" for both the
+    /// genuinely-missing and hash-mismatch cases.
+    pub reason: Option<String>,
+}
+
+pub async fn unregister_desktop_helper(
+    req: &UnregisterDesktopHelperRequest<'_>,
+) -> SupabaseResult<UnregisterDesktopHelperResponse> {
+    let v = rpc("unregister_desktop_helper", req).await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+// ========================================================================
 // device_status (v0.3.0) — used by the helper_sync error classifier
 // (see lib.rs::auth_account_check). Returns one of:
 //   "healthy"          — keep syncing
@@ -274,6 +316,106 @@ pub async fn helper_sync_daily_usage(
     req: &HelperSyncDailyUsageRequest<'_>,
 ) -> SupabaseResult<HelperSyncDailyUsageResponse> {
     let v = rpc("helper_sync_daily_usage", req).await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+// ========================================================================
+// Dashboard read RPCs (v0.3.4) — user-JWT-authenticated. Caller passes
+// the access_token via rpc_with_auth. Shapes mirror what iOS / Android
+// already consume from the same RPCs in app_rpc.sql.
+// ========================================================================
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DashboardSummary {
+    #[serde(default)]
+    pub today_usage: i64,
+    #[serde(default)]
+    pub today_cost: f64,
+    #[serde(default)]
+    pub active_sessions: i64,
+    #[serde(default)]
+    pub online_devices: i64,
+    #[serde(default)]
+    pub unresolved_alerts: i64,
+    #[serde(default)]
+    pub today_sessions: i64,
+}
+
+pub async fn dashboard_summary(user_jwt: &str) -> SupabaseResult<DashboardSummary> {
+    let v = rpc_with_auth("dashboard_summary", &serde_json::json!({}), Some(user_jwt)).await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProviderTier {
+    pub name: String,
+    #[serde(default)]
+    pub quota: i64,
+    #[serde(default)]
+    pub remaining: i64,
+    #[serde(default)]
+    pub reset_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProviderSummaryRow {
+    pub provider: String,
+    #[serde(default)]
+    pub today_usage: i64,
+    #[serde(default)]
+    pub total_usage: i64,
+    #[serde(default)]
+    pub estimated_cost: f64,
+    #[serde(default)]
+    pub estimated_cost_today: f64,
+    #[serde(default)]
+    pub estimated_cost_30_day: f64,
+    #[serde(default)]
+    pub remaining: Option<i64>,
+    #[serde(default)]
+    pub quota: Option<i64>,
+    #[serde(default)]
+    pub plan_type: Option<String>,
+    #[serde(default)]
+    pub reset_time: Option<String>,
+    #[serde(default)]
+    pub tiers: Vec<ProviderTier>,
+}
+
+pub async fn provider_summary(user_jwt: &str) -> SupabaseResult<Vec<ProviderSummaryRow>> {
+    let v = rpc_with_auth("provider_summary", &serde_json::json!({}), Some(user_jwt)).await?;
+    check_rpc_error(&v)?;
+    // provider_summary returns a JSON array directly (not an object).
+    Ok(serde_json::from_value(v)?)
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DailyUsageRow {
+    pub metric_date: String,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub input_tokens: i64,
+    #[serde(default)]
+    pub cached_tokens: i64,
+    #[serde(default)]
+    pub output_tokens: i64,
+    #[serde(default)]
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GetDailyUsageRequest {
+    days: i64,
+}
+
+pub async fn get_daily_usage(days: u32, user_jwt: &str) -> SupabaseResult<Vec<DailyUsageRow>> {
+    let req = GetDailyUsageRequest {
+        days: days as i64,
+    };
+    let v = rpc_with_auth("get_daily_usage", &req, Some(user_jwt)).await?;
     check_rpc_error(&v)?;
     Ok(serde_json::from_value(v)?)
 }

@@ -2,6 +2,99 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.3.4] — 2026-05-02
+
+### Added
+- **Server-side dashboard parity** — when signed in, the Providers
+  and Overview tabs now display the same plan/quota/tier/cross-device
+  metrics that iOS / Android show for the account.
+  - **Providers tab** picks up plan badge, quota bar, and tier bars
+    (e.g. Claude Max's "5h Window 80/100", "Weekly 66/100", "Sonnet
+    only 98/100", "Designs", "Daily Routines"). When a provider has
+    no server-side quota data, an honest "Quota data unavailable"
+    line appears instead of a fake bar.
+  - **Overview tab** gains a 6-tile "All devices — today" grid above
+    the existing local-scan section: today_cost, today_usage,
+    today_sessions, active_sessions, online_devices,
+    unresolved_alerts. The local-scan tiles are now labeled "This
+    device" so users can tell server-aggregated from local.
+  - All read paths use the existing v0.3.0 OTP infrastructure:
+    refresh_token from the OS keychain, lazy/on-demand refresh, 30s
+    in-memory cache scoped by user_id and explicitly cleared at
+    every auth transition.
+- **Single-instance enforcement** (user-flagged 2026-05-02). Launching
+  CLI Pulse twice now focuses the existing window instead of spawning
+  a duplicate. Uses `tauri-plugin-single-instance` (named-mutex on
+  Windows, Unix domain socket on macOS/Linux).
+- **File logging** (audit-flagged "no on-disk logs" gap). All app logs
+  now write to:
+  - Windows: `%LOCALAPPDATA%\dev.clipulse.desktop\logs\cli-pulse.log`
+  - macOS: `~/Library/Logs/dev.clipulse.desktop/cli-pulse.log`
+  - Linux: `~/.local/share/dev.clipulse.desktop/logs/cli-pulse.log`
+  Rotation: 5 MB per file, KeepAll. The path is included in the
+  Copy-diagnostics block on the About panel so support tickets can
+  point at it directly.
+- **Server-side unpair**. `Unpair this device` now actually removes
+  the device row from Supabase (via the new strictly-additive
+  `unregister_desktop_helper` RPC), instead of leaving an orphan that
+  accumulated each re-pair. Best-effort: on transient network errors
+  the local clear still proceeds (the next sign-in supersedes the
+  orphan via `register_desktop_helper`).
+
+### Server-side
+Strictly-additive RPC deployed via
+`migrate_v0.38_unregister_desktop_helper.sql` in the main repo:
+
+- `unregister_desktop_helper(p_device_id, p_helper_secret)` — anon-
+  callable but secret-gated. Returns `{deleted: true,
+  remaining_devices}` on success, `{deleted: false, reason:
+  'not_found'}` for both genuinely-missing rows and hash-mismatch
+  (privacy invariant — same shape as `device_status`).
+- Recomputes `profiles.paired = (count post-DELETE > 0)` in the same
+  RPC tx so a multi-device account whose Laptop A unregisters while
+  Laptop B is still active does NOT get its paired flag flipped to
+  false (Codex review fix).
+
+### Privacy
+- Refresh-token rotation is now persisted to the keychain BEFORE the
+  dashboard RPC call. A process crash between refresh and RPC no
+  longer loses the rotated token (Codex review fix).
+- Cache scoping is anchored by user_id with belt-and-suspenders
+  mismatch checks on read; all auth transitions (sign-in, sign-out,
+  unpair, refresh-failure, helper_sync error classifier) explicitly
+  invalidate the cache so a re-sign-in as a different user can never
+  see the previous account's tile data.
+
+### Translation review
+Gemini 3.1 Pro reviewed the new `auth.signin.*`, `overview.tile_*`,
+and `providers.*` keys for zh-CN + ja. Caught:
+- "Unresolved alerts" — `通知` (notification) → `告警` (zh-CN, matches
+  iOS/Mac convention) and `通知` → `アラート` (ja).
+- `剩 X/Y` (zh-CN) → `剩余 X/Y` (more polished UI copy).
+- `计划` → `套餐` (zh-CN; "plan" in SaaS context).
+- `本日のトークン` (ja) → `本日のトークン使用量` (clarifies that it's a
+  metric, not a literal token list).
+- `クォータ` retained for ja (matches iOS/Mac existing localization).
+
+### Reviews
+- VM Claude broader audit (2026-05-02) surfaced the zero-call-sites
+  parity gap, the no-on-disk-logs gap, and the orphan-device-row
+  cleanup gap — all addressed.
+- Codex GPT-5.4 reviewed this spec and surfaced four FIX-FIRSTs:
+  multi-device race on `paired = false`, unpair flow's "call server
+  then clear local" being unsafe on transient errors, refresh-token
+  rotation not persisted in the wrapper, and 30s cache leaking
+  across sign-out boundaries. All resolved before execution.
+
+### Notes
+- v0.3.3 desktops on auto-update will land on v0.3.4 within minutes.
+  Existing pairing survives the upgrade; the v0.3.4 plugins
+  (single-instance, log) initialize on first launch with no
+  user-visible migration.
+- The new dashboard reads only fire when paired AND the user has
+  signed in via OTP. Pure-Win/Linux users without a paired Mac will
+  see "Quota data unavailable" — honest empty state, not a fake bar.
+
 ## [0.3.3] — 2026-05-02
 
 ### Fixed

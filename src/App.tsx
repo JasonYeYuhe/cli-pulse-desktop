@@ -269,8 +269,8 @@ export default function App() {
             {error}
           </div>
         )}
-        {tab === "overview" && <Overview scan={scan} loading={loading} />}
-        {tab === "providers" && <Providers scan={scan} />}
+        {tab === "overview" && <Overview scan={scan} loading={loading} paired={!!config?.paired} />}
+        {tab === "providers" && <Providers scan={scan} paired={!!config?.paired} />}
         {tab === "sessions" && (
           <Sessions
             snapshot={sessions}
@@ -314,7 +314,26 @@ function PairBadge({ paired }: { paired: boolean }) {
   );
 }
 
-function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean }) {
+// v0.3.4 — server-side dashboard summary, mirrors `dashboard_summary`
+// RPC shape from app_rpc.sql:11.
+type DashboardSummaryRow = {
+  today_usage: number;
+  today_cost: number;
+  active_sessions: number;
+  online_devices: number;
+  unresolved_alerts: number;
+  today_sessions: number;
+};
+
+function Overview({
+  scan,
+  loading,
+  paired,
+}: {
+  scan: ScanResult | null;
+  loading: boolean;
+  paired: boolean;
+}) {
   const { t } = useTranslation();
   const today = useMemo(() => {
     if (!scan) return null;
@@ -329,21 +348,89 @@ function Overview({ scan, loading }: { scan: ScanResult | null; loading: boolean
     return { cost, tokens, msgs };
   }, [scan]);
 
+  // v0.3.4 — fetch server-aggregated dashboard summary when paired.
+  // This is the cross-device "today" view (Mac + Win + Linux + iOS all
+  // contributing to the same account). Failures are soft — the
+  // local-scan tiles below stay useful.
+  const [serverDash, setServerDash] = useState<DashboardSummaryRow | null>(null);
+  useEffect(() => {
+    if (!paired) {
+      setServerDash(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<DashboardSummaryRow>("get_dashboard_summary")
+      .then((d) => {
+        if (!cancelled) setServerDash(d);
+      })
+      .catch(() => {
+        if (!cancelled) setServerDash(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [paired]);
+
   if (!scan && loading) return <Skeleton />;
   if (!scan) return null;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label={t("overview.today_cost")} value={today ? formatUSD(today.cost) : "—"} hint={scan.today_key} />
-        <StatCard label={t("overview.today_tokens")} value={today ? formatInt(today.tokens) : "—"} hint={t("overview.tokens_hint")} />
-        <StatCard label={t("overview.today_messages")} value={today ? formatInt(today.msgs) : "—"} hint={t("overview.claude_only_hint")} />
-        <StatCard
-          label={t("overview.last_n_days_cost", { days: scan.days_scanned })}
-          value={formatUSD(scan.total_cost_usd)}
-          hint={t("overview.files_scanned_hint", { n: scan.files_scanned })}
-        />
-      </div>
+      {/* v0.3.4 — server-aggregated tiles. Visible only when paired and
+          the dashboard_summary RPC returned data. Six tiles match the
+          Mac/iOS metrics grid. */}
+      {paired && serverDash && (
+        <section>
+          <h2 className="text-sm font-semibold text-neutral-400 mb-2">
+            {t("overview.account_today")}
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <StatCard
+              label={t("overview.tile_today_cost")}
+              value={formatUSD(serverDash.today_cost)}
+            />
+            <StatCard
+              label={t("overview.tile_today_usage")}
+              value={formatInt(serverDash.today_usage)}
+              hint={t("overview.tokens_hint")}
+            />
+            <StatCard
+              label={t("overview.tile_today_sessions")}
+              value={formatInt(serverDash.today_sessions)}
+            />
+            <StatCard
+              label={t("overview.tile_active_sessions")}
+              value={formatInt(serverDash.active_sessions)}
+            />
+            <StatCard
+              label={t("overview.tile_online_devices")}
+              value={formatInt(serverDash.online_devices)}
+            />
+            <StatCard
+              label={t("overview.tile_unresolved_alerts")}
+              value={formatInt(serverDash.unresolved_alerts)}
+            />
+          </div>
+        </section>
+      )}
+
+      <section>
+        {paired && serverDash && (
+          <h2 className="text-sm font-semibold text-neutral-400 mb-2">
+            {t("overview.this_device")}
+          </h2>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <StatCard label={t("overview.today_cost")} value={today ? formatUSD(today.cost) : "—"} hint={scan.today_key} />
+          <StatCard label={t("overview.today_tokens")} value={today ? formatInt(today.tokens) : "—"} hint={t("overview.tokens_hint")} />
+          <StatCard label={t("overview.today_messages")} value={today ? formatInt(today.msgs) : "—"} hint={t("overview.claude_only_hint")} />
+          <StatCard
+            label={t("overview.last_n_days_cost", { days: scan.days_scanned })}
+            value={formatUSD(scan.total_cost_usd)}
+            hint={t("overview.files_scanned_hint", { n: scan.files_scanned })}
+          />
+        </div>
+      </section>
 
       <section>
         <h2 className="text-sm font-semibold text-neutral-400 mb-2">{t("overview.trend_title")}</h2>
@@ -527,9 +614,72 @@ type ProviderAgg = {
   models: Map<string, { cost: number; input: number; output: number; cached: number }>;
 };
 
-function Providers({ scan }: { scan: ScanResult | null }) {
+// v0.3.4 — server-side provider summary row, mirrors the JSON shape
+// returned by the `provider_summary` RPC in app_rpc.sql:62. iOS / Android
+// already consume this; the desktop now joins them.
+type ProviderTier = {
+  name: string;
+  quota: number;
+  remaining: number;
+  reset_time: string | null;
+};
+
+type ProviderSummaryRow = {
+  provider: string;
+  today_usage: number;
+  total_usage: number;
+  estimated_cost: number;        // 7-day rolling
+  estimated_cost_today: number;
+  estimated_cost_30_day: number;
+  remaining: number | null;
+  quota: number | null;
+  plan_type: string | null;
+  reset_time: string | null;
+  tiers: ProviderTier[];
+};
+
+function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // v0.3.4 — fetch server-side provider quota / plan / tiers when paired.
+  // Keyed by `paired` so a sign-in/sign-out cycle re-fetches. Errors are
+  // swallowed to a soft-empty state — the local-scan card below stays
+  // useful regardless.
+  const [serverRows, setServerRows] = useState<ProviderSummaryRow[] | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!paired) {
+      setServerRows(null);
+      setServerError(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<ProviderSummaryRow[]>("get_provider_summary")
+      .then((rows) => {
+        if (!cancelled) {
+          setServerRows(rows);
+          setServerError(null);
+        }
+      })
+      .catch((e: any) => {
+        if (!cancelled) {
+          setServerRows(null);
+          setServerError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [paired]);
+  // Index server rows by provider name for O(1) lookup during render.
+  const serverByProvider = useMemo(() => {
+    const m = new Map<string, ProviderSummaryRow>();
+    if (serverRows) {
+      for (const row of serverRows) m.set(row.provider, row);
+    }
+    return m;
+  }, [serverRows]);
 
   const grouped = useMemo<ProviderAgg[] | null>(() => {
     if (!scan) return null;
@@ -581,12 +731,18 @@ function Providers({ scan }: { scan: ScanResult | null }) {
 
   return (
     <div className="space-y-3">
+      {paired && serverError && (
+        <div className="text-xs text-neutral-500 px-3 py-2 rounded-md border border-neutral-800/60 bg-neutral-900/30">
+          {t("providers.server_unavailable")}
+        </div>
+      )}
       {grouped.map((v) => {
         const isOpen = expanded.has(v.provider);
         const barPct = (v.cost / maxCost) * 100;
         const sortedModels = Array.from(v.models.entries())
           .sort((a, b) => b[1].cost - a[1].cost)
           .slice(0, 10);
+        const srv = serverByProvider.get(v.provider);
         return (
           <div
             key={v.provider}
@@ -600,7 +756,10 @@ function Providers({ scan }: { scan: ScanResult | null }) {
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <span className="text-neutral-500 text-xs w-4">{isOpen ? "▼" : "▶"}</span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold">{v.provider}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold">{v.provider}</span>
+                    {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
+                  </div>
                   <div className="text-xs text-neutral-500">
                     {t("providers.active_days", { count: v.days.size, msgs: formatInt(v.msgs) })}
                     {v.models.size > 0 && <span className="ml-2">· {v.models.size} models</span>}
@@ -621,15 +780,85 @@ function Providers({ scan }: { scan: ScanResult | null }) {
               </div>
             </button>
 
+            {/* v0.3.4 — server-side quota: tier bars per the iOS/macOS Mac
+                app's UI pattern. Falls back to a single overall bar when
+                tiers is empty AND quota > 0 AND provider != "Claude"
+                (Claude's empty-tiers state means data unavailable, not
+                "100% remaining" — matches the Mac heuristic). */}
+            {paired && srv && (
+              <div className="px-4 pb-3 pt-2 border-t border-neutral-800/50 space-y-2">
+                {srv.tiers.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {srv.tiers.map((tier) => {
+                      const used = Math.max(0, tier.quota - tier.remaining);
+                      const usePct = tier.quota > 0 ? (used / tier.quota) * 100 : 0;
+                      const color =
+                        usePct >= 90
+                          ? "from-rose-500 to-red-500"
+                          : usePct >= 60
+                            ? "from-amber-400 to-orange-500"
+                            : "from-emerald-500 to-cyan-500";
+                      return (
+                        <div key={tier.name} className="text-xs">
+                          <div className="flex justify-between text-neutral-400 mb-0.5">
+                            <span>{tier.name}</span>
+                            <span className="font-mono">
+                              {t("providers.tier_left", {
+                                remaining: formatInt(tier.remaining),
+                                quota: formatInt(tier.quota),
+                              })}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
+                            <div
+                              className={`h-full bg-gradient-to-r ${color}`}
+                              style={{ width: `${Math.min(100, usePct)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : srv.quota && srv.quota > 0 && srv.provider !== "Claude" ? (
+                  // Single overall bar for non-Claude providers with a flat quota.
+                  <div className="text-xs">
+                    <div className="flex justify-between text-neutral-400 mb-0.5">
+                      <span>{t("providers.quota_label")}</span>
+                      <span className="font-mono">
+                        {t("providers.tier_left", {
+                          remaining: formatInt(srv.remaining ?? 0),
+                          quota: formatInt(srv.quota),
+                        })}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"
+                        style={{
+                          width: `${Math.min(100, srv.quota > 0 ? ((srv.quota - (srv.remaining ?? 0)) / srv.quota) * 100 : 0)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  // Claude with empty tiers, or any provider where quota
+                  // data isn't available — be honest, don't fake a bar.
+                  <div className="text-xs text-neutral-500">
+                    {t("providers.quota_unavailable")}
+                  </div>
+                )}
+              </div>
+            )}
+
             {isOpen && sortedModels.length > 0 && (
               <div className="px-4 pb-4 pt-1 border-t border-neutral-800/50">
                 <table className="w-full text-xs">
                   <thead className="text-neutral-500">
                     <tr>
-                      <th className="text-left font-normal py-1.5">Model</th>
-                      <th className="text-right font-normal py-1.5">Input</th>
-                      <th className="text-right font-normal py-1.5">Output</th>
-                      <th className="text-right font-normal py-1.5">Cost</th>
+                      <th className="text-left font-normal py-1.5">{t("providers.col_model")}</th>
+                      <th className="text-right font-normal py-1.5">{t("providers.col_input")}</th>
+                      <th className="text-right font-normal py-1.5">{t("providers.col_output")}</th>
+                      <th className="text-right font-normal py-1.5">{t("providers.col_cost")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -652,6 +881,18 @@ function Providers({ scan }: { scan: ScanResult | null }) {
         <div className="text-sm text-neutral-500">{t("providers.no_usage")}</div>
       )}
     </div>
+  );
+}
+
+// v0.3.4 — Plan-type badge. Matches the Mac convention: Free/free →
+// orange (signals "upgrade available"); anything else → emerald.
+function PlanBadge({ plan }: { plan: string }) {
+  const isFree = plan.toLowerCase() === "free";
+  const cls = isFree
+    ? "border border-orange-700/60 text-orange-300 bg-orange-950/40"
+    : "border border-emerald-700/60 text-emerald-300 bg-emerald-950/40";
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`}>{plan}</span>
   );
 }
 

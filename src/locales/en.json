@@ -43,12 +43,28 @@
     "today_breakdown": "Today's breakdown",
     "no_usage_today": "No usage today.",
     "max_per_day": "Max: {{value}}/day",
-    "label_today": "Today"
+    "label_today": "Today",
+    "account_today": "All devices — today",
+    "this_device": "This device",
+    "tile_today_cost": "Today's cost",
+    "tile_today_usage": "Today's tokens",
+    "tile_today_sessions": "Today's sessions",
+    "tile_active_sessions": "Active sessions",
+    "tile_online_devices": "Online devices",
+    "tile_unresolved_alerts": "Unresolved alerts"
   },
   "providers": {
     "active_days": "{{count}} active days · {{msgs}} msgs",
     "no_usage": "No usage found in last 30 days.",
-    "io_tokens": "{{value}} I/O tokens"
+    "io_tokens": "{{value}} I/O tokens",
+    "tier_left": "{{remaining}}/{{quota}} left",
+    "quota_label": "Quota",
+    "quota_unavailable": "Quota data unavailable — sign in on your phone or pair a Mac.",
+    "server_unavailable": "Couldn't load plan/quota from the server. Showing local-scan totals only.",
+    "col_model": "Model",
+    "col_input": "Input",
+    "col_output": "Output",
+    "col_cost": "Cost"
   },
   "sessions": {
     "header": "{{active}} active · {{total}} processes scanned · refreshed {{time}}",
