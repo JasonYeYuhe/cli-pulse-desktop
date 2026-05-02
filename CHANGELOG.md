@@ -333,11 +333,12 @@ Deployed via `migrate_v0.37_daily_usage_device_id.sql` in the main repo:
     binary across `cargo build`, `cargo tauri build`, and the
     bundler.
   - **CI guard added** (`.github/workflows/release.yml`):
-    post-build verification step now asserts NSIS ≥ 3 MB,
-    `.deb`/`.rpm` ≥ 3 MB, AppImage ≥ 30 MB, AND inspects each
-    archive for the GUI binary by name (`7z l` for NSIS,
-    `dpkg-deb -c` for .deb). Failure makes the matrix job red
-    so the human un-draft gate notices.
+    post-build verification step now asserts NSIS ≥ 1.5 MB
+    (LZMA-compressed; healthy build is ~2.7 MB, broken was
+    ~0.6 MB), `.deb`/`.rpm` ≥ 3 MB, AppImage ≥ 30 MB, AND
+    inspects each archive for the GUI binary by name (`7z l`
+    for NSIS, `dpkg-deb -c` for .deb). Failure makes the matrix
+    job red so the human un-draft gate notices.
   - Caught by first real human Windows GUI test on Azure VM —
     13 prior releases passed CI matrix because CI only built,
     never installed-and-launched. Adopting "real-VM smoke gate

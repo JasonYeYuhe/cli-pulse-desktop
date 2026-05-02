@@ -134,7 +134,11 @@ WebView2 shims).
 Added a **post-build regression guard** that runs after `tauri-action`
 inside the same matrix job:
 
-- Asserts NSIS `*-setup.exe` ≥ 3 MB.
+- Asserts NSIS `*-setup.exe` ≥ 1.5 MB. (NSIS uses LZMA, so
+  even a healthy GUI build compresses to ~2.7 MB. Broken-binary
+  baseline was ~0.6 MB; 1.5 MB sits ~2.5× above broken and
+  ~45% below typical, leaving headroom for normal growth.
+  Originally landed at 3 MB and corrected in commit 0ee047f.)
 - Asserts Linux `.deb` ≥ 3 MB, `.rpm` ≥ 3 MB, AppImage ≥ 30 MB.
 - Inspects NSIS via `7z l` and asserts `cli-pulse-desktop.exe` is
   present.
