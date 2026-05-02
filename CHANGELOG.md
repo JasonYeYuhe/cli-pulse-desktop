@@ -2,6 +2,24 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.1] — 2026-05-02
+
+### Added
+- **Quota success log line.** v0.4.0's `quota.rs` only emitted log
+  output on the failure paths (debug for missing creds / expired
+  token, warn on API error) — the success branch was silent, so
+  `cli-pulse.log` had no evidence the new collector was running on
+  paired desktops with valid `.credentials.json`. Now writes
+  `Claude quota updated: plan=<>, tiers=<n>, remaining=<n>` at info
+  level once per successful fetch (every ~2-min sync cycle), so VM
+  E2E and real-user diagnostics can confirm the collector is firing.
+
+### Notes
+- No behavior change. Only a single new `log::info!` call in
+  `collect_claude()`'s `Ok` branch.
+- iOS / Android / Mac unaffected.
+- v0.4.0 desktops on auto-update: pick this up automatically.
+
 ## [0.4.0] — 2026-05-02
 
 ### Added

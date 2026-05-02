@@ -121,7 +121,16 @@ pub async fn collect_claude() -> Option<QuotaSnapshot> {
         return None;
     }
     match fetch_usage(&creds.access_token).await {
-        Ok(usage) => Some(map_to_snapshot(&creds, &usage)),
+        Ok(usage) => {
+            let snap = map_to_snapshot(&creds, &usage);
+            log::info!(
+                "Claude quota updated: plan={}, tiers={}, remaining={}",
+                snap.plan_type,
+                snap.tiers.len(),
+                snap.remaining,
+            );
+            Some(snap)
+        }
         Err(e) => {
             log::warn!("Claude OAuth /usage fetch failed (non-fatal): {e}");
             None
