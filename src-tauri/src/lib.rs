@@ -5,9 +5,11 @@
 //! round-trips, periodic 2-minute sync tick.
 
 pub mod alerts;
+pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod creds;
+pub mod keychain;
 pub mod notify;
 pub mod paths;
 pub mod pricing;
@@ -227,6 +229,7 @@ async fn pair_device(
         helper_version: HELPER_VERSION.to_string(),
         helper_secret: resp.helper_secret,
         thresholds: alerts::AlertThresholds::default(),
+        email: String::new(),
     };
     config::save(&cfg).map_err(|e| format!("Failed to save config: {e}"))?;
     notify::pair_success(&app, &name);
@@ -239,7 +242,171 @@ async fn pair_device(
 
 #[tauri::command]
 fn unpair_device() -> Result<(), String> {
+    // Best-effort: drop the keychain refresh token alongside the helper
+    // config. Either failure is non-fatal — the goal is to leave the
+    // device in a clean state.
+    let _ = keychain::delete_refresh_token();
     config::clear().map_err(|e| e.to_string())
+}
+
+// ------------------------------------------------------------------------
+// v0.3.0 — direct email OTP sign-in commands.
+// ------------------------------------------------------------------------
+
+#[tauri::command]
+async fn auth_send_otp(email: String) -> Result<(), String> {
+    let email = email.trim();
+    if email.is_empty() {
+        return Err("Email is empty".into());
+    }
+    auth::send_otp(email).await.map_err(auth_friendly)
+}
+
+#[tauri::command]
+async fn auth_verify_otp(
+    app: tauri::AppHandle,
+    email: String,
+    code: String,
+    device_name: Option<String>,
+) -> Result<PairResult, String> {
+    let email = email.trim().to_string();
+    let code = code.trim().to_string();
+    if email.is_empty() || code.is_empty() {
+        return Err("Email or code is empty".into());
+    }
+
+    // 1. Verify OTP → tokens.
+    let session = auth::verify_otp(&email, &code).await.map_err(auth_friendly)?;
+
+    // 2. Mint device credentials with the user JWT.
+    let resolved_name = device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(default_device_name);
+    let req = supabase::RegisterDesktopHelperRequest {
+        p_device_name: &resolved_name,
+        p_device_type: device_type(),
+        p_system: &system_label(),
+        p_helper_version: HELPER_VERSION,
+    };
+    let resp = supabase::register_desktop_helper(&req, &session.access_token)
+        .await
+        .map_err(friendly)?;
+
+    // 3. Persist refresh token to OS keychain. Fail-closed if the
+    //    backend is missing — that signal needs to reach the UI so the
+    //    user knows to install libsecret (Linux) or fall back to Mac
+    //    pairing.
+    if let Err(e) = keychain::store_refresh_token(&session.refresh_token) {
+        // Wipe whatever we just registered server-side — leaving an
+        // orphaned device row that the user can't sign back into is
+        // worse UX than asking them to retry.
+        let _ = keychain::delete_refresh_token();
+        return Err(match e {
+            keychain::KeychainError::NotAvailable => {
+                "OS keychain not available. On Linux, install libsecret (e.g. `gnome-keyring` \
+                 or `kwalletd`); on minimal headless servers, use the Mac pairing flow instead."
+                    .to_string()
+            }
+            keychain::KeychainError::Backend(msg) => format!("Keychain error: {msg}"),
+        });
+    }
+
+    // 4. Save HelperConfig.
+    let cfg = HelperConfig {
+        device_id: resp.device_id.clone(),
+        user_id: resp.user_id.clone(),
+        device_name: resolved_name.clone(),
+        helper_version: HELPER_VERSION.to_string(),
+        helper_secret: resp.helper_secret,
+        thresholds: alerts::AlertThresholds::default(),
+        email: session.email.clone(),
+    };
+    config::save(&cfg).map_err(|e| format!("Failed to save config: {e}"))?;
+    notify::pair_success(&app, &resolved_name);
+    Ok(PairResult {
+        device_id: resp.device_id,
+        user_id: resp.user_id,
+        device_name: resolved_name,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct AuthStatus {
+    paired: bool,
+    email: String,
+    has_refresh_token: bool,
+}
+
+#[tauri::command]
+fn auth_status() -> Result<AuthStatus, String> {
+    let cfg = config::load().map_err(|e| e.to_string())?;
+    let has_refresh_token = matches!(keychain::read_refresh_token(), Ok(Some(_)));
+    Ok(AuthStatus {
+        paired: cfg.is_some(),
+        email: cfg.as_ref().map(|c| c.email.clone()).unwrap_or_default(),
+        has_refresh_token,
+    })
+}
+
+/// Local-only sign-out. Always succeeds regardless of refresh-token
+/// state — the goal is "this device is no longer signed in", and that
+/// goal is achieved by clearing the local credentials.
+#[tauri::command]
+fn auth_sign_out() -> Result<(), String> {
+    let _ = keychain::delete_refresh_token();
+    config::clear().map_err(|e| e.to_string())
+}
+
+/// Probe whether the device + account are still healthy server-side.
+/// Used by the helper_sync error classifier (v0.3.0) to distinguish
+/// "device removed by another client / account deleted" from a
+/// transient 401.
+#[tauri::command]
+async fn auth_account_check() -> Result<String, String> {
+    let cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Device not paired".to_string())?;
+    let req = supabase::DeviceStatusRequest {
+        p_device_id: &cfg.device_id,
+        p_helper_secret: &cfg.helper_secret,
+    };
+    let status = supabase::device_status(&req).await.map_err(friendly)?;
+    Ok(match status {
+        supabase::DeviceStatus::Healthy => "healthy",
+        supabase::DeviceStatus::DeviceMissing => "device_missing",
+        supabase::DeviceStatus::AccountMissing => "account_missing",
+    }
+    .to_string())
+}
+
+#[tauri::command]
+fn auth_default_device_name() -> String {
+    default_device_name()
+}
+
+fn default_device_name() -> String {
+    let dn = whoami::devicename();
+    if !dn.trim().is_empty() {
+        dn
+    } else {
+        whoami::fallible::hostname().unwrap_or_else(|_| "Desktop".to_string())
+    }
+}
+
+fn auth_friendly(e: auth::AuthError) -> String {
+    match e {
+        auth::AuthError::RateLimited => {
+            "Too many tries — please wait a minute and try again.".to_string()
+        }
+        auth::AuthError::InvalidCode => "Invalid or expired code.".to_string(),
+        auth::AuthError::RefreshFailed => "Your sign-in expired. Please sign in again.".to_string(),
+        auth::AuthError::Network(err) => format!("Network error: {err}"),
+        auth::AuthError::Other { status, body } => format!("Auth error (HTTP {status}): {body}"),
+        auth::AuthError::Json(err) => format!("Auth response parse error: {err}"),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -381,6 +548,29 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                         "background sync error ({}× consecutive): {e}",
                         consecutive_failures
                     );
+                    // v0.3.0 — on the first auth-shaped failure, ask the
+                    // server whether the device or account is still
+                    // healthy. If gone, clear local credentials and stop
+                    // sync until the user signs in again.
+                    if looks_like_auth_failure(&e) {
+                        match classify_auth_failure(&app).await {
+                            Ok(classified) if classified => {
+                                // Local state cleared; reset the streak counter
+                                // so we don't spam another notification when the
+                                // (now-no-op) tick keeps not-syncing.
+                                consecutive_failures = 0;
+                                tokio::time::sleep(SYNC_INTERVAL).await;
+                                continue;
+                            }
+                            Ok(_) => {
+                                // Server says healthy → 401 was transient.
+                                // Fall through to the streak-counter path.
+                            }
+                            Err(probe_err) => {
+                                log::warn!("device_status probe failed: {probe_err}");
+                            }
+                        }
+                    }
                     if consecutive_failures == SYNC_FAILURE_NOTIFY_THRESHOLD {
                         notify::sync_failure_streak(&app, consecutive_failures, &e);
                     }
@@ -389,6 +579,49 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
             tokio::time::sleep(SYNC_INTERVAL).await;
         }
     });
+}
+
+/// Heuristic: does the sync error look like the device credential was
+/// rejected? `friendly` formats Supabase HTTP errors as
+/// `"Supabase HTTP {status}: ..."` — we look for 401 / 403 explicitly.
+/// This is intentionally narrow: we don't want a 500 / 502 to trigger
+/// a `device_status` probe.
+fn looks_like_auth_failure(msg: &str) -> bool {
+    msg.contains("HTTP 401")
+        || msg.contains("HTTP 403")
+        || msg.contains("Device not found or unauthorized")
+}
+
+/// Probe `device_status` and act on the response. Returns `Ok(true)`
+/// when the local pairing was cleared (device or account gone), so the
+/// caller can reset its streak counter.
+async fn classify_auth_failure(app: &tauri::AppHandle) -> Result<bool, String> {
+    let cfg = match config::load().map_err(|e| e.to_string())? {
+        Some(c) => c,
+        None => return Ok(false),
+    };
+    let req = supabase::DeviceStatusRequest {
+        p_device_id: &cfg.device_id,
+        p_helper_secret: &cfg.helper_secret,
+    };
+    let status = supabase::device_status(&req).await.map_err(friendly)?;
+    match status {
+        supabase::DeviceStatus::Healthy => Ok(false),
+        supabase::DeviceStatus::DeviceMissing => {
+            log::warn!("device_status: device_missing — clearing local pairing");
+            let _ = keychain::delete_refresh_token();
+            let _ = config::clear();
+            notify::session_expired(app, "device_missing");
+            Ok(true)
+        }
+        supabase::DeviceStatus::AccountMissing => {
+            log::warn!("device_status: account_missing — clearing local pairing");
+            let _ = keychain::delete_refresh_token();
+            let _ = config::clear();
+            notify::session_expired(app, "account_missing");
+            Ok(true)
+        }
+    }
 }
 
 async fn background_tick(app: &tauri::AppHandle) -> Result<Option<SyncReport>, String> {
@@ -443,6 +676,13 @@ pub fn run() {
             set_thresholds,
             preview_alerts,
             diagnostic_snapshot,
+            // v0.3.0 — direct email OTP sign-in
+            auth_send_otp,
+            auth_verify_otp,
+            auth_status,
+            auth_sign_out,
+            auth_account_check,
+            auth_default_device_name,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

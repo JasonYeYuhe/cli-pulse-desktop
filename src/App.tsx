@@ -673,6 +673,36 @@ function Settings({
   const [deviceName, setDeviceName] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // v0.3.0 — OTP sign-in state. When `paired` is true, the form is
+  // never shown; we keep the state hooks at the top level so React
+  // doesn't unmount/remount on every transition.
+  const [otpStage, setOtpStage] = useState<"email" | "code" | "signed-in">("email");
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpDeviceName, setOtpDeviceName] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [showLegacyPair, setShowLegacyPair] = useState(false);
+
+  // Pre-fill the device-name input with whatever Rust whoami suggests.
+  // Synchronous-feeling on first paint because the Tauri command is
+  // local-only.
+  useEffect(() => {
+    if (otpDeviceName === "") {
+      invoke<string>("auth_default_device_name")
+        .then((name) => setOtpDeviceName(name))
+        .catch(() => {});
+    }
+    // We only want this on initial mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Resend cooldown ticker.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const id = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendCooldown]);
   const [updater, setUpdater] = useState<
     | { state: "idle" }
     | { state: "checking" }
@@ -709,6 +739,71 @@ function Settings({
     } catch (e: any) {
       setUpdater({ state: "error", text: String(e) });
     }
+  }
+
+  async function doSendOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      await invoke("auth_send_otp", { email: otpEmail.trim() });
+      setOtpStage("code");
+      setResendCooldown(30);
+    } catch (err: any) {
+      setMsg({ kind: "err", text: String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doVerifyOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const result = await invoke<{ device_id: string; user_id: string; device_name: string }>(
+        "auth_verify_otp",
+        {
+          email: otpEmail.trim(),
+          code: otpCode.trim(),
+          deviceName: otpDeviceName.trim() || null,
+        },
+      );
+      setMsg({
+        kind: "ok",
+        text: t("messages.signed_in_as", {
+          email: otpEmail.trim(),
+          name: result.device_name,
+        }),
+      });
+      setOtpCode("");
+      setOtpStage("signed-in");
+      await onPaired();
+    } catch (err: any) {
+      setMsg({ kind: "err", text: String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doResendOtp() {
+    if (resendCooldown > 0 || busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await invoke("auth_send_otp", { email: otpEmail.trim() });
+      setResendCooldown(30);
+    } catch (err: any) {
+      setMsg({ kind: "err", text: String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function doResetOtp() {
+    setOtpStage("email");
+    setOtpCode("");
+    setMsg(null);
   }
 
   async function doPair(e: React.FormEvent) {
@@ -798,43 +893,153 @@ function Settings({
 
       {!paired && (
         <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
-          <h2 className="text-sm font-semibold text-neutral-300 mb-1">{t("settings.pair_heading")}</h2>
-          <p className="text-xs text-neutral-500 mb-3">
-            {t("settings.pair_hint")}
-          </p>
-          <form onSubmit={doPair} className="space-y-3">
-            <div>
-              <label className="block text-xs text-neutral-400 mb-1">{t("settings.pairing_code")}</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="\d{6}"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="123456"
-                className="w-32 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-center font-mono tracking-widest text-lg focus:outline-none focus:border-emerald-500"
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-neutral-400 mb-1">{t("settings.device_name_optional")}</label>
-              <input
-                type="text"
-                value={deviceName}
-                onChange={(e) => setDeviceName(e.target.value)}
-                placeholder={t("settings.device_name_placeholder")}
-                className="w-full max-w-sm px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
+          <h2 className="text-sm font-semibold text-neutral-300 mb-1">
+            {t("auth.signin.heading")}
+          </h2>
+          <p className="text-xs text-neutral-500 mb-3">{t("auth.signin.hint")}</p>
+
+          {otpStage === "email" && (
+            <form onSubmit={doSendOtp} className="space-y-3">
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">
+                  {t("auth.signin.email_label")}
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={otpEmail}
+                  onChange={(e) => setOtpEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full max-w-sm px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+                  autoFocus
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={busy || !otpEmail.trim()}
+                className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
+              >
+                {busy ? t("auth.signin.sending") : t("auth.signin.send_code")}
+              </button>
+            </form>
+          )}
+
+          {otpStage === "code" && (
+            <form onSubmit={doVerifyOtp} className="space-y-3">
+              <p className="text-xs text-neutral-400">
+                {t("auth.signin.code_sent", { email: otpEmail.trim() })}
+              </p>
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">
+                  {t("auth.signin.code_label")}
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="123456"
+                  className="w-32 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-center font-mono tracking-widest text-lg focus:outline-none focus:border-emerald-500"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">
+                  {t("auth.signin.device_name_optional")}
+                </label>
+                <input
+                  type="text"
+                  value={otpDeviceName}
+                  onChange={(e) => setOtpDeviceName(e.target.value)}
+                  placeholder={t("auth.signin.device_name_placeholder")}
+                  className="w-full max-w-sm px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={busy || otpCode.length !== 6}
+                  className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
+                >
+                  {busy ? t("auth.signin.verifying") : t("auth.signin.verify")}
+                </button>
+                <button
+                  type="button"
+                  onClick={doResendOtp}
+                  disabled={busy || resendCooldown > 0}
+                  className="px-3 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
+                >
+                  {resendCooldown > 0
+                    ? t("auth.signin.resend_in", { seconds: resendCooldown })
+                    : t("auth.signin.resend")}
+                </button>
+                <button
+                  type="button"
+                  onClick={doResetOtp}
+                  disabled={busy}
+                  className="px-3 py-2 rounded-md text-sm text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+                >
+                  {t("auth.signin.back")}
+                </button>
+              </div>
+              <p className="text-xs text-neutral-600">{t("auth.signin.spam_hint")}</p>
+            </form>
+          )}
+
+          <div className="mt-4 pt-3 border-t border-neutral-800">
             <button
-              type="submit"
-              disabled={busy || code.length !== 6}
-              className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50"
+              type="button"
+              onClick={() => setShowLegacyPair((v) => !v)}
+              className="text-xs text-neutral-500 hover:text-neutral-300"
             >
-              {busy ? t("action.pairing") : t("action.pair_device")}
+              {showLegacyPair
+                ? t("auth.signin.hide_legacy")
+                : t("auth.signin.show_legacy")}
             </button>
-          </form>
+            {showLegacyPair && (
+              <div className="mt-3">
+                <p className="text-xs text-neutral-500 mb-2">{t("settings.pair_hint")}</p>
+                <form onSubmit={doPair} className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1">
+                      {t("settings.pairing_code")}
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d{6}"
+                      maxLength={6}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="123456"
+                      className="w-32 px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 text-center font-mono tracking-widest text-lg focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1">
+                      {t("settings.device_name_optional")}
+                    </label>
+                    <input
+                      type="text"
+                      value={deviceName}
+                      onChange={(e) => setDeviceName(e.target.value)}
+                      placeholder={t("settings.device_name_placeholder")}
+                      className="w-full max-w-sm px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busy || code.length !== 6}
+                    className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-white text-sm border border-neutral-700 disabled:opacity-50"
+                  >
+                    {busy ? t("action.pairing") : t("action.pair_device")}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
         </section>
       )}
 

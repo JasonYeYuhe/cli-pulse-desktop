@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.2.14"
+version = "0.3.0"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -49,6 +49,16 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 uuid = { version = "1", features = ["v4"] }
 sysinfo = "0.32"
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
+# v0.3.0 — direct email OTP sign-in. keyring stores the refresh token in
+# the OS-native credential store; whoami suggests a default device name
+# from the system hostname.
+# NOTE the linux-native-sync-persistent feature: uses libsecret with
+# blocking calls (matches our sync API), and the "persistent" suffix
+# requests collection-unlock prompts only once (vs every call). On
+# Linux without libsecret, the keyring crate returns NoEntry / PlatformFailure
+# and we fail-closed via a clear UI error.
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
+whoami = "1"
 
 [profile.release]
 panic = "abort"

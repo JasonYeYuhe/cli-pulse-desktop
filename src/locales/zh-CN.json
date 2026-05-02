@@ -78,7 +78,7 @@
     "user_id": "用户 ID",
     "helper_version": "Helper 版本",
     "pair_heading": "配对此设备",
-    "pair_hint": "v0.3.0 将支持通过邮箱直接登录(即将推出)。目前,请在 macOS 上打开 CLI Pulse 菜单栏应用 → 设置 → 连接 → 「设置 Sync」,然后将显示的 6 位配对码输入到下方。若您仅使用 Windows / Linux 且没有 Mac,请等待 v0.3.0。",
+    "pair_hint": "macOS 用户:打开 CLI Pulse 菜单栏应用 → 设置 → 连接 → 「设置 Sync」,然后将显示的 6 位配对码输入到下方。也可以在本节顶部直接用邮箱登录。",
     "pairing_code": "配对码",
     "device_name_optional": "设备名称(可选)",
     "device_name_placeholder": "例如:Jason 的 Surface",
@@ -123,12 +123,34 @@
   "messages": {
     "paired_as": "已配对为\"{{name}}\" ({{id}}…)。",
     "device_unpaired": "已解除配对。",
+    "signed_in_as": "已使用 {{email}} 在「{{name}}」登录。",
     "sync_ok": "已同步 {{sessions}} 个会话、{{alerts}} 条通知。",
     "budget_saved": "预算已保存。",
     "err_budget_nonneg": "每日预算必须是非负数。",
     "err_weekly_nonneg": "每周预算必须是非负数。",
     "err_cpu_range": "CPU 阈值必须在 0–100 之间。",
     "err_code_empty": "配对码为空"
+  },
+  "auth": {
+    "signin": {
+      "heading": "登录 CLI Pulse",
+      "hint": "请输入邮箱,我们将发送 6 位验证码。新用户会自动注册。",
+      "email_label": "邮箱",
+      "send_code": "发送验证码",
+      "sending": "发送中…",
+      "code_sent": "已向 {{email}} 发送验证码。",
+      "code_label": "6 位验证码",
+      "verify": "验证",
+      "verifying": "验证中…",
+      "resend": "重新发送",
+      "resend_in": "重新发送({{seconds}} 秒)",
+      "back": "返回",
+      "spam_hint": "如果 1 分钟内仍未收到,请检查垃圾邮件文件夹。",
+      "device_name_optional": "设备名称(可选)",
+      "device_name_placeholder": "例如:Jason 的 Surface",
+      "show_legacy": "使用 Mac?请改用菜单栏配对。",
+      "hide_legacy": "隐藏配对码方式"
+    }
   },
   "misc": {
     "provider_label": "服务商:{{name}}",
