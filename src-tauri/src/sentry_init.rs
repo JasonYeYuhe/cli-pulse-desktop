@@ -189,6 +189,28 @@ fn redact_secrets_in_strings(event: &mut sentry::protocol::Event<'static>) {
     static ANTHROPIC_TOKEN: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"\bsk-ant-(?:oat|api|sid)\d{0,3}-[A-Za-z0-9_\-]{16,}\b").unwrap());
 
+    // v0.4.3 — additional providers + generic Bearer / Cookie redaction.
+    // Codex 2026-05-02 review of v0.4.3 spec caught that:
+    //  - GitHub now ships `github_pat_*` (47-char body) in addition
+    //    to the legacy `gh[pousr]_` shape.
+    //  - Cookie-only redaction misses `Authorization: Bearer <opaque>`
+    //    for providers (e.g. Cursor) whose tokens don't match a known
+    //    regex.
+    static OPENAI_TOKEN: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\bsk-(?:proj|svcacct)?-?[A-Za-z0-9_\-]{30,}\b").unwrap());
+    static GITHUB_TOKEN_LEGACY: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b").unwrap());
+    static GITHUB_PAT_NEW: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\bgithub_pat_[A-Za-z0-9_]{40,90}\b").unwrap());
+    static OPENROUTER_TOKEN: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\bsk-or-(?:v\d+-)?[A-Za-z0-9]{40,}\b").unwrap());
+    static GOOGLE_OAUTH: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\bya29\.[A-Za-z0-9_\-]{40,}\b").unwrap());
+    static COOKIE_HEADER: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#"(?im)("?Cookie"?:\s*)[^\r\n,"]+"#).unwrap());
+    static AUTH_BEARER: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#"(?im)("?Authorization"?:\s*)Bearer\s+[^\r\n,"]+"#).unwrap());
+
     let Ok(json) = serde_json::to_string(event) else {
         return;
     };
@@ -201,6 +223,33 @@ fn redact_secrets_in_strings(event: &mut sentry::protocol::Event<'static>) {
         .into_owned();
     scrubbed = ANTHROPIC_TOKEN
         .replace_all(&scrubbed, "<anthropic-token-redacted>")
+        .into_owned();
+    // v0.4.3 — order matters: OpenRouter `sk-or-...` and OpenAI
+    // `sk-...` overlap on the prefix; match OpenRouter first because
+    // its body length floor (40) and `or-` prefix are stricter.
+    scrubbed = OPENROUTER_TOKEN
+        .replace_all(&scrubbed, "<openrouter-token-redacted>")
+        .into_owned();
+    scrubbed = OPENAI_TOKEN
+        .replace_all(&scrubbed, "<openai-token-redacted>")
+        .into_owned();
+    scrubbed = GITHUB_PAT_NEW
+        .replace_all(&scrubbed, "<github-token-redacted>")
+        .into_owned();
+    scrubbed = GITHUB_TOKEN_LEGACY
+        .replace_all(&scrubbed, "<github-token-redacted>")
+        .into_owned();
+    scrubbed = GOOGLE_OAUTH
+        .replace_all(&scrubbed, "<google-oauth-redacted>")
+        .into_owned();
+    // Note: `${1}` (not `$1`) so the trailing alphanumerics aren't
+    // interpreted as part of the capture-group name in Rust's regex
+    // replace_all syntax.
+    scrubbed = COOKIE_HEADER
+        .replace_all(&scrubbed, "${1}<redacted>")
+        .into_owned();
+    scrubbed = AUTH_BEARER
+        .replace_all(&scrubbed, "${1}Bearer <redacted>")
         .into_owned();
 
     if scrubbed != json {
@@ -324,5 +373,87 @@ mod tests {
             !out.contains("thisIsAnUnversionedTokenBody123"),
             "unversioned token survived: {out}"
         );
+    }
+
+    // v0.4.3 — multi-provider tokens.
+
+    #[test]
+    fn scrubs_openai_proj_token() {
+        let s = "401: token=sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIII1234567890";
+        let out = scrub_str_via_event(s);
+        assert!(
+            !out.contains("AAAABBBB"),
+            "OpenAI proj token survived: {out}"
+        );
+        assert!(
+            out.contains("<openai-token-redacted>"),
+            "no replacement: {out}"
+        );
+    }
+
+    #[test]
+    fn scrubs_openai_legacy_token() {
+        let s = "Authorization: Bearer sk-AAAABBBBCCCCDDDDEEEEFFFFGGGG12345678";
+        let out = scrub_str_via_event(s);
+        // AUTH_BEARER catches the whole header line; OPENAI_TOKEN catches
+        // the token alone if rendered raw. Either way, the body must not
+        // survive.
+        assert!(!out.contains("AAAABBBBCCCCDDDDEEEEFFFFGGGG"));
+    }
+
+    #[test]
+    fn scrubs_github_pat_legacy_format() {
+        let s = "fetch failed for token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("AbCdEfGhIjKlMnOp"));
+        assert!(out.contains("<github-token-redacted>"));
+    }
+
+    #[test]
+    fn scrubs_github_pat_new_format() {
+        // 2024+ GitHub PAT: github_pat_<22 chars>_<59 chars>
+        let s = "Header: github_pat_11ABCDE0Y0123456789ABC_xY1zAbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCdEfGhIj0123456789";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("github_pat_11"), "PAT survived: {out}");
+        assert!(out.contains("<github-token-redacted>"));
+    }
+
+    #[test]
+    fn scrubs_openrouter_v1_key() {
+        let s = "OPENROUTER_API_KEY=sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1234";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("AAAAAAAAAAAAAAAA"));
+        assert!(out.contains("<openrouter-token-redacted>"));
+    }
+
+    #[test]
+    fn scrubs_google_ya29_bearer() {
+        let s = "Authorization: Bearer ya29.A0ARrdaM-abcDEFghijKLMNopqrSTUVwxYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWX";
+        let out = scrub_str_via_event(s);
+        assert!(
+            !out.contains("A0ARrdaM-abcDEF"),
+            "ya29 token survived: {out}"
+        );
+    }
+
+    #[test]
+    fn scrubs_cookie_header_value() {
+        // Cookie header containing an opaque session token (e.g. Cursor).
+        let s = "Cookie: WorkosCursorSessionToken=user_01ABCDEF.aBcDeFgHiJ.signature123";
+        let out = scrub_str_via_event(s);
+        assert!(
+            !out.contains("WorkosCursorSessionToken=user_"),
+            "Cookie body survived: {out}"
+        );
+        assert!(out.contains("<redacted>"));
+    }
+
+    #[test]
+    fn scrubs_generic_authorization_bearer_header() {
+        // Opaque Bearer token (no prefix matching any provider regex).
+        let s = "Authorization: Bearer ZXJtaW5lOnNlc3Npb24tdG9rZW4tb3BhcXVlLXZhbHVl";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("ZXJtaW5lOnNlc3Npb24"));
+        assert!(out.contains("Bearer <redacted>"));
     }
 }

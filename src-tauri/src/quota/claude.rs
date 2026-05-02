@@ -23,7 +23,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use super::{QuotaSnapshot, TierEntry};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const ANTHROPIC_BETA: &str = "oauth-2025-04-20";
@@ -112,39 +114,14 @@ where
         .map_err(serde::de::Error::custom)
 }
 
-/// Snapshot returned to the helper_sync caller. `None` from the public
-/// `collect_claude` means "skip uploading quota this cycle" — the caller
-/// should ship an empty `{}` for `p_provider_tiers` / `p_provider_remaining`.
-#[derive(Debug, Clone, Serialize)]
-pub struct QuotaSnapshot {
-    pub plan_type: String,
-    /// Min remaining across all tiers. The dashboard "headline" remaining
-    /// number reflects the user's most-constrained dimension (matches
-    /// Mac convention).
-    pub remaining: i64,
-    pub quota: i64,
-    /// Outer `reset_time` — the 5h Window reset, mirroring Mac's
-    /// `ClaudeSourceStrategy.swift:217` (`reset_time: snapshot.sessionReset`).
-    /// `helper_sync` writes this to `provider_quotas.reset_time` and a
-    /// missing value flips the column NULL on every Win sync, flickering
-    /// against Mac's writes.
-    pub session_reset: Option<String>,
-    pub tiers: Vec<TierEntry>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TierEntry {
-    pub name: String,
-    pub quota: i64,
-    pub remaining: i64,
-    pub reset_time: Option<String>,
-}
-
 /// Top-level entry. Reads the persisted Claude credentials, validates
 /// freshness, hits the OAuth /usage API, and maps the response to a
-/// portable `QuotaSnapshot`. Returns `None` on any failure — callers log
-/// at info level and continue without aborting.
-pub async fn collect_claude() -> Option<QuotaSnapshot> {
+/// portable `QuotaSnapshot`. Returns `None` on any failure — callers
+/// log at info level and continue without aborting.
+///
+/// `QuotaSnapshot` and `TierEntry` are shared with sibling provider
+/// modules in `quota::mod`.
+pub async fn collect() -> Option<QuotaSnapshot> {
     let creds = match read_credentials() {
         Some(c) => c,
         None => {

@@ -756,35 +756,32 @@ async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
 
     let alerts_payload = serde_json::to_value(&computed_alerts).unwrap_or(json!([]));
 
-    // 4a. (v0.4.0) — best-effort Claude OAuth quota scrape, BEFORE
-    //     helper_sync. Reads ~/.claude/.credentials.json on this
-    //     machine, hits api.anthropic.com/api/oauth/usage, and
-    //     constructs the provider_tiers payload. Failures (no creds,
-    //     expired token, API error) silently fall back to empty maps
-    //     so the rest of the sync (sessions + alerts) is unaffected.
-    let claude_quota = quota::collect_claude().await;
-    let (p_provider_remaining, p_provider_tiers) = match &claude_quota {
-        Some(snap) => {
-            let remaining = json!({ "Claude": snap.remaining });
-            // v0.4.2 — outer `reset_time` mirrors Mac's
-            // `ClaudeSourceStrategy.swift:217` (5h Window reset) so
-            // helper_sync's `(v_tier_data->>'reset_time')::timestamptz`
-            // upsert produces the same column value Mac writes. Without
-            // it, the column flips NULL on every Win sync, flickering
-            // against Mac's writes for accounts with both clients active.
-            let tiers = json!({
-                "Claude": {
-                    "quota": snap.quota,
-                    "remaining": snap.remaining,
-                    "plan_type": snap.plan_type,
-                    "reset_time": snap.session_reset,
-                    "tiers": snap.tiers,
-                }
-            });
-            (remaining, tiers)
-        }
-        None => (json!({}), json!({})),
-    };
+    // 4a. (v0.4.3) — best-effort multi-provider quota scrape. Each
+    //     of the 6 collectors (Claude, Codex, Cursor, Gemini, Copilot,
+    //     OpenRouter) runs concurrently via tokio::spawn per arm with
+    //     panic isolation; each is best-effort and returns Option<>.
+    //     Failures and panics are logged per-provider; sessions + alerts
+    //     upload regardless.
+    let snaps = quota::collect_all().await;
+    let mut tier_map = serde_json::Map::with_capacity(snaps.len());
+    let mut remaining_map = serde_json::Map::with_capacity(snaps.len());
+    for (name, snap) in &snaps {
+        // Outer `reset_time` mirrors each provider's headline-tier
+        // reset (matches Mac for cross-writer parity per v0.4.2 audit).
+        tier_map.insert(
+            (*name).to_string(),
+            json!({
+                "quota": snap.quota,
+                "remaining": snap.remaining,
+                "plan_type": snap.plan_type,
+                "reset_time": snap.session_reset,
+                "tiers": snap.tiers,
+            }),
+        );
+        remaining_map.insert((*name).to_string(), json!(snap.remaining));
+    }
+    let p_provider_remaining = serde_json::Value::Object(remaining_map);
+    let p_provider_tiers = serde_json::Value::Object(tier_map);
 
     // 4b. helper_sync — ship live sessions + computed alerts +
     //     (v0.4.0) provider quota when available.

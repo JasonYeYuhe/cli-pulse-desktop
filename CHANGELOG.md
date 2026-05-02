@@ -2,6 +2,100 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.3] — 2026-05-02
+
+### Added
+- **Multi-provider quota collection.** v0.4.0–0.4.2 only ported the
+  Claude OAuth collector. v0.4.3 adds 5 more providers, matching what
+  the Mac menu-bar app already collects:
+  - **Codex (OpenAI)** — reads `~/.codex/auth.json` (or
+    `$CODEX_HOME/auth.json`), refreshes OAuth access token via
+    `auth.openai.com/oauth/token` if `last_refresh` > 8 days, hits
+    `chatgpt.com/backend-api/wham/usage`. Emits "5h Window", "Weekly",
+    "Credits" tiers. Mirrors `CodexCollector.swift`.
+  - **Cursor** — reads env `CURSOR_COOKIE`, hits
+    `cursor.com/api/usage-summary`. Emits "Plan" + "On-Demand" tiers
+    (cents-scaled). Mirrors `CursorCollector.swift`.
+  - **Gemini** — reads `~/.gemini/oauth_creds.json` (file-only path,
+    matches Mac's secondary fallback). Hits
+    `cloudcode-pa.googleapis.com:loadCodeAssist` + `:retrieveUserQuota`.
+    Groups buckets by model family, emits "Pro" / "Flash" /
+    "Flash Lite" tiers. Active OAuth refresh deferred to v0.4.5+.
+  - **GitHub Copilot** — reads env `COPILOT_API_TOKEN`, hits
+    `api.github.com/copilot_internal/user` with the editor headers
+    GitHub Copilot's internal API requires. Emits "Premium" + "Chat"
+    tiers. Mirrors `CopilotCollector.swift`.
+  - **OpenRouter** — reads env `OPENROUTER_API_KEY` (optional
+    `OPENROUTER_API_URL` override), hits `/credits` (required) and
+    `/key` (optional, 3s timeout). Emits "Credits" + "Key Limit"
+    tiers, dollar-scaled $1=100,000. Mirrors `OpenRouterCollector.swift`.
+- All 6 providers run **concurrently** via `tokio::spawn` per arm with
+  panic isolation (NOT `tokio::join!` — Codex review caught that
+  `join!` shares a task with the parent and would unwind `sync_now`
+  on any provider panic). Per-arm `JoinError::is_panic()` check logs
+  panics at ERROR level but doesn't kill the sync.
+- Per-provider structured logging: each `[Provider]`-prefixed
+  WARN/DEBUG log makes `grep '\[Codex\]' cli-pulse.log` a triage
+  tool. Per Gemini 3.1 Pro review.
+- Provider name contract test: a checked-in snapshot of
+  `Models.swift:10-37` `ProviderKind` raw values asserts against Rust
+  constants in `quota/mod.rs`. Drift between Mac and Win/Linux
+  provider names would land writes on different
+  `(user_id, provider)` PKs and break dual-writer convergence.
+- Sentry scrubber regex coverage extended for the new providers'
+  token formats: OpenAI (`sk-proj-*`, `sk-svcacct-*`, legacy `sk-*`),
+  GitHub legacy (`gh[pousr]_*`), GitHub PAT new (`github_pat_*`,
+  47-char body), OpenRouter (`sk-or-*`), Google OAuth (`ya29.*`),
+  generic Cookie + Authorization Bearer header redaction. 8 new
+  Sentry tests.
+
+### Changed
+- **Module restructure**: existing v0.4.2 `quota.rs` moved to
+  `quota/claude.rs`. New `quota/mod.rs` orchestrator owns the
+  shared `QuotaSnapshot` / `TierEntry` types and provides
+  `collect_all()`. Sibling modules: `codex.rs`, `cursor.rs`,
+  `gemini.rs`, `copilot.rs`, `openrouter.rs`.
+- `lib.rs::sync_now` now builds a multi-provider `p_provider_tiers`
+  payload from `quota::collect_all()`. helper_sync's
+  `jsonb_object_keys()` loop already handles multi-key maps —
+  verified in v0.4.2 audit.
+
+### Tests
+- 35 new unit tests across the 5 new collectors (+ 8 Sentry, +
+  existing 18 quota = **111 lib tests** total). Per-provider tests
+  cover JSON parsing, tier emission, plan_type bucketing, error
+  fallbacks, and provider-specific quirks (Codex `reset_at` epoch
+  vs ISO, Copilot snake_case vs camelCase, Gemini launch-window
+  null semantics, OpenRouter scaling).
+
+### Reviews
+- **Codex GPT-5.4 (2026-05-02)** — full spec audit + 5 Mac source
+  files. 4 FIX-FIRST + 3 ship-it. Resolutions inline in the dev plan
+  (`PROJECT_DEV_PLAN_2026-05-02_v0.4.3_multi_provider_quota.md` §10):
+  panic isolation switched from `tokio::join!` to spawn-per-arm,
+  Sentry regex extended for `github_pat_*` + generic Bearer,
+  provider-name contract test added. **Deferred**: OpenRouter i32
+  overflow at $21k+ balance is an inherited Mac bug requiring backend
+  schema migration; tracked as v0.4.4+.
+- **Gemini 3.1 Pro (2026-05-02)** — UX/product/i18n review. 4 FAIL.
+  Per-provider WARN logs added (§4.6). Other UX gaps (env-var-only
+  config, per-provider empty-state copy, token-expired UI warning)
+  acknowledged as v0.4.4 frontend sprint scope.
+
+### Known limitations (deferred to v0.4.4)
+- Cursor / Copilot / OpenRouter credentials read from env vars only.
+  Settings UI for credential entry pending.
+- Gemini token refresh requires the user to run `gemini` CLI
+  periodically. Active OAuth refresh + cross-platform Keychain pending.
+- Token-expired silent-skip leaves stale provider_quotas row in
+  place (no UI warning state). Explicit `CollectorStatus::Expired`
+  + UI warning pending.
+- Per-provider on/off toggle UI pending.
+
+### Notes
+- No server-side schema changes. iOS / Android / Mac unaffected.
+- v0.4.x desktops on auto-update pick this up automatically.
+
 ## [0.4.2] — 2026-05-02
 
 ### Fixed
