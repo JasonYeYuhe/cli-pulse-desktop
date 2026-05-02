@@ -78,7 +78,7 @@
     "user_id": "ユーザー ID",
     "helper_version": "Helper バージョン",
     "pair_heading": "このデバイスをペアリング",
-    "pair_hint": "v0.3.0 でメールによる直接サインインを追加予定です(近日公開)。現在は macOS にて、CLI Pulse メニューバーアプリ → 設定 → 接続 → 「Sync をセットアップ」を開き、表示された 6 桁のコードを下のフィールドに入力してください。Mac をお持ちでない Windows / Linux ユーザーの方は、v0.3.0 をお待ちください。",
+    "pair_hint": "macOS の場合:CLI Pulse メニューバーアプリ → 設定 → 接続 → 「Sync をセットアップ」を開き、表示された 6 桁のコードを下のフィールドに入力してください。本セクション上部のメールサインインも利用できます。",
     "pairing_code": "ペアリングコード",
     "device_name_optional": "デバイス名 (任意)",
     "device_name_placeholder": "例: Jason の Surface",
@@ -123,12 +123,34 @@
   "messages": {
     "paired_as": "「{{name}}」としてペアリングしました ({{id}}…)。",
     "device_unpaired": "ペアリングを解除しました。",
+    "signed_in_as": "「{{name}}」で {{email}} としてサインインしました。",
     "sync_ok": "{{sessions}} セッション、{{alerts}} 件の通知を同期しました。",
     "budget_saved": "予算を保存しました。",
     "err_budget_nonneg": "日次予算は 0 以上の数値である必要があります。",
     "err_weekly_nonneg": "週次予算は 0 以上の数値である必要があります。",
     "err_cpu_range": "CPU しきい値は 0 から 100 の間である必要があります。",
     "err_code_empty": "ペアリングコードが空です"
+  },
+  "auth": {
+    "signin": {
+      "heading": "CLI Pulse にサインイン",
+      "hint": "メールアドレスを入力すると、6 桁のコードを送信します。新規ユーザーは自動的に登録されます。",
+      "email_label": "メールアドレス",
+      "send_code": "コードを送信",
+      "sending": "送信中…",
+      "code_sent": "{{email}} にコードを送信しました。",
+      "code_label": "6 桁のコード",
+      "verify": "認証",
+      "verifying": "認証中…",
+      "resend": "再送信",
+      "resend_in": "再送信({{seconds}} 秒)",
+      "back": "戻る",
+      "spam_hint": "1 分以内に届かない場合は、迷惑メールフォルダをご確認ください。",
+      "device_name_optional": "デバイス名(任意)",
+      "device_name_placeholder": "例:Jason の Surface",
+      "show_legacy": "Mac をお持ちですか?メニューバーからペアリングしてください。",
+      "hide_legacy": "ペアリングコード方式を隠す"
+    }
   },
   "misc": {
     "provider_label": "プロバイダ: {{name}}",

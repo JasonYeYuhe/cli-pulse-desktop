@@ -2,6 +2,65 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.3.0] — 2026-05-02
+
+### Added
+- **Direct email sign-in** — pure Windows / Linux users can now onboard
+  without owning a Mac. Enter your email in Settings → Sign in to CLI
+  Pulse, receive a 6-digit code, and the desktop mints its own helper
+  credentials against your Supabase account. New users get auto-signed
+  up; existing Mac/iOS account holders sign in to the same account.
+  The legacy "pair from a Mac menu bar" 6-digit-code flow is preserved
+  under an "Advanced" disclosure.
+- **OS-native refresh-token storage** via the `keyring` crate:
+  - macOS → Keychain
+  - Windows → Credential Manager
+  - Linux → Secret Service / libsecret
+  Linux without libsecret fails closed with a clear install-hint error
+  rather than falling back to weak machine-id-derived encryption.
+- **helper_sync error classifier** — when sync hits an auth-shaped
+  error (HTTP 401/403, "Device not found"), the desktop now asks the
+  server whether the device or account is still healthy via a new
+  `device_status` RPC. If the device or account is gone, the desktop
+  clears local credentials and shows a "sign in again" notification
+  instead of looping on 401s indefinitely.
+- **Localization**: new `auth.signin.*` and `messages.signed_in_as`
+  keys for English, Simplified Chinese, and Japanese (translation
+  reviewed by Gemini 3.1 Pro).
+
+### Server-side
+- Two new strictly-additive RPCs deployed via
+  `migrate_v0.36_desktop_otp.sql` in the main repo:
+  - `register_desktop_helper(p_device_name, ...)` — auth.uid()-based
+    mirror of `register_helper`. Mints a `device_id + helper_secret`
+    against the user's session JWT. Includes per-user 20-device cap
+    enforced via `pg_advisory_xact_lock` (race-safe), and
+    `set search_path = pg_catalog, public, extensions` to mirror
+    existing `register_helper` hardening.
+  - `device_status(p_device_id, p_helper_secret)` — anon-callable but
+    secret-gated. Returns `'healthy' | 'device_missing' |
+    'account_missing'`. Returns `device_missing` for both genuinely
+    missing devices and hash-mismatches so it cannot be used to
+    enumerate device UUIDs.
+
+### Privacy
+- **Sentry scrubber tightened** — the `before_send` hook now redacts
+  JWTs, helper secrets (`helper_<64hex>`), and `refresh_token` /
+  `access_token` / `helper_secret` / `pairing_code` / `Authorization`
+  query parameters embedded in error messages, breadcrumb URLs, and
+  request bodies. Org-level field-name scrubbing still applies; this
+  is belt-and-suspenders for content-shaped tokens.
+
+### Notes
+- v0.3.0 is the first release where Tauri can sign up new accounts
+  directly. Mac users with an existing pairing keep working unchanged.
+- Refresh strategy is **lazy / on-demand only**: the desktop never
+  background-refreshes user JWTs. helper_sync uses device credentials
+  exclusively. Refresh runs only when a user-scoped action needs the
+  user JWT (rare today; will see more use as future features land).
+- v0.3.1 (next release) restores per-device daily-usage syncing for
+  the desktop with a multi-device-aware schema.
+
 ## [0.2.14] — 2026-05-02
 
 ### Fixed

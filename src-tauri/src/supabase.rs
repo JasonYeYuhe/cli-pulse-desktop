@@ -51,12 +51,27 @@ fn client() -> SupabaseResult<Client> {
 /// `{"error": "...", "message": "..."}` body, as used by
 /// `register_helper`) into [`SupabaseError::Rpc`] via [`check_rpc_error`].
 pub async fn rpc<P: Serialize>(name: &str, params: &P) -> SupabaseResult<Value> {
+    rpc_with_auth(name, params, None).await
+}
+
+/// Generic RPC POST with optional user-JWT authorization. When
+/// `user_jwt` is `Some`, the `Authorization: Bearer <jwt>` header
+/// carries the user's session token instead of the anon key — required
+/// by RPCs whose `auth.uid()` check needs to resolve to the user
+/// (e.g. `register_desktop_helper`). The `apikey` header still carries
+/// the anon key (Supabase's rate-limit + project gate).
+pub async fn rpc_with_auth<P: Serialize>(
+    name: &str,
+    params: &P,
+    user_jwt: Option<&str>,
+) -> SupabaseResult<Value> {
     let url = format!("{}/rest/v1/rpc/{}", creds::supabase_url(), name);
     let anon = creds::supabase_anon_key();
+    let bearer = user_jwt.unwrap_or(&anon);
     let resp = client()?
         .post(&url)
         .header("apikey", &anon)
-        .header("Authorization", format!("Bearer {anon}"))
+        .header("Authorization", format!("Bearer {bearer}"))
         .header("Content-Type", "application/json")
         .json(params)
         .send()
@@ -117,6 +132,57 @@ pub async fn register_helper(
     req: &RegisterHelperRequest<'_>,
 ) -> SupabaseResult<RegisterHelperResponse> {
     let v = rpc("register_helper", req).await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+// ========================================================================
+// register_desktop_helper (v0.3.0) — auth.uid()-based mirror used by
+// the desktop OTP sign-in flow. Same response shape as register_helper
+// so the calling code path past this RPC is identical.
+// ========================================================================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisterDesktopHelperRequest<'a> {
+    pub p_device_name: &'a str,
+    pub p_device_type: &'a str,
+    pub p_system: &'a str,
+    pub p_helper_version: &'a str,
+}
+
+pub async fn register_desktop_helper(
+    req: &RegisterDesktopHelperRequest<'_>,
+    user_jwt: &str,
+) -> SupabaseResult<RegisterHelperResponse> {
+    let v = rpc_with_auth("register_desktop_helper", req, Some(user_jwt)).await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+// ========================================================================
+// device_status (v0.3.0) — used by the helper_sync error classifier
+// (see lib.rs::auth_account_check). Returns one of:
+//   "healthy"          — keep syncing
+//   "device_missing"   — device row deleted; clear local pairing
+//   "account_missing"  — account deleted; clear local pairing
+// ========================================================================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceStatusRequest<'a> {
+    pub p_device_id: &'a str,
+    pub p_helper_secret: &'a str,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "status")]
+pub enum DeviceStatus {
+    Healthy,
+    DeviceMissing,
+    AccountMissing,
+}
+
+pub async fn device_status(req: &DeviceStatusRequest<'_>) -> SupabaseResult<DeviceStatus> {
+    let v = rpc("device_status", req).await?;
     check_rpc_error(&v)?;
     Ok(serde_json::from_value(v)?)
 }

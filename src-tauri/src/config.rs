@@ -28,6 +28,11 @@ pub struct HelperConfig {
     /// default to `AlertThresholds::default()` via serde default.
     #[serde(default)]
     pub thresholds: crate::alerts::AlertThresholds,
+    /// User email for display only — set when the user signs in via
+    /// the v0.3.0 OTP flow. Older pairings (and anyone who paired via
+    /// the Mac one-click code path) will have this empty.
+    #[serde(default)]
+    pub email: String,
 }
 
 pub fn config_dir() -> Option<PathBuf> {

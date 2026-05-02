@@ -119,8 +119,15 @@ fn scrub_event(
     if let Some(home) = std::env::var("HOME").ok().filter(|s| !s.is_empty()) {
         scrub_strings_recursive(&mut event, &home, "<home>");
     }
-    // Generic /Users/<name>/ → /Users/<scrubbed>/ on macOS, even when
-    // we don't have HOME set explicitly.
+
+    // v0.3.0: redact secret-shaped tokens that may appear inside error
+    // messages, breadcrumb URLs, request bodies, etc. The org-level
+    // Sentry Data Scrubber catches *field-name*-based redaction, but
+    // string contents can carry tokens too — e.g. an error like
+    // "401 from /auth/v1/token?refresh_token=eyJhbGc..." would still
+    // ship the token in the message body.
+    redact_secrets_in_strings(&mut event);
+
     Some(event)
 }
 
@@ -144,6 +151,55 @@ fn scrub_strings_recursive(
     }
 }
 
+/// v0.3.0: redact secret-shaped tokens by pattern, not just by field
+/// name. Run after `scrub_strings_recursive(home → <home>)` so paths
+/// have already been normalized.
+///
+/// Patterns covered:
+///   - JWTs:           three base64url segments separated by `.`
+///   - helper secrets: `helper_<64 hex chars>`
+///   - OTP query/body params for refresh_token / access_token /
+///     helper_secret / pairing_code
+///
+/// We round-trip the event through JSON (same approach as
+/// `scrub_strings_recursive`) and apply regex substitutions to every
+/// string. Misses on extremely odd shapes are acceptable because the
+/// org-level Data Scrubber catches the field-name path; this is a
+/// belt for the suspenders.
+fn redact_secrets_in_strings(event: &mut sentry::protocol::Event<'static>) {
+    use once_cell::sync::Lazy;
+    use regex::Regex;
+
+    static JWT: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b").unwrap()
+    });
+    static HELPER_SECRET: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\bhelper_[0-9a-f]{64}\b").unwrap());
+    static QUERY_PARAM: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(
+            r##"(?i)(refresh_token|access_token|helper_secret|pairing_code|authorization)=[^&\s"]+"##,
+        )
+        .unwrap()
+    });
+
+    let Ok(json) = serde_json::to_string(event) else {
+        return;
+    };
+    let mut scrubbed = JWT.replace_all(&json, "<jwt-redacted>").into_owned();
+    scrubbed = HELPER_SECRET
+        .replace_all(&scrubbed, "<helper-secret-redacted>")
+        .into_owned();
+    scrubbed = QUERY_PARAM
+        .replace_all(&scrubbed, "$1=<redacted>")
+        .into_owned();
+
+    if scrubbed != json {
+        if let Ok(reconstructed) = serde_json::from_str::<sentry::protocol::Event>(&scrubbed) {
+            *event = reconstructed;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +213,59 @@ mod tests {
         install();
         // Subsequent installs are also no-ops (OnceLock semantics)
         install();
+    }
+
+    fn scrub_str_via_event(input: &str) -> String {
+        // Build a minimal event with our string in `message`, run it
+        // through redact_secrets_in_strings, then read back.
+        let mut event = sentry::protocol::Event::<'static> {
+            message: Some(input.to_string()),
+            ..Default::default()
+        };
+        redact_secrets_in_strings(&mut event);
+        event.message.unwrap_or_default()
+    }
+
+    #[test]
+    fn scrubs_jwt_in_message() {
+        let s = "401 from /auth/v1/token: eyJhbGciOiJIUzI1NiIs.eyJzdWIiOjF9.AbC123-_xyz";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("eyJhbGciOiJIUzI1NiIs"), "JWT survived: {out}");
+        assert!(out.contains("<jwt-redacted>"), "no replacement: {out}");
+    }
+
+    #[test]
+    fn scrubs_helper_secret_in_message() {
+        let s = format!("device 123 with secret helper_{}", "a".repeat(64));
+        let out = scrub_str_via_event(&s);
+        assert!(
+            !out.contains(&"a".repeat(64)),
+            "helper secret survived: {out}"
+        );
+        assert!(out.contains("<helper-secret-redacted>"));
+    }
+
+    #[test]
+    fn scrubs_query_params_in_url() {
+        let s = "POST https://x.supabase.co/auth/v1/token?refresh_token=secret123&grant_type=refresh_token failed";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("secret123"), "refresh_token survived: {out}");
+        assert!(out.contains("refresh_token=<redacted>"));
+        // Non-secret params (grant_type) survive intact.
+        assert!(out.contains("grant_type=refresh_token"));
+    }
+
+    #[test]
+    fn scrubs_authorization_header_value() {
+        let s = "header Authorization=Bearer-eyJhbGc.eyJzdWIiOjF9.foo present";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("eyJhbGc.eyJzdWIiOjF9"), "JWT survived: {out}");
+    }
+
+    #[test]
+    fn benign_strings_pass_through_unchanged() {
+        let s = "just a plain error message — no secrets here";
+        let out = scrub_str_via_event(s);
+        assert_eq!(out, s);
     }
 }

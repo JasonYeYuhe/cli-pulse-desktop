@@ -33,6 +33,21 @@ pub fn sync_failure_streak<R: Runtime>(app: &AppHandle<R>, consecutive: u32, err
     );
 }
 
+/// v0.3.0 — emitted once when the helper_sync error classifier
+/// determines the device/account is gone server-side. Pairs with a
+/// local-state clear so the next user-facing surface is the sign-in
+/// screen instead of an unrecoverable loop of 401s.
+pub fn session_expired<R: Runtime>(app: &AppHandle<R>, kind: &str) {
+    let body = match kind {
+        "device_missing" => "This device was removed from your account. Sign in again to re-pair.",
+        "account_missing" => {
+            "Your CLI Pulse account is no longer accessible. Sign in again to continue."
+        }
+        _ => "Your sign-in expired. Please sign in again to keep syncing.",
+    };
+    send(app, "CLI Pulse — Sign in again", body);
+}
+
 /// Fired once per (day, budget kind) — see `maybe_notify_budget_breach`
 /// in lib.rs for the de-dup logic. `title` and `body` are produced by
 /// `alerts::compute` and trusted to be human-readable.
