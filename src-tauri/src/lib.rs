@@ -13,6 +13,7 @@ pub mod keychain;
 pub mod notify;
 pub mod paths;
 pub mod pricing;
+pub mod quota;
 pub mod scanner;
 pub mod sentry_init;
 pub mod sessions;
@@ -755,14 +756,38 @@ async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
 
     let alerts_payload = serde_json::to_value(&computed_alerts).unwrap_or(json!([]));
 
-    // 4. helper_sync — ship live sessions + computed alerts
+    // 4a. (v0.4.0) — best-effort Claude OAuth quota scrape, BEFORE
+    //     helper_sync. Reads ~/.claude/.credentials.json on this
+    //     machine, hits api.anthropic.com/api/oauth/usage, and
+    //     constructs the provider_tiers payload. Failures (no creds,
+    //     expired token, API error) silently fall back to empty maps
+    //     so the rest of the sync (sessions + alerts) is unaffected.
+    let claude_quota = quota::collect_claude().await;
+    let (p_provider_remaining, p_provider_tiers) = match &claude_quota {
+        Some(snap) => {
+            let remaining = json!({ "Claude": snap.remaining });
+            let tiers = json!({
+                "Claude": {
+                    "quota": snap.quota,
+                    "remaining": snap.remaining,
+                    "plan_type": snap.plan_type,
+                    "tiers": snap.tiers,
+                }
+            });
+            (remaining, tiers)
+        }
+        None => (json!({}), json!({})),
+    };
+
+    // 4b. helper_sync — ship live sessions + computed alerts +
+    //     (v0.4.0) provider quota when available.
     let hs = supabase::helper_sync(&supabase::HelperSyncRequest {
         p_device_id: &cfg.device_id,
         p_helper_secret: &cfg.helper_secret,
         p_sessions: sessions::sessions_payload(&snapshot),
         p_alerts: alerts_payload,
-        p_provider_remaining: json!({}),
-        p_provider_tiers: json!({}),
+        p_provider_remaining,
+        p_provider_tiers,
     })
     .await
     .map_err(friendly)?;

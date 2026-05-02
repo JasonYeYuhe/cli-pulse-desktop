@@ -2,6 +2,64 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.0] — 2026-05-02
+
+### Added
+- **Local Claude quota collection on Win / Linux / Mac.** The desktop
+  now scrapes the Anthropic OAuth `/api/oauth/usage` endpoint on its
+  own and uploads the result via `helper_sync`'s
+  `p_provider_remaining` / `p_provider_tiers` parameters (which had
+  been shipping as `{}` since v0.3.0). A signed-in desktop sees real
+  Claude tier bars (`5h Window`, `Weekly`, `Sonnet only`, `Designs`,
+  `Daily Routines`) within ~2 minutes of starting Claude Code,
+  regardless of whether a Mac is online for the same account.
+  - Reads `~/.claude/.credentials.json` — same path Claude Code
+    writes on every OS.
+  - Best-effort: missing creds, expired token, or API failure
+    silently skip the quota upload without breaking session/alert
+    sync.
+  - Plan-type detection from `rateLimitTier` field: `max_20x` →
+    "Max 20x", `max_5x` → "Max 5x", `pro` → "Pro", custom values
+    pass through verbatim.
+  - Token freshness check with 60-second safety margin. Both
+    ISO-8601 and epoch-millisecond `expiresAt` formats supported.
+  - Pure-Win / Linux users (the v0.3.0 OTP-onboarding target) now
+    see real tier bars without needing a Mac in the loop.
+
+### Fixed
+- **Codex gpt-5.5 cost rendered as $0.00.** v0.3.5 VM E2E found
+  pricing.rs only went up to gpt-5.4, so any account running Codex
+  with `gpt-5.5` returned a null cost and aggregated to $0. Added
+  `gpt-5.5`, `gpt-5.5-codex`, `gpt-5.5-mini`, `gpt-5.5-nano`,
+  `gpt-5.5-pro` entries with rates mirroring gpt-5.4 (OpenAI hasn't
+  published official 5.5 billing yet — flagged in source as
+  approximate, replace when public).
+
+### Privacy
+- **Sentry scrubber extended for Anthropic tokens.** The new OAuth
+  usage path uses `Authorization: Bearer sk-ant-oat...` headers; if
+  these ever leak into error messages or breadcrumb URLs, the
+  `before_send` hook now redacts them with the new
+  `<anthropic-token-redacted>` marker. Permissive regex
+  (`sk-ant-(oat|api|sid)\d{0,3}-...`) handles current and future
+  version formats including the rumored `sid` prefix. 4 new tests
+  cover oat / api / Bearer header / unversioned variants.
+
+### Reviews
+- Codex GPT-5.4 (SQL/security/correctness, 2026-05-02): caught two
+  FIX-FIRSTs on the original spec — the Anthropic regex was too
+  strict on version digits (`\d{2}` only matched 2-digit versions;
+  permissive `\d{0,3}` handles 1/2/3-digit and unversioned), and
+  noted scrubber coverage for stacktrace/request-metadata strings
+  was contingent on the regex matching real tokens. Both resolved
+  before code.
+
+### Notes
+- Server-side schema unchanged. iOS / Android / Mac unaffected.
+- v0.3.x desktops on auto-update: unaffected. Existing helper_sync
+  payload accepted both empty and non-empty quota maps from day 1.
+- Codex / Cursor / OpenAI API quota collection deferred to v0.4.1+.
+
 ## [0.3.5] — 2026-05-02
 
 ### Fixed
