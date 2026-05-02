@@ -176,6 +176,52 @@ static CODEX_MODELS: Lazy<HashMap<&'static str, CodexModel>> = Lazy::new(|| {
             cache_read: None,
         },
     );
+    // v0.4.0 — gpt-5.5 family. OpenAI hasn't published official
+    // billing yet; rates mirror gpt-5.4 as a best-known approximation.
+    // VM E2E on 2026-05-02 found Codex with model="gpt-5.5" and
+    // 16K tokens rendering as $0.00 because pricing.rs returned None.
+    // Approximate-but-non-zero is materially better than zero for
+    // cost-aware UX. Replace with official prices when published.
+    m.insert(
+        "gpt-5.5",
+        CodexModel {
+            input: 2.5e-6,
+            output: 1.5e-5,
+            cache_read: Some(2.5e-7),
+        },
+    );
+    m.insert(
+        "gpt-5.5-codex",
+        CodexModel {
+            input: 2.5e-6,
+            output: 1.5e-5,
+            cache_read: Some(2.5e-7),
+        },
+    );
+    m.insert(
+        "gpt-5.5-mini",
+        CodexModel {
+            input: 7.5e-7,
+            output: 4.5e-6,
+            cache_read: Some(7.5e-8),
+        },
+    );
+    m.insert(
+        "gpt-5.5-nano",
+        CodexModel {
+            input: 2e-7,
+            output: 1.25e-6,
+            cache_read: Some(2e-8),
+        },
+    );
+    m.insert(
+        "gpt-5.5-pro",
+        CodexModel {
+            input: 3e-5,
+            output: 1.8e-4,
+            cache_read: None,
+        },
+    );
     m
 });
 

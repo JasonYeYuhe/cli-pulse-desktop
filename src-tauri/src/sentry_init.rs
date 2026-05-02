@@ -181,6 +181,14 @@ fn redact_secrets_in_strings(event: &mut sentry::protocol::Event<'static>) {
         )
         .unwrap()
     });
+    // v0.4.0 — Anthropic OAuth / API tokens that show up when the
+    // desktop hits api.anthropic.com/api/oauth/usage. Codex review
+    // flagged that the version digit count varies (saw 2 in the wild,
+    // could be 1 or 3) and the rumored `sid` form may also appear in
+    // error messages. Match permissively.
+    static ANTHROPIC_TOKEN: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"\bsk-ant-(?:oat|api|sid)\d{0,3}-[A-Za-z0-9_\-]{16,}\b").unwrap()
+    });
 
     let Ok(json) = serde_json::to_string(event) else {
         return;
@@ -191,6 +199,9 @@ fn redact_secrets_in_strings(event: &mut sentry::protocol::Event<'static>) {
         .into_owned();
     scrubbed = QUERY_PARAM
         .replace_all(&scrubbed, "$1=<redacted>")
+        .into_owned();
+    scrubbed = ANTHROPIC_TOKEN
+        .replace_all(&scrubbed, "<anthropic-token-redacted>")
         .into_owned();
 
     if scrubbed != json {
@@ -267,5 +278,46 @@ mod tests {
         let s = "just a plain error message — no secrets here";
         let out = scrub_str_via_event(s);
         assert_eq!(out, s);
+    }
+
+    // v0.4.0 — Anthropic token scrubbing. Codex flagged the v0.3.0
+    // regex set didn't cover sk-ant-oat..., which is what the new
+    // OAuth usage path on Win/Linux carries via Authorization headers.
+    #[test]
+    fn scrubs_anthropic_oat_token_in_message() {
+        let s = "POST /api/oauth/usage failed: sk-ant-oat01-AbCdEfGhIjKlMnOpQrSt-XyZ_-123";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("AbCdEfGhIjKlMnOpQrSt"), "OAuth token survived: {out}");
+        assert!(out.contains("<anthropic-token-redacted>"));
+    }
+
+    #[test]
+    fn scrubs_anthropic_api_token() {
+        let s = "key sk-ant-api03-vWxYz1234567890abcdefghijklm leaked";
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("vWxYz1234567890abcdefghijklm"), "api token survived: {out}");
+        assert!(out.contains("<anthropic-token-redacted>"));
+    }
+
+    #[test]
+    fn scrubs_anthropic_oat_in_authorization_header_value() {
+        // Real shape from a logged Authorization header. The Bearer
+        // token gets redacted by ANTHROPIC_TOKEN even when the
+        // QUERY_PARAM regex doesn't fire (no "Authorization=" form).
+        let s = r#"Authorization: Bearer sk-ant-oat01-1234567890abcdefghijklmnopqrst was rejected"#;
+        let out = scrub_str_via_event(s);
+        assert!(!out.contains("1234567890abcdefghijklmnopqrst"));
+    }
+
+    #[test]
+    fn scrubs_unversioned_anthropic_token_form() {
+        // Defensive: sk-ant-oat- without version digits (rumored
+        // future form). Permissive regex catches this.
+        let s = "saw sk-ant-oat-thisIsAnUnversionedTokenBody123 in the cache";
+        let out = scrub_str_via_event(s);
+        assert!(
+            !out.contains("thisIsAnUnversionedTokenBody123"),
+            "unversioned token survived: {out}"
+        );
     }
 }
