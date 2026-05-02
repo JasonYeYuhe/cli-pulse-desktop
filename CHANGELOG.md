@@ -2,6 +2,30 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.13] — 2026-05-02
+
+### Fixed
+- **Misleading pairing instructions (P2 UX).** The Settings tab told users
+  to "open CLI Pulse on iOS → Settings → Add device" and copy the 6-digit
+  code from the phone. The iOS app has no such UI — `generatePairingCode()`
+  is only ever called from the macOS menu bar app
+  (`PairingSection.swift:46`), confirmed by repo-wide grep. The instruction
+  was a dead-end for everyone, and especially confusing for Windows / Linux
+  users who don't own a Mac (those users currently cannot onboard at all).
+  - Fix: rewrite `pair_heading` and `pair_hint` in `src/locales/{en,zh-CN,ja}.json`.
+    New text points users to the macOS menu bar app (the actual code source)
+    and previews v0.3.0's email-based sign-in for Mac-less users.
+  - This is a stop-gap. The architectural fix — direct email sign-in on
+    Tauri desktop — is tracked in
+    `PROJECT_DEV_PLAN_2026-05-02_v0.3.0_otp_login.md` and slated for
+    v0.3.0. After v0.3.0 ships, both the new copy and the pairing-code UI
+    will be replaced with email + OTP.
+
+### Notes
+- v0.2.13 is purely a string change. No Rust changes; no schema changes;
+  no behavior changes. The pairing flow itself works correctly when the
+  user has a Mac to source the code from.
+
 ## [0.2.12] — 2026-05-02
 
 ### Fixed
