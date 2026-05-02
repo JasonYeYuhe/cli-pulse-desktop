@@ -97,7 +97,7 @@
     "export_json": "导出 JSON",
     "updates_heading": "更新",
     "updates_hint": "更新均已签名。发布地址:<code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>",
-    "unpair_confirm": "确认解除此设备配对吗?之后可用新的 6 位码重新配对。",
+    "unpair_confirm": "确认解除此设备配对吗?之后可用邮箱重新登录,或在 Mac 上重新配对。",
     "language_heading": "语言",
     "about_heading": "关于",
     "about_version": "版本",

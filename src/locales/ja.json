@@ -97,7 +97,7 @@
     "export_json": "JSON 出力",
     "updates_heading": "アップデート",
     "updates_hint": "アップデートは署名付きです。公開先: <code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>",
-    "unpair_confirm": "このデバイスのペアリングを解除しますか? あとで新しい 6 桁コードで再度ペアリングできます。",
+    "unpair_confirm": "このデバイスのペアリングを解除しますか? あとでメールで再サインインするか、Mac から再ペアリングできます。",
     "language_heading": "言語",
     "about_heading": "情報",
     "about_version": "バージョン",

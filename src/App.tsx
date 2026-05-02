@@ -837,6 +837,14 @@ function Settings({
     try {
       await invoke("unpair_device");
       setMsg({ kind: "ok", text: t("messages.device_unpaired") });
+      // v0.3.3: reset the OTP flow state so the email-input form
+      // renders again on the next paint. doVerifyOtp leaves
+      // otpStage="signed-in"; without this, the unpaired view rendered
+      // the heading + hint + legacy disclosure but no email input
+      // (neither the "email" nor "code" stage block matched). VM E2E
+      // had to switch tabs and back to recover.
+      setOtpStage("email");
+      setOtpCode("");
       await onUnpaired();
     } catch (e: any) {
       setMsg({ kind: "err", text: String(e) });
@@ -870,7 +878,7 @@ function Settings({
 
   return (
     <div className="max-w-2xl space-y-6">
-      <AboutSection />
+      <AboutSection paired={paired} />
 
       <LanguageSection />
 
@@ -1192,16 +1200,23 @@ type DiagnosticSnapshot = {
   cache_dir: string | null;
 };
 
-function AboutSection() {
+function AboutSection({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
   const [diag, setDiag] = useState<DiagnosticSnapshot | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Re-fetch diagnostics whenever the paired state flips. v0.3.2 E2E
+  // surfaced that a fresh OTP sign-in left the About panel showing the
+  // pre-pair "Not paired: -" — the dependency array was [] so the
+  // diagnostic_snapshot was a one-shot. The Account section above
+  // updates correctly via the parent's config refetch; About now
+  // tracks the same signal so the diagnostics-copy block doesn't leak
+  // stale state into support tickets.
   useEffect(() => {
     invoke<DiagnosticSnapshot>("diagnostic_snapshot")
       .then(setDiag)
       .catch((e) => console.warn("diagnostic_snapshot failed", e));
-  }, []);
+  }, [paired]);
 
   function diagText(d: DiagnosticSnapshot): string {
     return [

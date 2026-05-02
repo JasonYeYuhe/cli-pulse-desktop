@@ -97,7 +97,7 @@
     "export_json": "Export JSON",
     "updates_heading": "Updates",
     "updates_hint": "Updates are signed. Releases publish at <code>github.com/JasonYeYuhe/cli-pulse-desktop/releases</code>.",
-    "unpair_confirm": "Unpair this device? You can pair again later using a new 6-digit code.",
+    "unpair_confirm": "Unpair this device? You can sign in again later with email, or pair from a Mac.",
     "language_heading": "Language",
     "about_heading": "About",
     "about_version": "Version",

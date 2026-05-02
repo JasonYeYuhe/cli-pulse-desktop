@@ -2,6 +2,27 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.3.3] — 2026-05-02
+
+### Fixed
+- **About panel didn't reactively update on sign-in.** The Account
+  section flipped to "Paired" with the right device_id immediately,
+  but the About panel (and its Copy diagnostics block) kept showing
+  "Not paired: -" until the next launch. Found during v0.3.2 Win VM
+  E2E. AboutSection now refetches the diagnostic snapshot whenever
+  the paired state flips.
+- **OTP form vanished after unpair until tab switch.** The OTP-flow
+  stage state stayed at `signed-in` after a successful sign-out, so
+  neither the email-input nor code-input block rendered — the section
+  showed only the heading + hint + legacy disclosure. Now reset to
+  the email stage on unpair so re-pairing on the same screen works
+  without a tab round-trip.
+- **Unpair confirmation dialog claimed "new 6-digit code".** That's
+  only accurate for the legacy Mac-pair path; on Windows / Linux the
+  re-establish flow is the variable-length email OTP. Updated en /
+  zh-CN / ja `unpair_confirm` strings to neutral wording covering
+  both paths.
+
 ## [0.3.2] — 2026-05-02
 
 ### Fixed
