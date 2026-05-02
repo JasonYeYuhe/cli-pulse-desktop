@@ -43,12 +43,28 @@
     "today_breakdown": "本日の内訳",
     "no_usage_today": "本日はまだ利用がありません。",
     "max_per_day": "最大: {{value}}/日",
-    "label_today": "今日"
+    "label_today": "今日",
+    "account_today": "すべてのデバイス · 本日",
+    "this_device": "このデバイス",
+    "tile_today_cost": "本日の費用",
+    "tile_today_usage": "本日のトークン使用量",
+    "tile_today_sessions": "本日のセッション",
+    "tile_active_sessions": "アクティブなセッション",
+    "tile_online_devices": "オンラインデバイス",
+    "tile_unresolved_alerts": "未解決のアラート"
   },
   "providers": {
     "active_days": "{{count}} 日間アクティブ · {{msgs}} メッセージ",
     "no_usage": "直近 30 日間の利用はありません。",
-    "io_tokens": "{{value}} I/O トークン"
+    "io_tokens": "{{value}} I/O トークン",
+    "tier_left": "残り {{remaining}}/{{quota}}",
+    "quota_label": "クォータ",
+    "quota_unavailable": "クォータ情報を取得できません。スマートフォンでサインインするか、Mac とペアリングしてください。",
+    "server_unavailable": "サーバーからプラン/クォータを取得できませんでした。ローカルスキャンの集計のみ表示しています。",
+    "col_model": "モデル",
+    "col_input": "入力",
+    "col_output": "出力",
+    "col_cost": "費用"
   },
   "sessions": {
     "header": "{{active}} アクティブ · {{total}} プロセス走査 · 更新 {{time}}",
