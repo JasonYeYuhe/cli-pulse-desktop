@@ -124,7 +124,7 @@
     "paired_as": "Paired as \"{{name}}\" ({{id}}…).",
     "device_unpaired": "Device unpaired.",
     "signed_in_as": "Signed in as {{email}} on \"{{name}}\".",
-    "sync_ok": "Synced {{sessions}} sessions, {{alerts}} alerts.",
+    "sync_ok": "Synced {{sessions}} sessions, {{alerts}} alerts, {{metrics}} daily metrics.",
     "budget_saved": "Budget saved.",
     "err_budget_nonneg": "Daily budget must be a non-negative number.",
     "err_weekly_nonneg": "Weekly budget must be a non-negative number.",

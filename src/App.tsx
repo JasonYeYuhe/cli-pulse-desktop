@@ -39,6 +39,8 @@ type ConfigView = {
 type SyncReport = {
   sessions_synced: number;
   alerts_synced: number;
+  metrics_synced: number;
+  metrics_errored: number;
   total_cost_usd: number;
   total_tokens: number;
   files_scanned: number;
@@ -854,6 +856,7 @@ function Settings({
         text: t("messages.sync_ok", {
           sessions: report.sessions_synced,
           alerts: report.alerts_synced,
+          metrics: report.metrics_synced,
         }),
       });
     } catch (e: any) {
