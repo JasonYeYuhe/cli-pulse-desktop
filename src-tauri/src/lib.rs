@@ -1,8 +1,8 @@
 //! CLI Pulse Desktop — Tauri backend entry point.
 //!
 //! Sprint 0: local JSONL scan + per-day/model/provider aggregation.
-//! Sprint 1 (this): Supabase pairing, config persistence, helper_sync
-//! + upsert_daily_usage round-trips, periodic 2-minute sync tick.
+//! Sprint 1: Supabase pairing, config persistence, helper_sync
+//! round-trips, periodic 2-minute sync tick.
 
 pub mod alerts;
 pub mod cache;
@@ -246,7 +246,6 @@ fn unpair_device() -> Result<(), String> {
 struct SyncReport {
     sessions_synced: i64,
     alerts_synced: i64,
-    metrics_uploaded: usize,
     total_cost_usd: f64,
     total_tokens: i64,
     files_scanned: u32,
@@ -292,21 +291,15 @@ async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
     .await
     .map_err(friendly)?;
 
-    // 5. upsert_daily_usage
-    let metrics: Vec<_> = scan
-        .entries
-        .iter()
-        .filter_map(supabase::DailyUsageMetric::from_entry)
-        .collect();
-    let metrics_len = metrics.len();
-    supabase::upsert_daily_usage(metrics)
-        .await
-        .map_err(friendly)?;
+    // Daily-usage upload (the previous `upsert_daily_usage` step) is removed
+    // in v0.2.14. The RPC required a user JWT but Tauri only has the helper's
+    // anon-key credentials, so every call returned an error and bubbled up as
+    // a sync failure even when sessions+alerts had landed. v0.3.1 routes
+    // daily metrics through a multi-device-aware path.
 
     Ok(SyncReport {
         sessions_synced: hs.sessions_synced,
         alerts_synced: hs.alerts_synced,
-        metrics_uploaded: metrics_len,
         total_cost_usd: scan.total_cost_usd,
         total_tokens: scan.total_tokens,
         files_scanned: scan.files_scanned,
@@ -373,10 +366,9 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
             match background_tick(&app).await {
                 Ok(Some(report)) => {
                     log::info!(
-                        "background sync ok — {} sessions, {} alerts, {} metrics",
+                        "background sync ok — {} sessions, {} alerts",
                         report.sessions_synced,
-                        report.alerts_synced,
-                        report.metrics_uploaded
+                        report.alerts_synced
                     );
                     consecutive_failures = 0;
                 }

@@ -6,8 +6,10 @@
 //! their previous size forward (via `cache::FileAction::Incremental`).
 //! State lives in per-provider JSON caches at `cache::cache_path(...)`.
 //!
-//! Output schema matches what the Swift scanner produces so the existing
-//! Supabase RPCs (`upsert_daily_usage`) accept the payload unchanged.
+//! Output schema matches what the Swift scanner produces; the macOS app
+//! still uploads daily usage via `upsert_daily_usage`. Tauri-side daily
+//! upload is paused in v0.2.14 and returns in v0.3.1 via a multi-device
+//! aware path.
 //!
 //! Claude cost invariant:
 //! The server, Swift, Kotlin and Rust implementations all sum per-message

@@ -151,35 +151,11 @@ pub async fn helper_sync(req: &HelperSyncRequest<'_>) -> SupabaseResult<HelperSy
 }
 
 // ========================================================================
-// upsert_daily_usage — called by helper_heartbeat tick with scan result
+// (Removed in v0.2.14) upsert_daily_usage — the RPC requires auth.uid()
+// but Tauri callers only have the helper's anon-key credentials, so the
+// call would always fail and surface as a sync error. Per-device daily
+// usage metrics return in v0.3.1 via a multi-device-aware path.
 // ========================================================================
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UpsertDailyUsageRequest {
-    pub metrics: Vec<DailyUsageMetric>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DailyUsageMetric {
-    pub metric_date: String,
-    pub provider: String,
-    pub model: String,
-    pub input_tokens: i64,
-    pub cached_tokens: i64,
-    pub output_tokens: i64,
-    pub cost: f64,
-}
-
-pub async fn upsert_daily_usage(metrics: Vec<DailyUsageMetric>) -> SupabaseResult<()> {
-    if metrics.is_empty() {
-        return Ok(());
-    }
-    let req = UpsertDailyUsageRequest { metrics };
-    let v = rpc("upsert_daily_usage", &req).await?;
-    // This RPC returns no meaningful body on success — still honor error shape.
-    check_rpc_error(&v)?;
-    Ok(())
-}
 
 // ========================================================================
 // helper_heartbeat
@@ -198,30 +174,6 @@ pub async fn helper_heartbeat(req: &HelperHeartbeatRequest<'_>) -> SupabaseResul
     let v = rpc("helper_heartbeat", req).await?;
     check_rpc_error(&v)?;
     Ok(())
-}
-
-// ========================================================================
-// Convenience — build an upsert_daily_usage payload from a ScanResult.
-// ========================================================================
-
-impl DailyUsageMetric {
-    pub fn from_entry(e: &crate::scanner::DailyEntry) -> Option<Self> {
-        // Swift APIClient explicitly filters out the `__claude_msg__` bucket
-        // so the server doesn't see a synthetic model row. See
-        // `syncDailyUsage` in CLI Pulse Bar's APIClient.swift.
-        if e.model == crate::scanner::CLAUDE_MSG_BUCKET_MODEL {
-            return None;
-        }
-        Some(Self {
-            metric_date: e.date.clone(),
-            provider: e.provider.clone(),
-            model: e.model.clone(),
-            input_tokens: e.input_tokens,
-            cached_tokens: e.cached_tokens,
-            output_tokens: e.output_tokens,
-            cost: e.cost_usd.unwrap_or(0.0),
-        })
-    }
 }
 
 #[cfg(test)]
@@ -246,38 +198,5 @@ mod tests {
             }
             _ => panic!("wrong error variant"),
         }
-    }
-
-    #[test]
-    fn daily_usage_metric_skips_msg_bucket() {
-        let msg = crate::scanner::DailyEntry {
-            date: "2026-04-24".into(),
-            provider: "Claude".into(),
-            model: crate::scanner::CLAUDE_MSG_BUCKET_MODEL.into(),
-            input_tokens: 0,
-            cached_tokens: 0,
-            output_tokens: 0,
-            cost_usd: None,
-            message_count: 42,
-        };
-        assert!(DailyUsageMetric::from_entry(&msg).is_none());
-    }
-
-    #[test]
-    fn daily_usage_metric_roundtrips_real_entry() {
-        let e = crate::scanner::DailyEntry {
-            date: "2026-04-24".into(),
-            provider: "Claude".into(),
-            model: "claude-sonnet-4-6".into(),
-            input_tokens: 1000,
-            cached_tokens: 2000,
-            output_tokens: 500,
-            cost_usd: Some(0.1234),
-            message_count: 0,
-        };
-        let m = DailyUsageMetric::from_entry(&e).unwrap();
-        assert_eq!(m.metric_date, "2026-04-24");
-        assert_eq!(m.model, "claude-sonnet-4-6");
-        assert!((m.cost - 0.1234).abs() < 1e-9);
     }
 }

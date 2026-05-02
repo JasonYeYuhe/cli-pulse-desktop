@@ -2,6 +2,43 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.2.14] — 2026-05-02
+
+### Fixed
+- **Sync no longer reports failure after a successful sessions+alerts
+  upload (P0).** A cross-platform audit on 2026-05-02 found that every
+  paired Windows/Linux desktop was hitting an auth-shape mismatch on the
+  daily-usage upload step (the `upsert_daily_usage` RPC required a user
+  JWT but Tauri only has the helper's anon-key credentials). Sessions
+  and alerts had been landing in Supabase correctly, but the daily-usage
+  step bubbled up as a hard error and the entire sync surfaced as
+  failed in the manual-sync UI. We've removed the broken call. Per-device
+  daily usage is intentionally absent from the desktop until v0.3.1, which
+  introduces a multi-device-aware path so Mac and Windows scanners stop
+  race-clobbering the same row.
+- **Watch auth tokens no longer linger in unprotected UserDefaults
+  (P1).** Pre-v0.2.14 builds wrote the access + refresh tokens to both
+  the Keychain (canonical) and watchOS UserDefaults (unencrypted at rest).
+  v0.2.14 removes the UserDefaults write sites and adds a one-shot
+  launch-time migration: any stranded values are adopted into Keychain
+  (only when the Keychain is empty for that key — never overwriting a
+  fresh value with a stale one) and the UserDefaults entries are cleared.
+  No re-authentication required for the common case.
+- **Misleading SQL doc comment on `register_helper` (P3).** The block
+  comment claimed authentication required `auth.uid()` to match. The
+  function actually validates the supplied pairing code and doesn't
+  read `auth.uid` at all. Updated the comment to match the implementation
+  and forward-reference the `auth.uid()`-based `register_desktop_helper`
+  RPC coming in v0.3.0.
+
+### Coming next
+- v0.3.0: direct email sign-in for Tauri desktop (no more "find a Mac
+  to pair from"). Spec lives at
+  `PROJECT_DEV_PLAN_2026-05-02_v0.3.0_otp_login.md`. Pure Windows / Linux
+  users get a single-step OTP onboarding.
+- v0.3.1: per-device `daily_usage_metrics` so Mac + Windows + Linux all
+  contribute correctly to dashboard cost totals across devices.
+
 ## [0.2.13] — 2026-05-02
 
 ### Fixed

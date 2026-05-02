@@ -39,7 +39,6 @@ type ConfigView = {
 type SyncReport = {
   sessions_synced: number;
   alerts_synced: number;
-  metrics_uploaded: number;
   total_cost_usd: number;
   total_tokens: number;
   files_scanned: number;
@@ -758,7 +757,6 @@ function Settings({
       setMsg({
         kind: "ok",
         text: t("messages.sync_ok", {
-          metrics: report.metrics_uploaded,
           sessions: report.sessions_synced,
           alerts: report.alerts_synced,
         }),
@@ -847,7 +845,6 @@ function Settings({
             <div className="text-xs text-neutral-500">
               {t("settings.last_sync", {
                 time: lastSync.at.toLocaleTimeString(),
-                metrics: lastSync.report.metrics_uploaded,
                 sessions: lastSync.report.live_sessions_sent,
                 cost: formatUSD(lastSync.report.total_cost_usd),
                 files: lastSync.report.files_scanned,
