@@ -54,7 +54,12 @@
     "tile_unresolved_alerts": "Unresolved alerts"
   },
   "providers": {
-    "active_days": "{{count}} active days · {{msgs}} msgs",
+    "active_days_one": "{{count}} active day",
+    "active_days_other": "{{count}} active days",
+    "messages_one": "{{count}} msg",
+    "messages_other": "{{count}} msgs",
+    "models_one": "{{count}} model",
+    "models_other": "{{count}} models",
     "no_usage": "No usage found in last 30 days.",
     "io_tokens": "{{value}} I/O tokens",
     "tier_left": "{{remaining}}/{{quota}} left",

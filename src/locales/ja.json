@@ -54,7 +54,9 @@
     "tile_unresolved_alerts": "未解決のアラート"
   },
   "providers": {
-    "active_days": "{{count}} 日間アクティブ · {{msgs}} メッセージ",
+    "active_days_other": "{{count}} 日間アクティブ",
+    "messages_other": "{{count}} メッセージ",
+    "models_other": "{{count}} モデル",
     "no_usage": "直近 30 日間の利用はありません。",
     "io_tokens": "{{value}} I/O トークン",
     "tier_left": "残り {{remaining}}/{{quota}}",

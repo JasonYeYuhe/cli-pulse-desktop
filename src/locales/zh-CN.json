@@ -54,7 +54,9 @@
     "tile_unresolved_alerts": "未解决告警"
   },
   "providers": {
-    "active_days": "{{count}} 天活跃 · {{msgs}} 条消息",
+    "active_days_other": "{{count}} 天活跃",
+    "messages_other": "{{count}} 条消息",
+    "models_other": "{{count}} 个模型",
     "no_usage": "近 30 天未检测到使用。",
     "io_tokens": "{{value}} 条 I/O Token",
     "tier_left": "剩余 {{remaining}}/{{quota}}",

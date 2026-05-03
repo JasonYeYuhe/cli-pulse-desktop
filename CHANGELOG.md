@@ -2,6 +2,45 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.5] — 2026-05-04
+
+### Fixed
+- **Tier bar visual direction inverted vs text label.** v0.3.4–v0.4.4
+  rendered each tier bar's fill width as `used%` (consumption) while
+  the text label said `X/Y left` (remaining). The two halves of the
+  same row pointed at opposite metrics — text "85 left" rendered
+  alongside a 15%-filled bar. v0.4.5 flips the bar to fill from left
+  to right with the **remaining** percentage, so 85 left = 85% green
+  bar, matching the text. Color heat thresholds invert too:
+  - >40% remaining → green (safe)
+  - 10–40% remaining → amber/orange (warning)
+  - ≤10% remaining → red (critical)
+  Caught by user inspection of v0.4.4 Providers tab screenshot;
+  applies to per-tier bars (`App.tsx:792-820`) and the singleton
+  fallback bar for non-Claude providers with flat quota
+  (`App.tsx:822-842`).
+- **Pluralization for "active days", "msgs", "models".** Provider
+  card subtitle hardcoded "{{count}} active days · {{msgs}} msgs"
+  even when count was 1 ("1 active days · 0 msgs · 1 models"). The
+  `models` count was also a hardcoded English string with no i18n
+  routing. v0.4.5 splits into i18next plural-aware keys
+  (`active_days_one/_other`, `messages_one/_other`,
+  `models_one/_other`) for all three locales (en / zh-CN / ja). zh-CN
+  and ja use the single CLDR form (`_other`); en uses both.
+
+### Tests
+- 5 new Vitest tests in `i18n.test.ts` covering plural forms across
+  the 3 supported locales (en singular/plural toggle, zh-CN single-
+  form invariance, ja single-form invariance, models + messages
+  variants).
+
+### Notes
+- Pure frontend UX polish. No collector / backend / schema changes.
+  Per-provider quota fetch path unchanged from v0.4.4 — the live
+  values being visualized are the same.
+- v0.4.4 desktops on auto-update pick this up automatically once
+  v0.4.5 is published.
+
 ## [0.4.4] — 2026-05-03
 
 ### Fixed

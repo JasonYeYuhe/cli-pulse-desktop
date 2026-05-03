@@ -761,8 +761,15 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                     {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
                   </div>
                   <div className="text-xs text-neutral-500">
-                    {t("providers.active_days", { count: v.days.size, msgs: formatInt(v.msgs) })}
-                    {v.models.size > 0 && <span className="ml-2">· {v.models.size} models</span>}
+                    {t("providers.active_days", { count: v.days.size })}
+                    {" · "}
+                    {t("providers.messages", { count: v.msgs })}
+                    {v.models.size > 0 && (
+                      <>
+                        {" · "}
+                        {t("providers.models", { count: v.models.size })}
+                      </>
+                    )}
                   </div>
                   <div className="mt-2 h-1 bg-neutral-800 rounded overflow-hidden max-w-xs">
                     <div
@@ -790,12 +797,17 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                 {srv.tiers.length > 0 ? (
                   <div className="space-y-1.5">
                     {srv.tiers.map((tier) => {
-                      const used = Math.max(0, tier.quota - tier.remaining);
-                      const usePct = tier.quota > 0 ? (used / tier.quota) * 100 : 0;
+                      // v0.4.5 — bar visualizes REMAINING (matches the
+                      // "X/Y left" text label). Color heat by remaining:
+                      // - ≤10% left → red (critical)
+                      // - ≤40% left → amber (warning)
+                      // - >40% left → green (safe)
+                      const remaining = Math.max(0, Math.min(tier.quota, tier.remaining));
+                      const remainingPct = tier.quota > 0 ? (remaining / tier.quota) * 100 : 0;
                       const color =
-                        usePct >= 90
+                        remainingPct <= 10
                           ? "from-rose-500 to-red-500"
-                          : usePct >= 60
+                          : remainingPct <= 40
                             ? "from-amber-400 to-orange-500"
                             : "from-emerald-500 to-cyan-500";
                       return (
@@ -812,7 +824,7 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                           <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
                             <div
                               className={`h-full bg-gradient-to-r ${color}`}
-                              style={{ width: `${Math.min(100, usePct)}%` }}
+                              style={{ width: `${Math.min(100, remainingPct)}%` }}
                             />
                           </div>
                         </div>
@@ -821,25 +833,36 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                   </div>
                 ) : srv.quota && srv.quota > 0 && srv.provider !== "Claude" ? (
                   // Single overall bar for non-Claude providers with a flat quota.
-                  <div className="text-xs">
-                    <div className="flex justify-between text-neutral-400 mb-0.5">
-                      <span>{t("providers.quota_label")}</span>
-                      <span className="font-mono">
-                        {t("providers.tier_left", {
-                          remaining: formatInt(srv.remaining ?? 0),
-                          quota: formatInt(srv.quota),
-                        })}
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"
-                        style={{
-                          width: `${Math.min(100, srv.quota > 0 ? ((srv.quota - (srv.remaining ?? 0)) / srv.quota) * 100 : 0)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
+                  // v0.4.5 — same direction flip as the per-tier bars above.
+                  (() => {
+                    const remaining = Math.max(0, Math.min(srv.quota, srv.remaining ?? 0));
+                    const remainingPct = srv.quota > 0 ? (remaining / srv.quota) * 100 : 0;
+                    const color =
+                      remainingPct <= 10
+                        ? "from-rose-500 to-red-500"
+                        : remainingPct <= 40
+                          ? "from-amber-400 to-orange-500"
+                          : "from-emerald-500 to-cyan-500";
+                    return (
+                      <div className="text-xs">
+                        <div className="flex justify-between text-neutral-400 mb-0.5">
+                          <span>{t("providers.quota_label")}</span>
+                          <span className="font-mono">
+                            {t("providers.tier_left", {
+                              remaining: formatInt(srv.remaining ?? 0),
+                              quota: formatInt(srv.quota),
+                            })}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
+                          <div
+                            className={`h-full bg-gradient-to-r ${color}`}
+                            style={{ width: `${Math.min(100, remainingPct)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()
                 ) : (
                   // Claude with empty tiers, or any provider where quota
                   // data isn't available — be honest, don't fake a bar.

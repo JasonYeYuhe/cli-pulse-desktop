@@ -94,3 +94,46 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     }
   );
 });
+
+describe("i18n plural forms (v0.4.5)", () => {
+  // v0.4.5 — Providers tab strings now route through i18next plural rules
+  // ("1 active day" vs "2 active days", etc.). zh-CN / ja have a single
+  // form per CLDR; en has _one + _other. These tests catch regressions
+  // where a plural variant gets accidentally deleted.
+
+  it("en active_days uses singular for count=1, plural for count!=1", async () => {
+    const { default: i18n } = await freshI18n();
+    i18n.changeLanguage("en");
+    expect(i18n.t("providers.active_days", { count: 1 })).toBe("1 active day");
+    expect(i18n.t("providers.active_days", { count: 0 })).toBe("0 active days");
+    expect(i18n.t("providers.active_days", { count: 4 })).toBe("4 active days");
+  });
+
+  it("en models pluralizes correctly", async () => {
+    const { default: i18n } = await freshI18n();
+    i18n.changeLanguage("en");
+    expect(i18n.t("providers.models", { count: 1 })).toBe("1 model");
+    expect(i18n.t("providers.models", { count: 3 })).toBe("3 models");
+  });
+
+  it("en messages pluralizes correctly", async () => {
+    const { default: i18n } = await freshI18n();
+    i18n.changeLanguage("en");
+    expect(i18n.t("providers.messages", { count: 1 })).toBe("1 msg");
+    expect(i18n.t("providers.messages", { count: 2 })).toBe("2 msgs");
+  });
+
+  it("zh-CN active_days uses single form for any count (CLDR: zh has only `other`)", async () => {
+    const mod = await freshI18n();
+    mod.setLang("zh-CN");
+    expect(mod.default.t("providers.active_days", { count: 1 })).toBe("1 天活跃");
+    expect(mod.default.t("providers.active_days", { count: 5 })).toBe("5 天活跃");
+  });
+
+  it("ja models uses single form for any count (CLDR: ja has only `other`)", async () => {
+    const mod = await freshI18n();
+    mod.setLang("ja");
+    expect(mod.default.t("providers.models", { count: 1 })).toBe("1 モデル");
+    expect(mod.default.t("providers.models", { count: 3 })).toBe("3 モデル");
+  });
+});
