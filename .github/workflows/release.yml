@@ -29,13 +29,11 @@ jobs:
   publish:
     name: Build & publish (${{ matrix.platform }} / ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
-    # Skip Linux entries unless we're manually invoking with platforms=all
-    # (typically before promoting a Pre-release tag to Latest). Tag pushes
-    # always build Windows only — Linux users sit on the previous Latest
-    # until we explicitly re-run this workflow with the full matrix.
-    if: |
-      matrix.platform == 'windows'
-      || (github.event_name == 'workflow_dispatch' && github.event.inputs.platforms == 'all')
+    # NOTE: previous attempt at job-level `if:` with matrix.platform did
+    # not work — GitHub Actions doesn't expose the matrix context to
+    # job-level `if:` (matrix expansion happens after if evaluation).
+    # The `platforms` workflow_dispatch input is now a no-op until the
+    # logic is rewritten as a dynamic-matrix setup job (v0.4.6+).
     strategy:
       fail-fast: false
       matrix:
