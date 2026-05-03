@@ -9,6 +9,14 @@ on:
       tag:
         description: "Tag to build (must already exist, format vX.Y.Z)"
         required: true
+      platforms:
+        description: "Which platforms to build (default 'all'; tag push always builds windows only for fast hotfix iteration)"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - windows
 
 concurrency:
   group: release-${{ github.ref }}
@@ -21,6 +29,13 @@ jobs:
   publish:
     name: Build & publish (${{ matrix.platform }} / ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
+    # Skip Linux entries unless we're manually invoking with platforms=all
+    # (typically before promoting a Pre-release tag to Latest). Tag pushes
+    # always build Windows only — Linux users sit on the previous Latest
+    # until we explicitly re-run this workflow with the full matrix.
+    if: |
+      matrix.platform == 'windows'
+      || (github.event_name == 'workflow_dispatch' && github.event.inputs.platforms == 'all')
     strategy:
       fail-fast: false
       matrix:
