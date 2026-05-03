@@ -23,7 +23,7 @@
 //! (preferred order) followed by any unknown families alphabetically.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -97,6 +97,10 @@ struct TierInfo {
 /// Collect Gemini quota from `~/.gemini/oauth_creds.json`. Returns
 /// `None` if file absent / token expired / HTTP fails — `[Gemini]`
 /// log line in each case.
+///
+/// Log levels (v0.4.4 align with claude/codex):
+///   - file absent / token expired / no access_token: `debug!` (expected)
+///   - file present but JSON parse fails: `warn!` (schema drift)
 pub async fn collect() -> Option<QuotaSnapshot> {
     let path = match creds_path() {
         Some(p) => p,
@@ -106,9 +110,13 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         }
     };
     let creds = match read_creds(&path) {
-        Some(c) => c,
-        None => {
-            log::debug!("[Gemini] oauth_creds.json absent or unparseable — run `gemini` CLI to authenticate");
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            log::debug!("[Gemini] oauth_creds.json absent — run `gemini` CLI to authenticate");
+            return None;
+        }
+        Err(e) => {
+            log::warn!("[Gemini] oauth_creds.json parse failed (non-fatal): {e}");
             return None;
         }
     };
@@ -144,9 +152,18 @@ fn creds_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".gemini").join("oauth_creds.json"))
 }
 
-fn read_creds(path: &PathBuf) -> Option<CredsFile> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+/// Read + parse oauth_creds.json with three-state outcome:
+/// - `Ok(Some(creds))` — file present and JSON parsed.
+/// - `Ok(None)` — file absent (legitimate "user not signed in" skip).
+/// - `Err(msg)` — file present but read or JSON parse failed (schema drift).
+fn read_creds(path: &Path) -> Result<Option<CredsFile>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| format!("JSON: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("IO: {e}")),
+    }
 }
 
 async fn fetch_tier(token: &str) -> Result<TierInfo, String> {

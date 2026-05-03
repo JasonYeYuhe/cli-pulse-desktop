@@ -2,6 +2,65 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.4] — 2026-05-03
+
+### Fixed
+- **Claude collector schema mismatch.** v0.4.3 `ClaudeCredentials` struct
+  expected flat top-level `{accessToken, expiresAt, ...}`, but real
+  `claude` CLI ≥2.x writes nested `{claudeAiOauth: {accessToken, ...}}`.
+  Every sync silently parsed to `None` (debug-level log) — Claude
+  collector was effectively dead code in v0.4.3 for all real users.
+  v0.4.4 nested-only struct, mirrors CodexBar upstream commit `82bbcde`
+  (`Sources/CodexBarCore/Providers/Claude/ClaudeOAuth/ClaudeOAuthCredentialModels.swift:65-78`).
+  No flat-shape fallback — CodexBar upstream never accepted flat top-level
+  either; matching upstream avoids divergent schema drift. `expiresAt`
+  parsed strictly as epoch milliseconds (drops the v0.4.3 ISO-8601
+  branching code path that was based on incorrect docstring assumption).
+  Caught during VM E2E 2026-05-03 JST — Mac side never had real
+  `~/.claude/.credentials.json` to validate against.
+- **Codex `/wham/usage` parse error.** v0.4.3 `Credits.balance`
+  deserialized as `Option<f64>`, but the real ChatGPT API returns
+  `balance` as a JSON STRING (e.g. `"5.43"`) — verified via
+  `wham_inspect.py` against a live ChatGPT Plus account 2026-05-03 JST.
+  Every cycle's `resp.json::<UsageResponse>()` therefore failed with
+  `parse: error decoding response body`, and Codex collector returned
+  `None` despite valid creds + 200 OK response. v0.4.4 adds a string|
+  number custom deserializer accepting both forms (back-compat for any
+  account where the field was historically a number).
+- **Per-collector log level for schema drift.** Claude / Codex / Gemini
+  `read_*()` helpers now distinguish file-absent (`debug!` — user not
+  signed in, expected) from JSON parse failure (`warn!` — schema drift,
+  surface immediately). v0.4.3 collapsed both into `Option<None>` with
+  `debug!`, which is why the Claude bug above went silent for the
+  entire v0.4.3 era. Future Anthropic / OpenAI / Google response shape
+  changes will now appear in `cli-pulse.log` on the very first cycle.
+
+### Tests
+- 5 new fixture tests in `claude.rs`: nested happy path with
+  `subscriptionType` (silently ignored per upstream), flat-shape yields
+  `oauth=None`, empty `accessToken` preserved through parse, missing
+  `expiresAt` defensively returns false from `is_token_fresh`,
+  past-`expiresAt` returns false. Removed 3 ISO-8601 expiry tests
+  obsoleted by nested-only schema (real claude CLI never writes
+  ISO-8601 there).
+- 2 new fixture tests in `codex.rs`: real `/wham/usage` shape with
+  string `balance` + 9 unknown top-level fields (`account_id`, `email`,
+  `spend_control`, etc. — all silently ignored per default serde
+  semantics); `balance` deserializer accepts string, number, null,
+  empty-string, and absent-field forms.
+
+### Notes
+- Gemini token-expiry behavior unchanged (still v0.4.3 documented
+  limitation per `gemini.rs:10-14`). Explicit `CollectorStatus::Expired`
+  UI warning tracked for v0.4.5+ frontend sprint.
+- helper_sync RPC wiring (`lib.rs::sync_now` building
+  `p_provider_tiers` from `quota::collect_all`) confirmed correct in
+  VM E2E 2026-05-03 JST — server `provider_quotas` row updates
+  correctly as soon as any collector returns `Some(snapshot)`.
+- No server-side schema changes. iOS / Android / Mac unaffected.
+- v0.4.x desktops on auto-update pick this up automatically once
+  v0.4.4 is published.
+
 ## [0.4.3] — 2026-05-02
 
 ### Added

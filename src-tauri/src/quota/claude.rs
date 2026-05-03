@@ -1,15 +1,30 @@
 //! v0.4.0 — Claude OAuth-based quota collection.
+//! v0.4.4 — schema corrected to nested-only.
 //!
 //! Mirrors macOS `ClaudeOAuthStrategy.swift`, ported to Rust + portable I/O
 //! so Win / Linux / Mac desktops can populate `provider_quotas` server-side
 //! independently of whether a Mac scanner is online for the same account.
 //!
-//! Source of truth: `~/.claude/.credentials.json` — Claude Code writes this
-//! file on every successful OAuth sign-in regardless of OS. JSON shape:
-//!     { "accessToken": "sk-ant-oat01-...",
-//!       "refreshToken": "...",
-//!       "expiresAt": "2026-05-09T08:20:00Z" | 1746789600000,
-//!       "rateLimitTier": "max_20x" }  // optional
+//! Source of truth for the on-disk shape: CodexBar upstream commit `82bbcde`
+//! (2026-05-02 16:17 JST), file
+//! `Sources/CodexBarCore/Providers/Claude/ClaudeOAuth/ClaudeOAuthCredentialModels.swift:65-78`.
+//! Real claude CLI ≥2.x writes:
+//!     { "claudeAiOauth": { "accessToken": "sk-ant-oat01-...",
+//!                          "refreshToken": "...",
+//!                          "expiresAt": 1746789600000,
+//!                          "scopes": [...],
+//!                          "subscriptionType": "max",
+//!                          "rateLimitTier": "max_20x" } }
+//! v0.4.3 spec assumed flat top-level (`{accessToken, expiresAt, ...}`),
+//! which never matched real claude CLI output — collector silently returned
+//! `None` for every cycle. v0.4.4: nested-only, no flat fallback. CodexBar
+//! upstream never accepted flat top-level either; matching upstream 1:1
+//! avoids carrying our own divergent schema.
+//!
+//! Note: `subscriptionType` is preserved by Anthropic in the file but
+//! CodexBar upstream does NOT consume it for plan_type; we mirror that.
+//! `format_plan` (v0.4.2) reads `rateLimitTier` exclusively — see
+//! `provider_name_contract` in `mod.rs` for the dual-writer invariant.
 //!
 //! API: `GET https://api.anthropic.com/api/oauth/usage` with
 //!     Authorization: Bearer <accessToken>
@@ -17,12 +32,17 @@
 //!
 //! Best-effort: failures (missing creds, expired token, HTTP error, parse
 //! error) all return `None` so the calling sync_now flow ships an empty
-//! tiers map without aborting sessions/alerts.
+//! tiers map without aborting sessions/alerts. Log levels (v0.4.4):
+//!   - file absent / token expired / no access_token: `debug!` (expected,
+//!     "user not signed in" / "user idle past expiry")
+//!   - file present but JSON parse fails OR `claudeAiOauth` key missing:
+//!     `warn!` (schema drift — surface immediately so future Anthropic
+//!     shape changes don't go silent like v0.4.3 did)
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 
 use super::{QuotaSnapshot, TierEntry};
@@ -34,18 +54,40 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// window. Avoids racing token rotation when Claude Code refreshes.
 const EXPIRY_SAFETY_MARGIN_SECS: i64 = 60;
 
-/// Shape of `~/.claude/.credentials.json`.
+/// Top-level shape of `~/.claude/.credentials.json` (claude CLI ≥2.x).
+/// Single key `claudeAiOauth` wrapping the OAuth payload.
 #[derive(Debug, Clone, Deserialize)]
-struct ClaudeCredentials {
-    #[serde(rename = "accessToken")]
-    access_token: String,
-    /// ISO-8601 string OR epoch milliseconds. Both shapes appear in the
-    /// wild depending on Claude Code version. Stored as a raw JSON value
-    /// so `is_token_fresh` can branch.
+struct ClaudeCredentialsFile {
+    #[serde(rename = "claudeAiOauth", default)]
+    oauth: Option<ClaudeOAuthInner>,
+}
+
+/// Inner OAuth block. Field names match CodexBar upstream
+/// `ClaudeOAuthCredentialModels.swift:65-78` exactly.
+#[derive(Debug, Clone, Deserialize)]
+struct ClaudeOAuthInner {
+    #[serde(rename = "accessToken", default)]
+    access_token: Option<String>,
+    /// Reserved — not currently consumed (passive refresh requires the
+    /// `claude` CLI; v0.4.5+ may add active refresh).
+    #[serde(rename = "refreshToken", default)]
+    #[allow(dead_code)]
+    refresh_token: Option<String>,
+    /// Epoch milliseconds. CodexBar parses as Double, not String —
+    /// real claude CLI never writes ISO-8601 here. v0.4.3 had a string|
+    /// number branching deserializer based on incorrect docstring
+    /// assumption; v0.4.4 drops the string path entirely.
     #[serde(rename = "expiresAt", default)]
-    expires_at: serde_json::Value,
-    /// Optional plan tier ("max_20x", "max_5x", "pro", etc.). Older
-    /// Claude Code installs may omit this.
+    expires_at: Option<f64>,
+    /// Reserved — kept for completeness with CodexBar struct; not read.
+    #[serde(default)]
+    #[allow(dead_code)]
+    scopes: Vec<String>,
+    /// Plan tier source-of-truth ("max_20x", "max_5x", "pro", etc.).
+    /// CodexBar reads this field; v0.4.2 `format_plan` mirrors the same
+    /// lowercase substring matching used in `ClaudeSourceStrategy.swift:166-178`.
+    /// Note: Anthropic also writes `subscriptionType` in the file but
+    /// CodexBar upstream does NOT consume it — we follow upstream.
     #[serde(rename = "rateLimitTier", default)]
     rate_limit_tier: Option<String>,
 }
@@ -116,26 +158,51 @@ where
 
 /// Top-level entry. Reads the persisted Claude credentials, validates
 /// freshness, hits the OAuth /usage API, and maps the response to a
-/// portable `QuotaSnapshot`. Returns `None` on any failure — callers
-/// log at info level and continue without aborting.
-///
-/// `QuotaSnapshot` and `TierEntry` are shared with sibling provider
-/// modules in `quota::mod`.
+/// portable `QuotaSnapshot`. Returns `None` on any failure — log levels
+/// distinguish "user not signed in" (debug) from "schema drift" (warn)
+/// per v0.4.4 module docstring.
 pub async fn collect() -> Option<QuotaSnapshot> {
-    let creds = match read_credentials() {
-        Some(c) => c,
-        None => {
-            log::debug!("Claude .credentials.json absent or unparseable — skipping quota fetch");
+    let path = credentials_path()?;
+    let oauth = match read_credentials(&path) {
+        Ok(Some(file)) => match file.oauth {
+            Some(o) => o,
+            None => {
+                log::warn!(
+                    "Claude .credentials.json missing 'claudeAiOauth' key — schema mismatch \
+                     (real claude CLI ≥2.x writes nested shape; see CodexBar 82bbcde)"
+                );
+                return None;
+            }
+        },
+        Ok(None) => {
+            log::debug!("Claude .credentials.json absent — skipping quota fetch");
+            return None;
+        }
+        Err(e) => {
+            log::warn!("Claude .credentials.json parse failed (non-fatal): {e}");
             return None;
         }
     };
-    if !is_token_fresh(&creds) {
-        log::debug!("Claude OAuth token expired — skipping quota fetch");
+    let access_token = match oauth.access_token.as_deref().filter(|s| !s.is_empty()) {
+        Some(t) => t.to_string(),
+        None => {
+            log::warn!(
+                "Claude .credentials.json claudeAiOauth.accessToken absent or empty — \
+                 corrupted oauth block"
+            );
+            return None;
+        }
+    };
+    if !is_token_fresh(&oauth) {
+        log::debug!(
+            "Claude OAuth access token expired (or expiresAt missing) — \
+             run claude CLI to refresh"
+        );
         return None;
     }
-    match fetch_usage(&creds.access_token).await {
+    match fetch_usage(&access_token).await {
         Ok(usage) => {
-            let snap = map_to_snapshot(&creds, &usage);
+            let snap = map_to_snapshot(&oauth, &usage);
             log::info!(
                 "Claude quota updated: plan={}, tiers={}, remaining={}",
                 snap.plan_type,
@@ -155,28 +222,31 @@ fn credentials_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".claude").join(".credentials.json"))
 }
 
-fn read_credentials() -> Option<ClaudeCredentials> {
-    let path = credentials_path()?;
-    let text = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
-fn is_token_fresh(creds: &ClaudeCredentials) -> bool {
-    parse_expiry(&creds.expires_at)
-        .map(|expiry| expiry > Utc::now() + chrono::Duration::seconds(EXPIRY_SAFETY_MARGIN_SECS))
-        .unwrap_or(false)
-}
-
-/// Parse `expires_at` from either an ISO-8601 string or an epoch-ms
-/// number. Returns `None` for unrecognized shapes.
-fn parse_expiry(v: &serde_json::Value) -> Option<DateTime<Utc>> {
-    match v {
-        serde_json::Value::String(s) => DateTime::parse_from_rfc3339(s)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc)),
-        serde_json::Value::Number(n) => n.as_i64().and_then(DateTime::<Utc>::from_timestamp_millis),
-        _ => None,
+/// Read + parse credentials file with three-state outcome:
+/// - `Ok(Some(file))` — file present and JSON parsed.
+/// - `Ok(None)` — file absent (legitimate "user not signed in" skip).
+/// - `Err(msg)` — file present but read or JSON parse failed (schema drift).
+fn read_credentials(path: &Path) -> Result<Option<ClaudeCredentialsFile>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| format!("JSON: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("IO: {e}")),
     }
+}
+
+/// Token is fresh if `expiresAt` is present and at least
+/// `EXPIRY_SAFETY_MARGIN_SECS` seconds in the future. Missing
+/// `expiresAt` is treated as not-fresh (defensive — a credentials block
+/// without expiry can't be safely used).
+fn is_token_fresh(oauth: &ClaudeOAuthInner) -> bool {
+    let Some(exp_ms) = oauth.expires_at else {
+        return false;
+    };
+    let margin_ms = (EXPIRY_SAFETY_MARGIN_SECS as f64) * 1000.0;
+    let now_ms = Utc::now().timestamp_millis() as f64;
+    exp_ms > now_ms + margin_ms
 }
 
 async fn fetch_usage(access_token: &str) -> Result<UsageResponse, String> {
@@ -207,7 +277,7 @@ async fn fetch_usage(access_token: &str) -> Result<UsageResponse, String> {
         .map_err(|e| format!("parse: {e}"))
 }
 
-fn map_to_snapshot(creds: &ClaudeCredentials, usage: &UsageResponse) -> QuotaSnapshot {
+fn map_to_snapshot(oauth: &ClaudeOAuthInner, usage: &UsageResponse) -> QuotaSnapshot {
     let mut tiers = Vec::new();
     if let Some(w) = &usage.five_hour {
         tiers.push(window_to_tier("5h Window", w));
@@ -227,7 +297,7 @@ fn map_to_snapshot(creds: &ClaudeCredentials, usage: &UsageResponse) -> QuotaSna
     let remaining = tiers.iter().map(|t| t.remaining).min().unwrap_or(100);
     let session_reset = usage.five_hour.as_ref().and_then(|w| w.resets_at.clone());
     QuotaSnapshot {
-        plan_type: format_plan(creds.rate_limit_tier.as_deref()),
+        plan_type: format_plan(oauth.rate_limit_tier.as_deref()),
         remaining,
         quota: 100,
         session_reset,
@@ -308,64 +378,120 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration as ChronoDuration;
 
-    fn creds_with_expiry(v: serde_json::Value) -> ClaudeCredentials {
-        ClaudeCredentials {
-            access_token: "sk-ant-oat01-fake".into(),
-            expires_at: v,
+    fn oauth_with_expires_ms(exp_ms: Option<f64>) -> ClaudeOAuthInner {
+        ClaudeOAuthInner {
+            access_token: Some("sk-ant-oat01-fake".into()),
+            refresh_token: None,
+            expires_at: exp_ms,
+            scopes: vec![],
             rate_limit_tier: Some("max_20x".into()),
         }
     }
 
+    fn oauth_with_tier(tier: Option<&str>) -> ClaudeOAuthInner {
+        ClaudeOAuthInner {
+            access_token: Some("sk-ant-oat01-fake".into()),
+            refresh_token: None,
+            expires_at: None,
+            scopes: vec![],
+            rate_limit_tier: tier.map(String::from),
+        }
+    }
+
+    // ---- v0.4.4 schema fixtures (5 user-spec'd) ----
+
     #[test]
-    fn token_fresh_iso_string_future() {
-        let future = (Utc::now() + ChronoDuration::hours(1)).to_rfc3339();
-        assert!(is_token_fresh(&creds_with_expiry(
-            serde_json::Value::String(future)
-        )));
+    fn parse_nested_shape_happy() {
+        let json = r#"{
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oat01-fake",
+                "refreshToken": "rt-fake",
+                "expiresAt": 1777761408739,
+                "scopes": ["user:profile", "user:inference"],
+                "subscriptionType": "max",
+                "rateLimitTier": "max_20x"
+            }
+        }"#;
+        let parsed: ClaudeCredentialsFile = serde_json::from_str(json).unwrap();
+        let oauth = parsed.oauth.expect("oauth must parse from nested shape");
+        assert_eq!(oauth.access_token.as_deref(), Some("sk-ant-oat01-fake"));
+        assert_eq!(oauth.expires_at, Some(1777761408739.0));
+        assert_eq!(oauth.rate_limit_tier.as_deref(), Some("max_20x"));
+        // Unknown field `subscriptionType` is silently ignored by serde —
+        // CodexBar 82bbcde does not consume it; we follow upstream.
     }
 
     #[test]
-    fn token_not_fresh_iso_string_past() {
-        let past = (Utc::now() - ChronoDuration::hours(1)).to_rfc3339();
-        assert!(!is_token_fresh(&creds_with_expiry(
-            serde_json::Value::String(past)
-        )));
+    fn parse_legacy_flat_shape_yields_none_oauth() {
+        // Pre-v0.4.4 spec assumed flat top-level. CodexBar upstream
+        // never accepted this shape either; nested-only is correct.
+        let json = r#"{
+            "accessToken": "x",
+            "refreshToken": "y",
+            "expiresAt": 1777761408739,
+            "rateLimitTier": "max_20x"
+        }"#;
+        let parsed: ClaudeCredentialsFile = serde_json::from_str(json).unwrap();
+        assert!(
+            parsed.oauth.is_none(),
+            "flat shape (no claudeAiOauth wrapper) must yield oauth=None — \
+             nested-only per CodexBar 82bbcde"
+        );
+    }
+
+    #[test]
+    fn parse_nested_with_empty_access_token() {
+        // collect() must skip with WARN when access_token is empty —
+        // distinguishes "wrong shape" (warn) from "user signed out" (debug).
+        let json = r#"{
+            "claudeAiOauth": {
+                "accessToken": "",
+                "expiresAt": 1777761408739,
+                "rateLimitTier": "pro"
+            }
+        }"#;
+        let parsed: ClaudeCredentialsFile = serde_json::from_str(json).unwrap();
+        let oauth = parsed.oauth.expect("oauth must parse");
+        assert_eq!(oauth.access_token.as_deref(), Some(""));
+        // The empty-string filter lives in collect(); here we only assert
+        // the empty value is preserved through parse so the gate can fire.
+    }
+
+    #[test]
+    fn token_not_fresh_past_expires_at() {
+        let now_ms = Utc::now().timestamp_millis() as f64;
+        let past = oauth_with_expires_ms(Some(now_ms - 60_000.0));
+        assert!(!is_token_fresh(&past));
+    }
+
+    #[test]
+    fn token_not_fresh_missing_expires_at() {
+        let no_exp = oauth_with_expires_ms(None);
+        assert!(
+            !is_token_fresh(&no_exp),
+            "missing expiresAt must defensively return false"
+        );
+    }
+
+    // ---- is_token_fresh edge cases ----
+
+    #[test]
+    fn token_fresh_epoch_ms_future() {
+        let now_ms = Utc::now().timestamp_millis() as f64;
+        let future = oauth_with_expires_ms(Some(now_ms + 3_600_000.0)); // +1h
+        assert!(is_token_fresh(&future));
     }
 
     #[test]
     fn token_not_fresh_within_grace_window() {
-        // 30s in future → less than the 60s safety margin → NOT fresh.
-        let near = (Utc::now() + ChronoDuration::seconds(30)).to_rfc3339();
-        assert!(!is_token_fresh(&creds_with_expiry(
-            serde_json::Value::String(near)
-        )));
+        // 30s in future → less than 60s safety margin → NOT fresh.
+        let now_ms = Utc::now().timestamp_millis() as f64;
+        let near = oauth_with_expires_ms(Some(now_ms + 30_000.0));
+        assert!(!is_token_fresh(&near));
     }
 
-    #[test]
-    fn token_fresh_epoch_ms_future() {
-        let future_ms = (Utc::now() + ChronoDuration::hours(1)).timestamp_millis();
-        assert!(is_token_fresh(&creds_with_expiry(
-            serde_json::Value::Number(future_ms.into())
-        )));
-    }
-
-    #[test]
-    fn token_not_fresh_epoch_ms_past() {
-        let past_ms = (Utc::now() - ChronoDuration::hours(1)).timestamp_millis();
-        assert!(!is_token_fresh(&creds_with_expiry(
-            serde_json::Value::Number(past_ms.into())
-        )));
-    }
-
-    #[test]
-    fn token_not_fresh_unparseable() {
-        assert!(!is_token_fresh(&creds_with_expiry(serde_json::Value::Null)));
-        assert!(!is_token_fresh(&creds_with_expiry(
-            serde_json::Value::String("not-a-date".into())
-        )));
-    }
+    // ---- existing usage-response + map_to_snapshot tests (unchanged behavior) ----
 
     #[test]
     fn parse_full_usage_response() {
@@ -377,8 +503,8 @@ mod tests {
             "seven_day_omelette": {"utilization": 5}
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let creds = creds_with_expiry(serde_json::Value::Null);
-        let snap = map_to_snapshot(&creds, &usage);
+        let oauth = oauth_with_tier(Some("max_20x"));
+        let snap = map_to_snapshot(&oauth, &usage);
         assert_eq!(snap.tiers.len(), 5);
         assert_eq!(snap.tiers[0].name, "5h Window");
         assert_eq!(snap.tiers[0].remaining, 80);
@@ -387,7 +513,6 @@ mod tests {
         assert_eq!(snap.tiers[2].remaining, 98);
         assert_eq!(snap.tiers[3].name, "Designs");
         assert_eq!(snap.tiers[4].name, "Daily Routines");
-        // remaining = min across tiers
         assert_eq!(snap.remaining, 66);
         assert_eq!(snap.quota, 100);
         assert_eq!(snap.plan_type, "Max 20x");
@@ -395,26 +520,20 @@ mod tests {
 
     #[test]
     fn parse_legacy_response_no_launch_windows() {
-        // Older accounts: only five_hour + seven_day.
         let json = r#"{
             "five_hour": {"utilization": 12},
             "seven_day": {"utilization": 40}
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let creds = ClaudeCredentials {
-            access_token: "sk-ant-oat01-fake".into(),
-            expires_at: serde_json::Value::Null,
-            rate_limit_tier: Some("pro".into()),
-        };
-        let snap = map_to_snapshot(&creds, &usage);
+        let oauth = oauth_with_tier(Some("pro"));
+        let snap = map_to_snapshot(&oauth, &usage);
         assert_eq!(snap.tiers.len(), 2);
         assert_eq!(snap.plan_type, "Pro");
-        assert_eq!(snap.remaining, 60); // 100 - 40
+        assert_eq!(snap.remaining, 60);
     }
 
     #[test]
     fn utilization_int_or_float() {
-        // Both shapes coerce cleanly to i64.
         let int_form: UsageWindow = serde_json::from_str(r#"{"utilization": 9}"#).unwrap();
         let float_form: UsageWindow = serde_json::from_str(r#"{"utilization": 9.4}"#).unwrap();
         let float_round_up: UsageWindow = serde_json::from_str(r#"{"utilization": 9.6}"#).unwrap();
@@ -425,23 +544,18 @@ mod tests {
 
     #[test]
     fn format_plan_buckets_match_mac() {
-        // Mirrors ClaudeSourceStrategy.swift:166-178 so dual-writer
-        // produces identical plan_type strings.
         assert_eq!(format_plan(Some("max_20x")), "Max 20x");
         assert_eq!(format_plan(Some("MAX_20x")), "Max 20x");
         assert_eq!(format_plan(Some("max 20x")), "Max 20x");
         assert_eq!(format_plan(Some("max_5x")), "Max 5x");
         assert_eq!(format_plan(Some("max 5x")), "Max 5x");
-        // Generic max → 5x default.
         assert_eq!(format_plan(Some("max")), "Max 5x");
         assert_eq!(format_plan(Some("ultra")), "Ultra");
         assert_eq!(format_plan(Some("pro")), "Pro");
         assert_eq!(format_plan(Some("team")), "Team");
         assert_eq!(format_plan(Some("enterprise")), "Enterprise");
-        // Substring fallback: "custom_enterprise" → "Enterprise".
         assert_eq!(format_plan(Some("custom_enterprise")), "Enterprise");
         assert_eq!(format_plan(Some("free")), "Free");
-        // Empty / None / unrecognized all collapse to "Unknown".
         assert_eq!(format_plan(None), "Unknown");
         assert_eq!(format_plan(Some("")), "Unknown");
         assert_eq!(format_plan(Some("garbage_tier")), "Unknown");
@@ -449,25 +563,20 @@ mod tests {
 
     #[test]
     fn snapshot_remaining_clamps_to_zero() {
-        // utilization > 100 (shouldn't happen but defensive)
         let json = r#"{"five_hour": {"utilization": 120}}"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         assert_eq!(snap.tiers[0].remaining, 0);
     }
 
     #[test]
     fn sonnet_falls_back_to_opus_when_sonnet_absent() {
-        // Mirrors ClaudeSourceStrategy.swift:156: emit "Sonnet only" using
-        // sonnet OR opus. Without this, Mac and Win uploads disagree on
-        // tier count for accounts where only opus is populated.
         let json = r#"{
             "five_hour": {"utilization": 10},
             "seven_day_opus": {"utilization": 25, "resets_at": "2026-05-09T00:00:00Z"}
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
-        // 5h Window + Sonnet only (from opus) = 2 tiers.
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         assert_eq!(snap.tiers.len(), 2);
         let sonnet = snap.tiers.iter().find(|t| t.name == "Sonnet only").unwrap();
         assert_eq!(sonnet.remaining, 75);
@@ -481,24 +590,20 @@ mod tests {
             "seven_day_opus": {"utilization": 90}
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         let sonnet = snap.tiers.iter().find(|t| t.name == "Sonnet only").unwrap();
-        // sonnet wins: remaining = 100 - 5 = 95 (not 100 - 90 = 10).
         assert_eq!(sonnet.remaining, 95);
     }
 
     #[test]
     fn launch_window_present_null_emits_full_remaining() {
-        // Mirrors ClaudeOAuthStrategy.swift:152-160 parseLaunchWindow:
-        // present-but-null means "rolled out but unused" — emit a tier
-        // at 100% remaining so the row appears in the UI.
         let json = r#"{
             "five_hour": {"utilization": 0},
             "iguana_necktie": null,
             "seven_day_omelette": null
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         let designs = snap.tiers.iter().find(|t| t.name == "Designs").unwrap();
         assert_eq!(designs.remaining, 100);
         assert!(designs.reset_time.is_none());
@@ -512,27 +617,21 @@ mod tests {
 
     #[test]
     fn launch_window_absent_skips_tier() {
-        // Distinct from null: key absent means "not on the rollout" —
-        // skip emission entirely.
         let json = r#"{"five_hour": {"utilization": 0}}"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         assert!(!snap.tiers.iter().any(|t| t.name == "Designs"));
         assert!(!snap.tiers.iter().any(|t| t.name == "Daily Routines"));
     }
 
     #[test]
     fn outer_session_reset_taken_from_five_hour() {
-        // Mirrors ClaudeSourceStrategy.swift:217 — outer reset_time is the
-        // 5h Window reset. Without this field on the upload, helper_sync
-        // writes NULL to provider_quotas.reset_time, flickering against
-        // Mac's writes.
         let json = r#"{
             "five_hour": {"utilization": 20, "resets_at": "2026-05-02T22:00:00Z"},
             "seven_day": {"utilization": 50, "resets_at": "2026-05-09T00:00:00Z"}
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         assert_eq!(snap.session_reset.as_deref(), Some("2026-05-02T22:00:00Z"));
     }
 
@@ -540,7 +639,7 @@ mod tests {
     fn outer_session_reset_none_when_five_hour_missing() {
         let json = r#"{"seven_day": {"utilization": 50}}"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
-        let snap = map_to_snapshot(&creds_with_expiry(serde_json::Value::Null), &usage);
+        let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         assert!(snap.session_reset.is_none());
     }
 }

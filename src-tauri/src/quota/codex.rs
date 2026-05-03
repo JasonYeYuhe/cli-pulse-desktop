@@ -18,9 +18,20 @@
 //! optional `ChatGPT-Account-Id: <id>`. 30s timeout.
 //!
 //! Tiers emitted: "5h Window", "Weekly", "Credits".
-//! Best-effort: failures return `None`, structured `[Codex]` WARN log.
+//! Best-effort: failures return `None`, structured `[Codex]` log line.
+//! Log levels (v0.4.4):
+//!   - file absent / no token: `debug!` (user not signed in)
+//!   - file present but JSON parse fails: `warn!` (schema drift)
+//!
+//! v0.4.4 fix — `credits.balance` parser:
+//!   v0.4.3 spec assumed `balance` was a JSON number, but the real
+//!   `/wham/usage` response returns a JSON STRING (e.g. `"5.43"`). Every
+//!   v0.4.3 sync therefore failed `resp.json::<UsageResponse>()` with
+//!   `parse: error decoding response body`. v0.4.4 adds a string|number
+//!   custom deserializer. Verified by `wham_inspect.py` 2026-05-03 JST
+//!   against a live ChatGPT Plus account.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -113,7 +124,11 @@ struct Credits {
     has_credits: bool,
     #[serde(default)]
     unlimited: bool,
-    #[serde(default)]
+    /// Real `/wham/usage` returns `balance` as a JSON STRING (e.g. `"5.43"`),
+    /// not a number — verified 2026-05-03 JST. v0.4.3's `Option<f64>`
+    /// rejected the string and broke parse for every sync cycle.
+    /// v0.4.4: accept either string or number via custom deserializer.
+    #[serde(default, deserialize_with = "deser_balance_string_or_number")]
     balance: Option<f64>,
 }
 
@@ -128,9 +143,13 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         }
     };
     let mut auth = match read_auth(&path) {
-        Some(a) => a,
-        None => {
-            log::debug!("[Codex] auth.json absent or malformed — skipping");
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            log::debug!("[Codex] auth.json absent or no access_token — skipping");
+            return None;
+        }
+        Err(e) => {
+            log::warn!("[Codex] auth.json parse failed (non-fatal): {e}");
             return None;
         }
     };
@@ -164,10 +183,19 @@ fn auth_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".codex").join("auth.json"))
 }
 
-fn read_auth(path: &PathBuf) -> Option<CodexAuth> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let file: AuthFile = serde_json::from_str(&text).ok()?;
-    parse_auth(&file)
+/// Read + parse auth.json with three-state outcome:
+/// - `Ok(Some(auth))` — file present, parsed, has usable access_token.
+/// - `Ok(None)` — file absent OR file parses but no usable token (both
+///   are "user not signed in" → debug skip).
+/// - `Err(msg)` — file present but read or JSON parse failed (schema drift).
+fn read_auth(path: &Path) -> Result<Option<CodexAuth>, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("IO: {e}")),
+    };
+    let file: AuthFile = serde_json::from_str(&text).map_err(|e| format!("JSON: {e}"))?;
+    Ok(parse_auth(&file))
 }
 
 fn parse_auth(file: &AuthFile) -> Option<CodexAuth> {
@@ -240,7 +268,7 @@ async fn refresh_tokens(auth: &CodexAuth) -> Result<CodexAuth, String> {
     })
 }
 
-fn write_auth(path: &PathBuf, auth: &CodexAuth) -> Result<(), String> {
+fn write_auth(path: &Path, auth: &CodexAuth) -> Result<(), String> {
     // Round-trip: read existing JSON to preserve unknown fields, then
     // patch the tokens block + last_refresh.
     let existing = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
@@ -397,6 +425,31 @@ where
     }
 }
 
+/// serde helper: accept `balance` as either JSON number or JSON string.
+/// v0.4.4 fix — real `/wham/usage` returns balance as `"5.43"` (string),
+/// not `5.43` (number). The v0.4.3 spec assumed number; every cycle's
+/// `resp.json::<UsageResponse>()` therefore failed with "parse: error
+/// decoding response body". Verified via wham_inspect.py 2026-05-03 JST.
+fn deser_balance_string_or_number<'de, D>(d: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => Ok(n.as_f64()),
+        serde_json::Value::String(s) => {
+            if s.is_empty() {
+                Ok(None)
+            } else {
+                s.parse::<f64>().map(Some).map_err(Error::custom)
+            }
+        }
+        _ => Err(Error::custom("balance must be string, number, or null")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,6 +515,70 @@ mod tests {
     }
 
     #[test]
+    fn parse_usage_balance_as_string() {
+        // v0.4.4 — reproduces the actual `/wham/usage` response shape
+        // observed via wham_inspect.py 2026-05-03 JST. Real Anthropic
+        // ships `balance` as a JSON string, not a number.
+        let json = r#"{
+            "plan_type": "Plus",
+            "rate_limit": {
+                "primary_window": {"used_percent": 30, "reset_at": 1746789600},
+                "secondary_window": {"used_percent": 50, "reset_at": 1747304400}
+            },
+            "credits": {
+                "has_credits": true,
+                "unlimited": false,
+                "balance": "5.43",
+                "approx_cloud_messages": [10, 100],
+                "approx_local_messages": [5, 50],
+                "overage_limit_reached": false
+            },
+            "account_id": "acc-fake",
+            "additional_rate_limits": null,
+            "code_review_rate_limit": null,
+            "email": "user@example.com",
+            "promo": null,
+            "rate_limit_reached_type": null,
+            "referral_beacon": null,
+            "spend_control": {"individual_limit": null, "reached": false},
+            "user_id": "user-fake"
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json)
+            .expect("v0.4.4 must accept string balance + ignore unknown fields");
+        let snap = map_to_snapshot(&usage);
+        assert_eq!(snap.tiers.len(), 3);
+        assert_eq!(snap.tiers[2].name, "Credits");
+        assert_eq!(snap.tiers[2].quota, 543_000); // "5.43" parsed → 543k units
+        assert_eq!(snap.plan_type, "Plus");
+    }
+
+    #[test]
+    fn balance_deserializer_accepts_string_number_or_null() {
+        // String form (v0.4.4 real-world).
+        let s: Credits =
+            serde_json::from_str(r#"{"has_credits": true, "balance": "9.99"}"#).unwrap();
+        assert_eq!(s.balance, Some(9.99));
+
+        // Number form (v0.4.3 spec assumption + back-compat).
+        let n: Credits = serde_json::from_str(r#"{"has_credits": true, "balance": 9.99}"#).unwrap();
+        assert_eq!(n.balance, Some(9.99));
+
+        // Null form.
+        let null_form: Credits =
+            serde_json::from_str(r#"{"has_credits": true, "balance": null}"#).unwrap();
+        assert_eq!(null_form.balance, None);
+
+        // Empty string → None.
+        let empty: Credits =
+            serde_json::from_str(r#"{"has_credits": true, "balance": ""}"#).unwrap();
+        assert_eq!(empty.balance, None);
+
+        // Absent field → None (default).
+        let absent: Credits = serde_json::from_str(r#"{"has_credits": true}"#).unwrap();
+        assert_eq!(absent.balance, None);
+    }
+
+    #[test]
     fn parse_usage_no_credits_block() {
         let json = r#"{
             "plan_type": "Free",
@@ -481,7 +598,6 @@ mod tests {
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
         let snap = map_to_snapshot(&usage);
         assert!(snap.session_reset.is_some());
-        // Round-trip: 1746789600 = 2025-05-09T... etc.
         assert!(snap.session_reset.unwrap().starts_with("20"));
     }
 
@@ -498,7 +614,7 @@ mod tests {
     #[test]
     fn parse_usage_unlimited_credits_skips_tier() {
         let json = r#"{
-            "credits": {"has_credits": true, "unlimited": true, "balance": 999.99}
+            "credits": {"has_credits": true, "unlimited": true, "balance": "999.99"}
         }"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
         let snap = map_to_snapshot(&usage);
