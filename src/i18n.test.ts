@@ -137,3 +137,30 @@ describe("i18n plural forms (v0.4.5)", () => {
     expect(mod.default.t("providers.models", { count: 3 })).toBe("3 モデル");
   });
 });
+
+describe("i18n number formatter (v0.4.6)", () => {
+  // v0.4.6 — `{{count, number}}` runs the integer through Intl.NumberFormat
+  // with the active language so 2782 renders as "2,782" instead of "2782".
+  // VM 2026-05-04 flagged that v0.4.5 left numbers unformatted in the
+  // plural-routed messages key. Fix: i18n.ts adds a `format` callback for
+  // the `number` formatter; locale strings opt in via `{{count, number}}`.
+
+  it("en messages key applies thousands separator for large counts", async () => {
+    const { default: i18n } = await freshI18n();
+    i18n.changeLanguage("en");
+    expect(i18n.t("providers.messages", { count: 2782 })).toBe("2,782 msgs");
+    expect(i18n.t("providers.messages", { count: 1234567 })).toBe("1,234,567 msgs");
+  });
+
+  it("zh-CN messages key applies thousands separator (CLDR: zh-CN uses comma)", async () => {
+    const mod = await freshI18n();
+    mod.setLang("zh-CN");
+    expect(mod.default.t("providers.messages", { count: 2782 })).toBe("2,782 条消息");
+  });
+
+  it("ja messages key applies thousands separator (CLDR: ja uses comma)", async () => {
+    const mod = await freshI18n();
+    mod.setLang("ja");
+    expect(mod.default.t("providers.messages", { count: 2782 })).toBe("2,782 メッセージ");
+  });
+});

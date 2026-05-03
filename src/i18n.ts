@@ -45,7 +45,21 @@ i18n.use(initReactI18next).init({
   },
   lng: detectInitialLang(),
   fallbackLng: "en",
-  interpolation: { escapeValue: false },
+  interpolation: {
+    escapeValue: false,
+    // v0.4.6 — `{{n, number}}` formatter routes through Intl.NumberFormat
+    // with the active language so 2782 renders as "2,782" in en/zh-CN/ja
+    // (all three use the comma per CLDR). VM 2026-05-04 flagged that
+    // numbers were being interpolated as raw `String(n)` ("2782") under
+    // v0.4.5's plural-aware {{count}} interpolation, since by default
+    // i18next doesn't run numbers through toLocaleString.
+    format: (value, fmt, lng) => {
+      if (fmt === "number" && typeof value === "number") {
+        return value.toLocaleString(lng ?? "en-US");
+      }
+      return String(value);
+    },
+  },
   returnNull: false,
 });
 

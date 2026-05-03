@@ -22,7 +22,8 @@
     "syncing": "同步中…",
     "unpair_device": "解除配对",
     "check_updates": "检查更新",
-    "checking": "检查中…"
+    "checking": "检查中…",
+    "cancel": "取消"
   },
   "tab": {
     "overview": "概览",
@@ -54,8 +55,8 @@
     "tile_unresolved_alerts": "未解决告警"
   },
   "providers": {
-    "active_days_other": "{{count}} 天活跃",
-    "messages_other": "{{count}} 条消息",
+    "active_days_other": "{{count, number}} 天活跃",
+    "messages_other": "{{count, number}} 条消息",
     "models_other": "{{count}} 个模型",
     "no_usage": "近 30 天未检测到使用。",
     "io_tokens": "{{value}} 条 I/O Token",
@@ -127,7 +128,28 @@
     "about_diagnostics_hint": "提交问题时把这块信息复制进去。",
     "about_copy_diagnostics": "复制诊断信息",
     "about_copied": "已复制!",
-    "about_repo_link": "在 GitHub 打开仓库"
+    "about_repo_link": "在 GitHub 打开仓库",
+    "integrations": {
+      "heading": "集成",
+      "description": "为无 OAuth 文件的服务商配置认证 token。以 0600 文件权限保存在配置目录。",
+      "cursor_cookie_label": "Cursor 会话 Cookie",
+      "cursor_cookie_help": "从 cursor.com 浏览器开发者工具 → 应用 → Cookies 中复制",
+      "copilot_token_label": "GitHub Copilot Token",
+      "copilot_token_help": "来自 GitHub OAuth 或 Copilot CLI 的 COPILOT_API_TOKEN 环境变量",
+      "openrouter_api_key_label": "OpenRouter API Key",
+      "openrouter_api_key_help": "在 openrouter.ai/keys 生成",
+      "openrouter_advanced_toggle": "高级设置",
+      "openrouter_base_url_label": "自定义接入点(可选)",
+      "openrouter_base_url_placeholder": "https://openrouter.ai/api/v1",
+      "status_configured": "已配置",
+      "status_not_set": "未设置",
+      "save_button": "保存",
+      "clear_button": "清除",
+      "clear_confirm_title": "清除 {{provider}} 凭证?",
+      "clear_confirm_body": "你需要从原处重新粘贴。此操作不可撤销。",
+      "clear_confirm_action": "清除",
+      "env_override_banner": "环境变量 {{var}} 正在覆盖此保存的值。请从系统中移除该变量以生效。"
+    }
   },
   "updater": {
     "up_to_date": "已是最新版本。",

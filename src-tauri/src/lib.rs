@@ -13,6 +13,7 @@ pub mod keychain;
 pub mod notify;
 pub mod paths;
 pub mod pricing;
+pub mod provider_creds;
 pub mod quota;
 pub mod scanner;
 pub mod sentry_init;
@@ -27,7 +28,7 @@ use std::time::Duration;
 use config::HelperConfig;
 use once_cell::sync::Lazy;
 use scanner::ScanResult;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::async_runtime;
 
@@ -711,6 +712,98 @@ async fn get_daily_usage(days: Option<u32>) -> Result<Vec<supabase::DailyUsageRo
     Ok(v)
 }
 
+// v0.4.6 — Settings UI for provider credentials. Backend lives in
+// `provider_creds.rs` (atomic write + cache + mode 0600). Two commands:
+// - `get_provider_creds`: returns mask-only view ("Configured" / "Not set"
+//   bool per field) plus env-var override flags. Never returns raw secrets.
+// - `set_provider_creds`: merges partial update into file; None field =
+//   leave unchanged; Some("") = clear that field.
+
+#[derive(Debug, Clone, Serialize)]
+struct ProviderCredsView {
+    cursor_cookie_set: bool,
+    copilot_token_set: bool,
+    openrouter_api_key_set: bool,
+    /// Optional override for OpenRouter's API URL — NOT secret, returned
+    /// plaintext so the Settings UI can show the current custom endpoint
+    /// (or empty if using default openrouter.ai).
+    openrouter_base_url: Option<String>,
+    /// Per-Codex review concern #5: when the user has set an env var AND
+    /// also saved a value via the Settings UI, the env var wins (collector
+    /// priority is env → file → none). Surface this so the UI can render
+    /// the env_override_banner copy. Detected at command-call time, not
+    /// at app launch — env vars set after launch by the user's shell are
+    /// inherited only by THIS process; we read what we can see.
+    env_override_cursor: bool,
+    env_override_copilot: bool,
+    env_override_openrouter_key: bool,
+    env_override_openrouter_url: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct ProviderCredsUpdate {
+    /// `None` = leave field unchanged; `Some("")` = explicit clear;
+    /// `Some(v)` = set new value.
+    cursor_cookie: Option<String>,
+    copilot_token: Option<String>,
+    openrouter_api_key: Option<String>,
+    openrouter_base_url: Option<String>,
+}
+
+fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
+    let env_set = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty());
+    ProviderCredsView {
+        cursor_cookie_set: c.cursor_cookie.as_deref().is_some_and(|s| !s.is_empty()),
+        copilot_token_set: c.copilot_token.as_deref().is_some_and(|s| !s.is_empty()),
+        openrouter_api_key_set: c
+            .openrouter_api_key
+            .as_deref()
+            .is_some_and(|s| !s.is_empty()),
+        openrouter_base_url: c.openrouter_base_url.clone(),
+        env_override_cursor: env_set("CURSOR_COOKIE"),
+        env_override_copilot: env_set("COPILOT_API_TOKEN"),
+        env_override_openrouter_key: env_set("OPENROUTER_API_KEY"),
+        env_override_openrouter_url: env_set("OPENROUTER_API_URL"),
+    }
+}
+
+#[tauri::command]
+async fn get_provider_creds() -> Result<ProviderCredsView, String> {
+    let creds = provider_creds::load().map_err(|e| e.to_string())?;
+    Ok(build_provider_creds_view(&creds))
+}
+
+#[tauri::command]
+async fn set_provider_creds(
+    update: ProviderCredsUpdate,
+    app: tauri::AppHandle,
+) -> Result<ProviderCredsView, String> {
+    use tauri::Emitter;
+    let mut current = provider_creds::load().map_err(|e| e.to_string())?;
+    // For each field: None = leave alone; Some("") = clear; Some(v) = set.
+    if let Some(v) = update.cursor_cookie {
+        current.cursor_cookie = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.copilot_token {
+        current.copilot_token = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.openrouter_api_key {
+        current.openrouter_api_key = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.openrouter_base_url {
+        current.openrouter_base_url = if v.is_empty() { None } else { Some(v) };
+    }
+    provider_creds::save(&current).map_err(|e| e.to_string())?;
+    // Emit event so the background sync loop (or any other listener) can
+    // trigger an immediate sync. Frontend doesn't depend on this — the
+    // next ~120s tick will pick the new value up regardless. The event
+    // exists for the future fast-feedback UX where Settings UI invokes
+    // sync_now directly.
+    let _ = app.emit("provider_creds_changed", ());
+    Ok(build_provider_creds_view(&current))
+}
+
 #[derive(Debug, Serialize)]
 struct SyncReport {
     sessions_synced: i64,
@@ -1122,6 +1215,9 @@ pub fn run() {
             get_dashboard_summary,
             get_provider_summary,
             get_daily_usage,
+            // v0.4.6 — Settings UI for provider credentials
+            get_provider_creds,
+            set_provider_creds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

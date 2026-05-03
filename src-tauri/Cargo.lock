@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "cli-pulse-desktop"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -625,6 +625,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "uuid",

@@ -1354,6 +1354,8 @@ function Settings({
 
       <ExportSection scan={scan} />
 
+      <IntegrationsSection />
+
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
         <h2 className="text-sm font-semibold text-neutral-300">{t("settings.updates_heading")}</h2>
         <UpdaterPanel
@@ -1382,6 +1384,281 @@ function Settings({
         </div>
       )}
     </div>
+  );
+}
+
+// v0.4.6 — Settings UI for provider credentials (Cursor / Copilot /
+// OpenRouter). Calls Tauri commands `get_provider_creds` /
+// `set_provider_creds`. Backend lives in `provider_creds.rs`.
+//
+// Design per Gemini 3.1 Pro 2026-05-04 review:
+// - No-peek (#1): UI never re-displays raw saved value, only "Configured"
+//   / "Not set" status.
+// - Friendly error copy (#2): map HTTP statuses to localized strings.
+// - Single-line password input (#3): Cursor cookie too, not textarea.
+// - "Integrations" placement (#6): bottom of Settings tab, dedicated section.
+// - 2-state save flow (#7): spinner during save+sync, then green "Configured".
+// - Clear confirmation modal (#8): one-click is a UX trap.
+// - OpenRouter base URL behind Advanced toggle (#9): default-hidden.
+
+type ProviderCredsView = {
+  cursor_cookie_set: boolean;
+  copilot_token_set: boolean;
+  openrouter_api_key_set: boolean;
+  openrouter_base_url: string | null;
+  env_override_cursor: boolean;
+  env_override_copilot: boolean;
+  env_override_openrouter_key: boolean;
+  env_override_openrouter_url: boolean;
+};
+
+type ProviderCredsUpdateKey =
+  | "cursor_cookie"
+  | "copilot_token"
+  | "openrouter_api_key"
+  | "openrouter_base_url";
+
+function IntegrationsSection() {
+  const { t } = useTranslation();
+  const [view, setView] = useState<ProviderCredsView | null>(null);
+  const [drafts, setDrafts] = useState<Partial<Record<ProviderCredsUpdateKey, string>>>({});
+  const [savingField, setSavingField] = useState<ProviderCredsUpdateKey | null>(null);
+  const [confirmClear, setConfirmClear] = useState<ProviderCredsUpdateKey | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const v = await invoke<ProviderCredsView>("get_provider_creds");
+      setView(v);
+    } catch (e: any) {
+      setError(String(e));
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function saveField(key: ProviderCredsUpdateKey, value: string) {
+    setSavingField(key);
+    setError(null);
+    try {
+      const v = await invoke<ProviderCredsView>("set_provider_creds", {
+        update: { [key]: value },
+      });
+      setView(v);
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[key];
+        return next;
+      });
+    } catch (e: any) {
+      setError(String(e));
+    } finally {
+      setSavingField(null);
+    }
+  }
+
+  if (!view) {
+    return (
+      <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+        <h2 className="text-sm font-semibold text-neutral-300">
+          {t("settings.integrations.heading")}
+        </h2>
+      </section>
+    );
+  }
+
+  const rows: {
+    provider: string;
+    key: ProviderCredsUpdateKey;
+    labelKey: string;
+    helpKey: string;
+    isSet: boolean;
+    envOverride: boolean;
+    envVar: string;
+  }[] = [
+    {
+      provider: "Cursor",
+      key: "cursor_cookie",
+      labelKey: "settings.integrations.cursor_cookie_label",
+      helpKey: "settings.integrations.cursor_cookie_help",
+      isSet: view.cursor_cookie_set,
+      envOverride: view.env_override_cursor,
+      envVar: "CURSOR_COOKIE",
+    },
+    {
+      provider: "Copilot",
+      key: "copilot_token",
+      labelKey: "settings.integrations.copilot_token_label",
+      helpKey: "settings.integrations.copilot_token_help",
+      isSet: view.copilot_token_set,
+      envOverride: view.env_override_copilot,
+      envVar: "COPILOT_API_TOKEN",
+    },
+    {
+      provider: "OpenRouter",
+      key: "openrouter_api_key",
+      labelKey: "settings.integrations.openrouter_api_key_label",
+      helpKey: "settings.integrations.openrouter_api_key_help",
+      isSet: view.openrouter_api_key_set,
+      envOverride: view.env_override_openrouter_key,
+      envVar: "OPENROUTER_API_KEY",
+    },
+  ];
+
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-4">
+      <h2 className="text-sm font-semibold text-neutral-300">
+        {t("settings.integrations.heading")}
+      </h2>
+      <p className="text-xs text-neutral-500">{t("settings.integrations.description")}</p>
+
+      {rows.map((row) => {
+        const draftVal = drafts[row.key];
+        const isSaving = savingField === row.key;
+        const canSave = draftVal != null && draftVal !== "" && !isSaving;
+        return (
+          <div key={row.key} className="space-y-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="text-xs font-medium text-neutral-300">{t(row.labelKey)}</label>
+              <span
+                className={`text-xs ${row.isSet ? "text-emerald-300" : "text-neutral-500"}`}
+              >
+                {t(
+                  row.isSet
+                    ? "settings.integrations.status_configured"
+                    : "settings.integrations.status_not_set"
+                )}
+              </span>
+            </div>
+            <p className="text-xs text-neutral-500">{t(row.helpKey)}</p>
+            {row.envOverride && (
+              <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-900 rounded px-2 py-1">
+                {t("settings.integrations.env_override_banner", { var: row.envVar })}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={draftVal ?? ""}
+                onChange={(e) => setDrafts({ ...drafts, [row.key]: e.target.value })}
+                placeholder={row.isSet ? "••••••••" : ""}
+                spellCheck={false}
+                autoComplete="off"
+                className="flex-1 px-2 py-1 text-xs font-mono bg-neutral-950 border border-neutral-800 rounded text-neutral-200"
+                disabled={isSaving}
+              />
+              <button
+                type="button"
+                onClick={() => canSave && saveField(row.key, draftVal!)}
+                disabled={!canSave}
+                className="px-3 py-1 text-xs rounded bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-900 text-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isSaving ? "…" : t("settings.integrations.save_button")}
+              </button>
+              {row.isSet && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClear(row.key)}
+                  disabled={isSaving}
+                  className="px-3 py-1 text-xs rounded bg-red-950/40 hover:bg-red-900/60 border border-red-900 text-red-300 disabled:opacity-40"
+                >
+                  {t("settings.integrations.clear_button")}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* OpenRouter base URL — Advanced toggle (Gemini #9) */}
+      <div className="border-t border-neutral-800 pt-3">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="text-xs text-neutral-400 hover:text-neutral-200"
+        >
+          {showAdvanced ? "▼ " : "▶ "}
+          {t("settings.integrations.openrouter_advanced_toggle")}
+        </button>
+        {showAdvanced && (
+          <div className="mt-2 space-y-1">
+            <label className="text-xs text-neutral-300">
+              {t("settings.integrations.openrouter_base_url_label")}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={drafts.openrouter_base_url ?? view.openrouter_base_url ?? ""}
+                onChange={(e) =>
+                  setDrafts({ ...drafts, openrouter_base_url: e.target.value })
+                }
+                placeholder={t("settings.integrations.openrouter_base_url_placeholder") || ""}
+                className="flex-1 px-2 py-1 text-xs font-mono bg-neutral-950 border border-neutral-800 rounded text-neutral-200"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  saveField("openrouter_base_url", drafts.openrouter_base_url ?? "")
+                }
+                disabled={
+                  drafts.openrouter_base_url == null || savingField === "openrouter_base_url"
+                }
+                className="px-3 py-1 text-xs rounded bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-900 text-emerald-200 disabled:opacity-40"
+              >
+                {savingField === "openrouter_base_url"
+                  ? "…"
+                  : t("settings.integrations.save_button")}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="px-3 py-2 text-xs rounded bg-red-950/60 border border-red-900 text-red-200">
+          {error}
+        </div>
+      )}
+
+      {/* Confirm modal for clear (Gemini #8) */}
+      {confirmClear && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 max-w-sm w-full space-y-3 shadow-xl">
+            <h3 className="text-sm font-semibold text-neutral-100">
+              {t("settings.integrations.clear_confirm_title", {
+                provider: rows.find((r) => r.key === confirmClear)?.provider ?? confirmClear,
+              })}
+            </h3>
+            <p className="text-xs text-neutral-400">
+              {t("settings.integrations.clear_confirm_body")}
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfirmClear(null)}
+                className="px-3 py-1 text-xs rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+              >
+                {t("action.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const k = confirmClear;
+                  setConfirmClear(null);
+                  await saveField(k, "");
+                }}
+                className="px-3 py-1 text-xs rounded bg-red-950/60 border border-red-900 text-red-200 hover:bg-red-900/60"
+              >
+                {t("settings.integrations.clear_confirm_action")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

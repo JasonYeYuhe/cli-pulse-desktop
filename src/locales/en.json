@@ -22,7 +22,8 @@
     "syncing": "Syncing…",
     "unpair_device": "Unpair device",
     "check_updates": "Check for updates",
-    "checking": "Checking…"
+    "checking": "Checking…",
+    "cancel": "Cancel"
   },
   "tab": {
     "overview": "Overview",
@@ -54,10 +55,10 @@
     "tile_unresolved_alerts": "Unresolved alerts"
   },
   "providers": {
-    "active_days_one": "{{count}} active day",
-    "active_days_other": "{{count}} active days",
-    "messages_one": "{{count}} msg",
-    "messages_other": "{{count}} msgs",
+    "active_days_one": "{{count, number}} active day",
+    "active_days_other": "{{count, number}} active days",
+    "messages_one": "{{count, number}} msg",
+    "messages_other": "{{count, number}} msgs",
     "models_one": "{{count}} model",
     "models_other": "{{count}} models",
     "no_usage": "No usage found in last 30 days.",
@@ -130,7 +131,28 @@
     "about_diagnostics_hint": "Copy this block when reporting an issue.",
     "about_copy_diagnostics": "Copy diagnostics",
     "about_copied": "Copied!",
-    "about_repo_link": "Open repository on GitHub"
+    "about_repo_link": "Open repository on GitHub",
+    "integrations": {
+      "heading": "Integrations",
+      "description": "Configure auth tokens for providers that don't use OAuth files. Saved with file-mode 0600 in your config dir.",
+      "cursor_cookie_label": "Cursor session cookie",
+      "cursor_cookie_help": "Paste from cursor.com browser DevTools → Application → Cookies",
+      "copilot_token_label": "GitHub Copilot token",
+      "copilot_token_help": "From GitHub OAuth or your Copilot CLI's COPILOT_API_TOKEN env",
+      "openrouter_api_key_label": "OpenRouter API key",
+      "openrouter_api_key_help": "Generate at openrouter.ai/keys",
+      "openrouter_advanced_toggle": "Advanced settings",
+      "openrouter_base_url_label": "Custom endpoint (optional)",
+      "openrouter_base_url_placeholder": "https://openrouter.ai/api/v1",
+      "status_configured": "Configured",
+      "status_not_set": "Not set",
+      "save_button": "Save",
+      "clear_button": "Clear",
+      "clear_confirm_title": "Clear {{provider}} credential?",
+      "clear_confirm_body": "You'll need to re-paste it from the source. This can't be undone.",
+      "clear_confirm_action": "Clear",
+      "env_override_banner": "The environment variable {{var}} is currently overriding this saved value. Remove it from your system to use this setting."
+    }
   },
   "updater": {
     "up_to_date": "You're on the latest version.",

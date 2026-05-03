@@ -22,7 +22,8 @@
     "syncing": "同期中…",
     "unpair_device": "ペアリング解除",
     "check_updates": "アップデート確認",
-    "checking": "確認中…"
+    "checking": "確認中…",
+    "cancel": "キャンセル"
   },
   "tab": {
     "overview": "概要",
@@ -54,8 +55,8 @@
     "tile_unresolved_alerts": "未解決のアラート"
   },
   "providers": {
-    "active_days_other": "{{count}} 日間アクティブ",
-    "messages_other": "{{count}} メッセージ",
+    "active_days_other": "{{count, number}} 日間アクティブ",
+    "messages_other": "{{count, number}} メッセージ",
     "models_other": "{{count}} モデル",
     "no_usage": "直近 30 日間の利用はありません。",
     "io_tokens": "{{value}} I/O トークン",
@@ -127,7 +128,28 @@
     "about_diagnostics_hint": "問題を報告する際にこのブロックをコピーして添付してください。",
     "about_copy_diagnostics": "診断情報をコピー",
     "about_copied": "コピーしました!",
-    "about_repo_link": "GitHub でリポジトリを開く"
+    "about_repo_link": "GitHub でリポジトリを開く",
+    "integrations": {
+      "heading": "連携サービス",
+      "description": "OAuth ファイルを使わないプロバイダーの認証トークンを設定します。設定ディレクトリにファイルモード 0600 で保存されます。",
+      "cursor_cookie_label": "Cursor セッション Cookie",
+      "cursor_cookie_help": "cursor.com のブラウザ開発者ツール → アプリケーション → Cookie から貼り付け",
+      "copilot_token_label": "GitHub Copilot トークン",
+      "copilot_token_help": "GitHub OAuth または Copilot CLI の COPILOT_API_TOKEN 環境変数から取得",
+      "openrouter_api_key_label": "OpenRouter API キー",
+      "openrouter_api_key_help": "openrouter.ai/keys で生成",
+      "openrouter_advanced_toggle": "詳細設定",
+      "openrouter_base_url_label": "カスタムエンドポイント(任意)",
+      "openrouter_base_url_placeholder": "https://openrouter.ai/api/v1",
+      "status_configured": "設定済み",
+      "status_not_set": "未設定",
+      "save_button": "保存",
+      "clear_button": "削除",
+      "clear_confirm_title": "{{provider}} の認証情報を削除しますか?",
+      "clear_confirm_body": "元のソースから再度貼り付ける必要があります。この操作は取り消せません。",
+      "clear_confirm_action": "削除",
+      "env_override_banner": "環境変数 {{var}} が保存された値を上書きしています。この設定を有効にするにはシステムから変数を削除してください。"
+    }
   },
   "updater": {
     "up_to_date": "最新バージョンです。",

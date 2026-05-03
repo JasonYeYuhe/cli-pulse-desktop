@@ -59,14 +59,24 @@ struct OnDemandUsage {
     limit: Option<i64>,
 }
 
-/// Collect Cursor quota. Returns `None` if `CURSOR_COOKIE` env is
-/// unset or HTTP/parse fails — `[Cursor]`-prefixed log line in either
-/// case.
+/// Collect Cursor quota. v0.4.6 — credential read priority:
+///   1. Env `CURSOR_COOKIE` (backwards compat for power users)
+///   2. `provider_creds.json` `cursor_cookie` field (Settings UI)
+///   3. None → silent debug skip.
 pub async fn collect() -> Option<QuotaSnapshot> {
-    let cookie = match std::env::var("CURSOR_COOKIE") {
-        Ok(s) if !s.is_empty() => s,
-        _ => {
-            log::debug!("[Cursor] CURSOR_COOKIE env var not set — skipping");
+    let cookie = std::env::var("CURSOR_COOKIE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            crate::provider_creds::load()
+                .ok()
+                .and_then(|c| c.cursor_cookie)
+                .filter(|s| !s.is_empty())
+        });
+    let cookie = match cookie {
+        Some(c) => c,
+        None => {
+            log::debug!("[Cursor] no credential (env or Settings UI) — skipping");
             return None;
         }
     };

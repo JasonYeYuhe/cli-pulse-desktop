@@ -50,13 +50,24 @@ struct TierSnapshot {
     percent_remaining: Option<f64>,
 }
 
-/// Collect Copilot quota. Returns `None` if `COPILOT_API_TOKEN` env
-/// is unset or HTTP fails — `[Copilot]` log line either way.
+/// Collect Copilot quota. v0.4.6 — credential read priority:
+///   1. Env `COPILOT_API_TOKEN` (backwards compat for power users)
+///   2. `provider_creds.json` `copilot_token` field (Settings UI)
+///   3. None → silent debug skip.
 pub async fn collect() -> Option<QuotaSnapshot> {
-    let token = match std::env::var("COPILOT_API_TOKEN") {
-        Ok(s) if !s.is_empty() => s,
-        _ => {
-            log::debug!("[Copilot] COPILOT_API_TOKEN env var not set — skipping");
+    let token = std::env::var("COPILOT_API_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            crate::provider_creds::load()
+                .ok()
+                .and_then(|c| c.copilot_token)
+                .filter(|s| !s.is_empty())
+        });
+    let token = match token {
+        Some(t) => t,
+        None => {
+            log::debug!("[Copilot] no credential (env or Settings UI) — skipping");
             return None;
         }
     };

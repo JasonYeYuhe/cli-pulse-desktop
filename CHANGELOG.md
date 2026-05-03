@@ -2,6 +2,88 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.6] — 2026-05-04
+
+### Added
+- **Settings → Integrations panel for Cursor / Copilot / OpenRouter
+  credentials.** v0.4.3 introduced these three providers but only read
+  credentials from environment variables — a non-technical user had no
+  in-app way to configure them. v0.4.6 adds a dedicated "Integrations"
+  section at the bottom of the Settings tab with three rows:
+  - Cursor session cookie
+  - GitHub Copilot token
+  - OpenRouter API key (with optional custom endpoint behind an
+    "Advanced settings" toggle)
+  Each row shows status (Configured / Not set) and an env-override
+  warning banner when the corresponding env var is set, since the env
+  takes priority over the saved value (backwards-compatible read order:
+  env → file → none). Save is per-row; Clear opens a confirmation
+  modal. Once saved, the raw value is never re-displayed — the UI only
+  shows status. Replace by typing a new value or click Clear.
+- **Locale-aware number formatting via i18next.** v0.4.5 plural-aware
+  message keys (`{{count}} msgs`) interpolated raw integer strings
+  ("2782 msgs"), losing the thousands separator that v0.4.4 and earlier
+  rendered ("2,782 msgs"). v0.4.6 adds an i18next `number` formatter
+  that routes numbers through `Intl.NumberFormat` with the active
+  language; locale strings opt in via `{{count, number}}`. en / zh-CN
+  / ja all use comma per CLDR.
+- **Atomic credential persistence.** New `provider_creds.json` lives in
+  the same per-user config dir as the existing `config.json`. Same
+  security model: file mode 0600 on Unix (set BEFORE rename, so no
+  permission window), per-user `%APPDATA%` ACL default on Windows.
+  Atomic write via `tempfile::NamedTempFile` + persist; in-memory
+  read-side cache invalidated on every save so live edits take effect
+  on the next sync cycle without re-reading disk per-collector. Schema
+  versioned (`version: 1`) for v0.4.7+ stronghold migration.
+
+### Changed
+- `quota/cursor.rs` / `quota/copilot.rs` / `quota/openrouter.rs`
+  credential read priority: env var → `provider_creds.json` → none.
+  Existing v0.4.5 env-var users keep working identically; new users go
+  through the UI.
+
+### Reviews
+- **Gemini 3.1 Pro (2026-05-04)** — UX / product / i18n review of v0.4.6
+  spec. 10 findings: 4 FAILs resolved inline in spec (textarea →
+  password input, dedicated Integrations section vs Account/Budget
+  sandwich, 4-state save → 2-state, clear-confirmation modal), 4
+  ship-it-with-nits (HTTP 401 friendly copy mapping, zh-CN/ja
+  translation specifics, env-override banner copy, OpenRouter base URL
+  behind Advanced toggle), 2 ship-its (no-peek decision, zh-CN comma
+  format).
+
+### Tests
+- 6 new Rust unit tests in `provider_creds.rs` (round-trip empty/
+  populated, missing version defaults to 1, malformed JSON surfaces
+  Err, unknown fields ignored, empty-string credential semantics).
+- 3 new Vitest tests in `i18n.test.ts` for the number formatter
+  (en/zh-CN/ja messages key with count=2782 renders "2,782 msgs"
+  variant in each locale).
+- Total: **121 Rust lib tests + 33 Vitest tests** (was 115 + 30 in v0.4.5).
+
+### Deferred to v0.4.7+
+- **CI dynamic matrix** for tag-push Windows-only optimization. v0.4.5
+  attempt at job-level `if: matrix.platform` broke the workflow; v0.4.6
+  ships with the same 4-platform build to avoid stacking pipeline risk
+  with feature work. v0.4.7 will do this as a focused CI sprint with a
+  throwaway rc tag for validation.
+- **OS keychain / `tauri-plugin-stronghold`** migration. Plaintext
+  mode-0600 storage is the v0.4.6 baseline; v0.4.7+ migrates to true
+  cross-platform keychain.
+- **Active Gemini OAuth refresh.** Still requires the user to run
+  `gemini` CLI periodically to refresh `oauth_creds.json`.
+- **OpenRouter i32 overflow** at $21k+ balance. Backend bigint
+  migration pending user flag per autonomy rules.
+
+### Notes
+- Existing env-var users (CURSOR_COOKIE / COPILOT_API_TOKEN /
+  OPENROUTER_API_KEY / OPENROUTER_API_URL) continue to work
+  unchanged; env values take priority over saved file values, with a
+  banner in the Settings UI explaining the override.
+- No server-side schema changes. iOS / Android / Mac unaffected.
+- v0.4.x desktops on auto-update pick this up automatically once
+  v0.4.6 is published.
+
 ## [0.4.5] — 2026-05-04
 
 ### Fixed

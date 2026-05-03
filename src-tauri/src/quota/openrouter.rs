@@ -57,19 +57,41 @@ struct KeyData {
     usage: Option<f64>,
 }
 
-/// Collect OpenRouter quota. Returns `None` if `OPENROUTER_API_KEY`
-/// env is unset or `/credits` HTTP fails. `/key` failure is non-fatal
-/// (Credits tier still emits). `[OpenRouter]` log prefix.
+/// Collect OpenRouter quota. v0.4.6 — credential read priority for both
+/// API key and base URL:
+///   1. Env `OPENROUTER_API_KEY` / `OPENROUTER_API_URL` (backwards compat)
+///   2. `provider_creds.json` `openrouter_api_key` / `openrouter_base_url`
+///   3. None for key → silent debug skip; default for URL → openrouter.ai.
 pub async fn collect() -> Option<QuotaSnapshot> {
-    let api_key = match std::env::var("OPENROUTER_API_KEY") {
-        Ok(s) if !s.is_empty() => s,
-        _ => {
-            log::debug!("[OpenRouter] OPENROUTER_API_KEY env var not set — skipping");
+    let saved = crate::provider_creds::load().ok();
+
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            saved
+                .as_ref()
+                .and_then(|c| c.openrouter_api_key.clone())
+                .filter(|s| !s.is_empty())
+        });
+    let api_key = match api_key {
+        Some(k) => k,
+        None => {
+            log::debug!("[OpenRouter] no API key (env or Settings UI) — skipping");
             return None;
         }
     };
-    let base_url =
-        std::env::var("OPENROUTER_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+
+    let base_url = std::env::var("OPENROUTER_API_URL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            saved
+                .as_ref()
+                .and_then(|c| c.openrouter_base_url.clone())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
     let credits = match fetch_credits(&base_url, &api_key).await {
         Ok(c) => c,
