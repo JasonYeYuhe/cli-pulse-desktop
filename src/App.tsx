@@ -1814,6 +1814,8 @@ type DiagnosticSnapshot = {
   device_id_short: string | null;
   cache_dir: string | null;
   log_dir: string | null;
+  /** v0.4.16 — "os_keychain" or "file"; surfaces fallback on Linux without libsecret. */
+  provider_creds_backend: "os_keychain" | "file";
 };
 
 function AboutSection({ paired }: { paired: boolean }) {
@@ -1842,6 +1844,12 @@ function AboutSection({ paired }: { paired: boolean }) {
       `Paired: ${d.paired ? `yes (device ${d.device_id_short ?? "?"}…)` : "no"}`,
       `Cache dir: ${d.cache_dir ?? "(none)"}`,
       `Logs: ${d.log_dir ?? "(unavailable)"}`,
+      // v0.4.17 — surface the provider-creds backend so security-conscious
+      // users can verify the OS keychain (vs. the v0.4.6 plaintext file
+      // fallback used on Linux without libsecret). v0.4.16 wired the
+      // backend into DiagnosticSnapshot but missed adding the formatter
+      // line — VM verification of v0.4.16 caught this gap.
+      `Creds backend: ${d.provider_creds_backend === "os_keychain" ? "OS keychain" : "file (keyring unavailable)"}`,
       `User agent: ${navigator.userAgent}`,
     ].join("\n");
   }

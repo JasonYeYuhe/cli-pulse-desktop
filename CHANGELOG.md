@@ -2,6 +2,17 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.17] — 2026-05-05
+
+### Fixed
+- **"Copy diagnostic snapshot" now includes the provider-creds backend
+  line** ("OS keychain" / "file (keyring unavailable)"). v0.4.16 wired
+  the backend into the Rust `DiagnosticSnapshot` struct but missed
+  adding the formatter line in `App.tsx::diagText`, so the field was
+  silently dropped on its way to the clipboard. VM E2E verification
+  of v0.4.16 (D-block) caught this — the data was already in the IPC
+  response, just not rendered. Pure-rendering fix.
+
 ## [0.4.16] — 2026-05-04
 
 ### Changed
