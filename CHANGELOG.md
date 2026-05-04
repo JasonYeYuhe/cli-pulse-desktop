@@ -2,6 +2,68 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.9] — 2026-05-04
+
+### Fixed
+- **Gemini OAuth refresh now finds credentials in modern bundled
+  @google/gemini-cli releases.** v0.4.7 introduced active OAuth
+  refresh by mirroring CodexBar's discovery: look for a literal
+  `oauth2.js` source file at known npm/Homebrew/Nix paths. That
+  works for Homebrew installs and older gemini-cli versions, but
+  modern @google/gemini-cli npm releases are esbuild-bundled —
+  there's no standalone `oauth2.js`; the OAuth code lives inside
+  hashed chunks like `bundle/gemini-3OZCG3O2.js`. VM verification
+  of v0.4.7 caught this gap (Windows user with gemini-cli installed
+  at `%APPDATA%\npm\node_modules\@google\gemini-cli\` — refresh
+  failed because the v0.4.7 path search looked for a file that
+  doesn't exist in the bundled release).
+  v0.4.9 expands `find_oauth_credentials()`:
+  1. Try the legacy direct `oauth2.js` path first (Homebrew /
+     source layouts, unchanged).
+  2. Walk `<gemini-cli-root>/bundle/*.js` chunks (modern npm
+     releases — primary expected match).
+  3. Walk `<gemini-cli-root>/dist/*.js` and `<root>/lib/*.js` as
+     additional fallbacks.
+  Plus a value-pattern regex fallback for when minification has
+  stripped the named constants `OAUTH_CLIENT_ID` /
+  `OAUTH_CLIENT_SECRET`. The fallback matches Google's canonical
+  formats:
+  - Client ID: `<9-12 digit project>-<random>.apps.googleusercontent.com`
+  - Client secret: `GOCSPX-<22+ chars>`
+  Named-constant regex still runs first; value-pattern only kicks
+  in when minification has obscured the names.
+
+### Added
+- 4 new Vitest tests in `quota/gemini_refresh.rs`:
+  - `extract_credentials_from_minified_bundle_chunk` — verifies the
+    value-pattern fallback works on real esbuild output shape.
+  - `value_fallback_rejects_too_short_secret` — defensive: the
+    `{20,}` length floor on GOCSPX-... avoids false matches on
+    GOCSPX-prefixed substrings shorter than a real client secret.
+  - `value_fallback_rejects_non_googleusercontent_domain` — the
+    `.apps.googleusercontent.com` suffix is required.
+  - `named_constant_takes_priority_over_value_fallback` — when
+    both forms are present (e.g. comments documenting other OAuth
+    apps), the named constants win.
+- 4 KB JS file size cap on bundle scans to avoid pathological I/O
+  on unrelated huge JS bundles.
+
+### Changed
+- Discovery roots expanded to also include `@google/gemini-cli-core`
+  (sometimes installed alongside gemini-cli rather than nested),
+  Windows `%PROGRAMFILES%\nodejs\node_modules\@google\gemini-cli`,
+  and Mac/Linux `~/.nvm/versions/node` for NVM users.
+
+### Notes
+- Best-effort behavior unchanged: if no candidate path matches OR
+  the refresh API rejects, fall back to v0.4.6 silent-skip. No
+  regression for users without gemini-cli installed.
+- Total: **131 Rust lib tests** (was 127 in v0.4.7) + 33 Vitest
+  tests.
+- iOS / Android / Mac unaffected. Server-side schema unchanged.
+- v0.4.x desktops on auto-update pick this up automatically once
+  v0.4.9 promotes to Latest.
+
 ## [0.4.8] — 2026-05-04
 
 ### Fixed
