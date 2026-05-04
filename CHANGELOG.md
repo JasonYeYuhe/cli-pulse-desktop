@@ -2,6 +2,56 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.11] — 2026-05-03
+
+### Fixed
+- **Gemini OAuth refresh now reaches `dist/src/code_assist/oauth2.js`
+  in modern monorepo @google/gemini-cli installs.** v0.4.10's
+  diagnostic logging surfaced that on Windows VM, discovery walked
+  76 .js files in `<root>/bundle/` (the bundled chunks) but matched
+  none — the actual unbundled source `oauth2.js` lives at
+  `<root>/dist/src/code_assist/oauth2.js`, which v0.4.10's scan
+  didn't find because the scan was non-recursive (one level only).
+  Three fixes:
+  1. **Recursive .js walk** under each `<root>/bundle`, `<root>/dist`,
+     `<root>/lib` subdir, capped at depth 4 (covers the
+     `dist/src/code_assist/oauth2.js` path) and skipping nested
+     `node_modules/` to avoid expanding into transitive deps.
+  2. **Per-root legacy-path probing** — the `gemini-cli-core` install
+     root used to be joined with a relative path that already
+     contained `node_modules/@google/gemini-cli-core/...`, producing
+     a doubly-nested path that never existed. v0.4.11 probes both
+     `<root>/dist/src/code_assist/oauth2.js` (sibling/hoisted layout
+     in modern npm) and the deep-nested form in order.
+  3. **Multiline-assignment test pinned.** Upstream gemini-cli-core
+     emits `const OAUTH_CLIENT_ID =\n    '...';` after TS→JS compile.
+     Rust regex `\s*` already matches across newlines, but a new test
+     locks in that contract so a future regex tweak can't silently
+     break it.
+
+### Added
+- 4 new Vitest tests in `quota/gemini_refresh.rs`:
+  - `extract_credentials_from_multiline_assignment` — confirms regex
+    handles upstream's split `const X =\n  '...';` shape.
+  - `scan_dir_recursively_finds_creds_three_levels_deep` — synthetic
+    `dist/src/code_assist/oauth2.js` layout, asserts recursive walk
+    reaches it.
+  - `scan_dir_recursive_skips_node_modules` — defensive: vendored
+    deps' `node_modules/` are skipped to avoid pathological scans.
+  - `scan_dir_recursive_returns_none_for_missing_dir` — probing a
+    non-existent root must not panic (common: half the candidate
+    roots are missing on every refresh).
+
+### Notes
+- v0.4.10's INFO-level logging is preserved unchanged. After the
+  recursive walk hits the OAuth pair, you'll see one
+  `[Gemini] refresh: found OAuth pair via legacy direct path ...`
+  (or `... after scanning N .js file(s) recursively under ...`)
+  followed by the existing
+  `[Gemini] OAuth token refreshed ...` success line and the
+  `[Gemini] refresh wrote new tokens to ... (atomic, mode 0600)`
+  write-back confirmation.
+
 ## [0.4.10] — 2026-05-03
 
 ### Changed

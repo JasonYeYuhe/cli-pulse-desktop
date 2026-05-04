@@ -46,11 +46,21 @@ use serde::Deserialize;
 const TOKEN_REFRESH_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Legacy direct path for Homebrew / source-layout gemini-cli installs.
-/// Modern @google/gemini-cli npm releases have eliminated this file; see
-/// `find_oauth_credentials` for the bundle-walking fallback.
-const LEGACY_OAUTH2_JS_RELATIVE: &str =
-    "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js";
+/// Legacy direct paths for the unbundled TS-compiled `oauth2.js` file.
+/// Probed in order against each install root. Modern monorepo
+/// `@google/gemini-cli` 0.4x installs have:
+///   - `@google/gemini-cli-core/dist/src/code_assist/oauth2.js`
+///     (sibling package — npm 7+ hoists workspace deps to the same
+///     `node_modules` parent)
+///   - `@google/gemini-cli/node_modules/@google/gemini-cli-core/...`
+///     (deep nesting — pnpm/yarn-workspaces / older npm install
+///     strategies)
+///   - `@google/gemini-cli/dist/src/code_assist/oauth2.js`
+///     (legacy/source layout — Homebrew, older releases)
+const LEGACY_OAUTH2_JS_REL_PATHS: &[&str] = &[
+    "dist/src/code_assist/oauth2.js",
+    "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
+];
 
 /// Subdirectories within a `gemini-cli` package root to scan for `.js`
 /// files when the legacy `oauth2.js` path doesn't exist. Order matters:
@@ -123,15 +133,26 @@ fn find_oauth_credentials_with_path() -> Option<(String, String, PathBuf)> {
         roots.len()
     );
     for root in &roots {
-        // Try legacy direct path first (Homebrew / old source layouts).
-        let legacy = root.join(legacy_relative_path());
-        if let Ok(content) = std::fs::read_to_string(&legacy) {
-            if let Some((id, secret)) = extract_oauth_credentials(&content) {
-                return Some((id, secret, legacy));
+        // Try every legacy direct path first — fastest hit when the
+        // unbundled TS-compiled oauth2.js is on disk (gemini-cli-core
+        // package, or sibling-hoisted at the gemini-cli root, or
+        // workspace-nested under gemini-cli/node_modules/...).
+        for rel in LEGACY_OAUTH2_JS_REL_PATHS {
+            let legacy = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+            if let Ok(content) = std::fs::read_to_string(&legacy) {
+                if let Some((id, secret)) = extract_oauth_credentials(&content) {
+                    log::info!(
+                        "[Gemini] refresh: found OAuth pair via legacy direct path {}",
+                        legacy.display()
+                    );
+                    return Some((id, secret, legacy));
+                }
             }
         }
 
         // Walk known JS-containing subdirs for the bundled releases.
+        // Recursive in v0.4.11 (was 1-level in v0.4.10 — see
+        // scan_dir_recursive).
         for subdir in SEARCH_SUBDIRS {
             let dir = root.join(subdir);
             if let Some((id, secret, hit)) = scan_dir_for_credentials(&dir) {
@@ -151,18 +172,76 @@ fn find_oauth_credentials_with_path() -> Option<(String, String, PathBuf)> {
     None
 }
 
-fn legacy_relative_path() -> PathBuf {
-    PathBuf::from(LEGACY_OAUTH2_JS_RELATIVE.replace('/', std::path::MAIN_SEPARATOR_STR))
+/// Maximum directory depth for recursive .js scans. Tuned to reach
+/// `dist/src/code_assist/oauth2.js` (depth 3 below `<root>/dist`)
+/// without descending arbitrarily into vendored sub-packages.
+const MAX_SCAN_DEPTH: u32 = 4;
+
+/// Recursively scan `.js` files under `dir` for the OAuth pair.
+/// Returns the first match. Skips:
+/// - Nested `node_modules/` subdirs (avoid expanding into transitive
+///   deps where the same OAuth pattern probably won't match anyway).
+/// - Files larger than `MAX_JS_FILE_SIZE`.
+/// - Recursion past `MAX_SCAN_DEPTH`.
+///
+/// v0.4.11 — was non-recursive in v0.4.10 (one level only), which
+/// missed `dist/src/code_assist/oauth2.js` in the gemini-cli-core
+/// package because the .js file is 3 levels deep under `<root>/dist`.
+/// VM verification of v0.4.10 reported 76 .js files scanned in
+/// `<root>/bundle` (the bundled chunks correctly walked) but 0 in
+/// the gemini-cli-core `dist/` because v0.4.10 didn't descend into
+/// `dist/src/code_assist/`.
+fn scan_dir_for_credentials(dir: &std::path::Path) -> Option<(String, String, PathBuf)> {
+    let mut scanned = 0u32;
+    let hit = scan_dir_recursive(dir, 0, &mut scanned);
+    if let Some((id, secret, path)) = hit {
+        log::info!(
+            "[Gemini] refresh: found OAuth pair in {} (after scanning {} .js file(s) recursively under {})",
+            path.display(),
+            scanned,
+            dir.display()
+        );
+        return Some((id, secret, path));
+    }
+    if scanned > 0 {
+        log::info!(
+            "[Gemini] refresh: scanned {} .js file(s) recursively in {} — no OAuth pair matched",
+            scanned,
+            dir.display()
+        );
+    }
+    None
 }
 
-/// Scan all `.js` files in `dir` (non-recursive) for the OAuth pair.
-/// Returns the first match. Files larger than `MAX_JS_FILE_SIZE` are
-/// skipped to avoid pathological scans.
-fn scan_dir_for_credentials(dir: &std::path::Path) -> Option<(String, String, PathBuf)> {
+fn scan_dir_recursive(
+    dir: &std::path::Path,
+    depth: u32,
+    scanned: &mut u32,
+) -> Option<(String, String, PathBuf)> {
+    if depth > MAX_SCAN_DEPTH {
+        return None;
+    }
     let entries = std::fs::read_dir(dir).ok()?;
-    let mut scanned = 0u32;
+    let mut subdirs: Vec<PathBuf> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if file_type.is_dir() {
+            // Skip vendored deps — they don't ship gemini-cli's OAuth pair
+            // and recursing into them is the easy way to turn this into
+            // an O(N) filesystem walk on every refresh attempt.
+            if path.file_name().and_then(|n| n.to_str()) == Some("node_modules") {
+                continue;
+            }
+            subdirs.push(path);
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
         if path.extension().and_then(|e| e.to_str()) != Some("js") {
             continue;
         }
@@ -171,24 +250,21 @@ fn scan_dir_for_credentials(dir: &std::path::Path) -> Option<(String, String, Pa
                 continue;
             }
         }
-        scanned += 1;
+        *scanned += 1;
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Some((id, secret)) = extract_oauth_credentials(&content) {
-                log::info!(
-                    "[Gemini] refresh: found OAuth pair in {} (after scanning {} .js file(s) in this dir)",
-                    path.display(),
-                    scanned
-                );
                 return Some((id, secret, path));
             }
         }
     }
-    if scanned > 0 {
-        log::info!(
-            "[Gemini] refresh: scanned {} .js file(s) in {} — no OAuth pair matched",
-            scanned,
-            dir.display()
-        );
+    // Files first, then descend (depth-first into each subdir in
+    // alphabetical order — ReadDir order is platform-defined, so we
+    // get reproducible behavior regardless of FS ordering).
+    subdirs.sort();
+    for sub in subdirs {
+        if let Some(hit) = scan_dir_recursive(&sub, depth + 1, scanned) {
+            return Some(hit);
+        }
     }
     None
 }
@@ -470,5 +546,91 @@ mod tests {
         let (id, _) = extract_oauth_credentials(content).unwrap();
         // Named regex captures the const value, not the comment value.
         assert_eq!(id, "111111111111-real.apps.googleusercontent.com");
+    }
+
+    // v0.4.11 — recursive scan + multiline-assignment shape.
+
+    #[test]
+    fn extract_credentials_from_multiline_assignment() {
+        // Upstream `gemini-cli-core/dist/src/code_assist/oauth2.js`
+        // emits multi-line const assignment after TS->JS compile:
+        //   const OAUTH_CLIENT_ID =
+        //       '<value>';
+        // Rust regex `\s*` matches across newlines by default, so the
+        // existing regex SHOULD handle this — this test pins that
+        // contract so a future regex tweak can't silently break it.
+        let content = "const OAUTH_CLIENT_ID =\n    '681255809395-multi.apps.googleusercontent.com';\nconst OAUTH_CLIENT_SECRET =\n    'GOCSPX-multi-line-here';\n";
+        let (id, secret) = extract_oauth_credentials(content).unwrap();
+        assert_eq!(id, "681255809395-multi.apps.googleusercontent.com");
+        assert_eq!(secret, "GOCSPX-multi-line-here");
+    }
+
+    #[test]
+    fn scan_dir_recursively_finds_creds_three_levels_deep() {
+        // Synthetic gemini-cli-core install layout:
+        //   <tmp>/dist/src/code_assist/oauth2.js
+        // v0.4.10's non-recursive scan_dir_for_credentials would miss
+        // this because <tmp>/dist itself contains no .js files.
+        // v0.4.11 walks 3 levels in.
+        let tmp = tempfile::tempdir().unwrap();
+        let deep = tmp.path().join("dist").join("src").join("code_assist");
+        std::fs::create_dir_all(&deep).unwrap();
+        let oauth_file = deep.join("oauth2.js");
+        std::fs::write(
+            &oauth_file,
+            "const OAUTH_CLIENT_ID = '111111111111-x.apps.googleusercontent.com';\n\
+             const OAUTH_CLIENT_SECRET = 'GOCSPX-deeply-nested-secret-12345';\n",
+        )
+        .unwrap();
+        // Also put a non-matching .js file at the dist top-level to
+        // mimic the gemini-cli-core layout where dist/index.js exists
+        // but doesn't carry the OAuth pair.
+        std::fs::write(tmp.path().join("dist").join("index.js"), "// no creds").unwrap();
+
+        let scan_root = tmp.path().join("dist");
+        let hit = scan_dir_for_credentials(&scan_root);
+        assert!(
+            hit.is_some(),
+            "recursive scan should reach oauth2.js 3 dirs deep"
+        );
+        let (id, secret, path) = hit.unwrap();
+        assert_eq!(id, "111111111111-x.apps.googleusercontent.com");
+        assert_eq!(secret, "GOCSPX-deeply-nested-secret-12345");
+        assert_eq!(path, oauth_file);
+    }
+
+    #[test]
+    fn scan_dir_recursive_skips_node_modules() {
+        // Recursing into transitive deps' node_modules is the easy
+        // way to turn this into a 1000-file walk. Verify we skip.
+        let tmp = tempfile::tempdir().unwrap();
+        let nm = tmp
+            .path()
+            .join("node_modules")
+            .join("some-dep")
+            .join("dist");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(
+            nm.join("oauth2.js"),
+            "const OAUTH_CLIENT_ID = '999999999999-x.apps.googleusercontent.com';\n\
+             const OAUTH_CLIENT_SECRET = 'GOCSPX-should-not-be-found-12345';\n",
+        )
+        .unwrap();
+        let hit = scan_dir_for_credentials(tmp.path());
+        assert!(
+            hit.is_none(),
+            "recursive scan must skip node_modules/ — found {:?}",
+            hit.as_ref().map(|(_, _, p)| p.display().to_string())
+        );
+    }
+
+    #[test]
+    fn scan_dir_recursive_returns_none_for_missing_dir() {
+        // Probing a non-existent directory must not panic — common case
+        // is the user has gemini-cli but not gemini-cli-core, or vice
+        // versa, so half of the candidate roots are missing on every run.
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        assert!(scan_dir_for_credentials(&missing).is_none());
     }
 }
