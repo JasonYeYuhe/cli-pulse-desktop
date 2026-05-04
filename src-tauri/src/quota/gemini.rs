@@ -7,11 +7,12 @@
 //! macOS-native. Cross-platform OAuth (browser redirect listener +
 //! `keyring` crate) deferred to v0.4.5+.
 //!
-//! Token refresh: NOT in v0.4.3. If `expiry_date < now()`, silent
-//! skip + DEBUG log. User must run `gemini` CLI to refresh the file.
-//! v0.4.4 will add explicit `CollectorStatus::Expired` state so the
-//! UI can render an actionable warning (Gemini 3.1 Pro 2026-05-02
-//! review).
+//! Token refresh: active in v0.4.7+ via `gemini_refresh::refresh`. On
+//! expiry the refresh_token is exchanged at Google's OAuth endpoint
+//! (using gemini-cli's bundled OAuth client_id+secret discovered from
+//! the user's local install). v0.4.10 promoted every branch's logging
+//! from DEBUG → INFO so a "silent half-fix" can no longer hide which
+//! exit path was taken.
 //!
 //! Endpoints (both POST, JSON body, 10s timeout):
 //! - `https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`
@@ -161,18 +162,34 @@ struct TierInfo {
 /// the v0.4.6 silent-skip. On refresh success, write the new tokens
 /// back to the file atomically (mode 0600) and continue. On refresh
 /// failure, log warn and fall back to silent-skip (v0.4.6 behavior).
+///
+/// v0.4.10 — diagnostic INFO-level logs at every branch. v0.4.9 VM
+/// verification produced a "silent half-fix" where the Gemini card
+/// rendered but no `[Gemini]` log fired, even though VM measured the
+/// access_token as 8.4h expired. The previous code was silent on the
+/// "token still valid" path AND used DEBUG (filtered at INFO global
+/// level) for the "no home dir" / "file absent" / "no refresh_token"
+/// branches, so any of those exit paths looked identical from a log
+/// reader's perspective. Each branch now emits an INFO-level line
+/// with enough state to disambiguate (raw expiry_ms vs now_ms, whether
+/// refresh_token was present, etc.) so we can identify which branch
+/// is firing in the field.
 pub async fn collect() -> Option<QuotaSnapshot> {
     let path = match creds_path() {
         Some(p) => p,
         None => {
-            log::debug!("[Gemini] could not resolve home dir — skipping");
+            log::info!("[Gemini] collect: could not resolve home dir — skipping");
             return None;
         }
     };
+    log::info!("[Gemini] collect: reading creds from {}", path.display());
     let mut creds = match read_creds(&path) {
         Ok(Some(c)) => c,
         Ok(None) => {
-            log::debug!("[Gemini] oauth_creds.json absent — run `gemini` CLI to authenticate");
+            log::info!(
+                "[Gemini] collect: oauth_creds.json absent at {} — run `gemini` CLI to authenticate",
+                path.display()
+            );
             return None;
         }
         Err(e) => {
@@ -181,17 +198,40 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         }
     };
 
+    let now_ms = chrono::Utc::now().timestamp_millis() as f64;
+    let expired = is_expired(&creds);
+    log::info!(
+        "[Gemini] collect: expiry_date={:?} now_ms={} expired={} has_refresh_token={} has_access_token={}",
+        creds.expiry_date,
+        now_ms,
+        expired,
+        creds
+            .refresh_token
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        creds
+            .access_token
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+    );
+
     // v0.4.7 — active refresh on expiry instead of silent skip.
-    if is_expired(&creds) {
+    if expired {
         let refresh_token = match creds.refresh_token.clone() {
             Some(t) if !t.is_empty() => t,
             _ => {
-                log::debug!(
-                    "[Gemini] expired access_token + no refresh_token — run `gemini` CLI to re-auth"
+                log::info!(
+                    "[Gemini] expired access_token + no refresh_token in oauth_creds.json — run `gemini` CLI to re-auth"
                 );
                 return None;
             }
         };
+        log::info!(
+            "[Gemini] expired access_token — attempting OAuth refresh via gemini-cli local credentials (refresh_token len={})",
+            refresh_token.len()
+        );
         match super::gemini_refresh::refresh(&refresh_token).await {
             Ok(refreshed) => {
                 // Persist the new tokens atomically. If write fails the
@@ -205,12 +245,16 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 if let Some(it) = refreshed.id_token.clone() {
                     creds.id_token = Some(it);
                 }
-                let now_ms = chrono::Utc::now().timestamp_millis() as f64;
                 creds.expiry_date = Some(now_ms + (refreshed.expires_in as f64) * 1000.0);
                 if let Err(e) = write_creds_atomic(&path, &creds) {
                     log::warn!(
                         "[Gemini] refresh succeeded but write-back to oauth_creds.json failed \
                          (non-fatal — token used for this cycle, will re-refresh next launch): {e}"
+                    );
+                } else {
+                    log::info!(
+                        "[Gemini] refresh wrote new tokens to {} (atomic, mode 0600)",
+                        path.display()
                     );
                 }
                 log::info!(
@@ -223,6 +267,8 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 return None;
             }
         }
+    } else {
+        log::info!("[Gemini] access_token not expired — using cached creds without refresh");
     }
 
     let token = creds.access_token?;
@@ -239,6 +285,12 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         }
     };
 
+    log::info!(
+        "[Gemini] collect: success — tier_id={:?} project_id={:?} buckets={}",
+        tier_info.tier_id,
+        tier_info.project_id,
+        quota.buckets.len()
+    );
     Some(map_to_snapshot(&tier_info, &quota))
 }
 

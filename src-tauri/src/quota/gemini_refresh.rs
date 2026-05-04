@@ -88,11 +88,17 @@ struct GoogleRefreshResponse {
 /// gemini-cli OAuth credentials. Returns `Err(reason)` if any step
 /// fails — caller logs at warn! and falls back to silent-skip.
 pub async fn refresh(refresh_token: &str) -> Result<RefreshedTokens, String> {
-    let (client_id, client_secret) = find_oauth_credentials().ok_or_else(|| {
-        "Gemini CLI OAuth credentials not found — checked legacy oauth2.js path and \
-         bundle/dist/lib subdirs of all known npm/Homebrew/Nix install roots"
-            .to_string()
-    })?;
+    let (client_id, client_secret, discovered_path) = find_oauth_credentials_with_path()
+        .ok_or_else(|| {
+            "Gemini CLI OAuth credentials not found — checked legacy oauth2.js path and \
+             bundle/dist/lib subdirs of all known npm/Homebrew/Nix install roots"
+                .to_string()
+        })?;
+    log::info!(
+        "[Gemini] refresh: discovered OAuth client creds at {} (client_id starts {}…)",
+        discovered_path.display(),
+        client_id.chars().take(12).collect::<String>(),
+    );
     post_refresh(&client_id, &client_secret, refresh_token).await
 }
 
@@ -105,24 +111,43 @@ pub async fn refresh(refresh_token: &str) -> Result<RefreshedTokens, String> {
 /// v0.4.9: previously only the legacy direct path was checked, which
 /// missed modern esbuild-bundled @google/gemini-cli npm releases where
 /// the OAuth code is in hashed chunks under `bundle/`.
-fn find_oauth_credentials() -> Option<(String, String)> {
-    for root in collect_gemini_cli_roots() {
+///
+/// v0.4.10: returns the discovered path alongside the creds so the
+/// caller can log it. Also emits per-root probe lines at INFO when
+/// nothing matches, so VM verification can pinpoint which roots were
+/// even tried (vs. silently ignored because the env var wasn't set).
+fn find_oauth_credentials_with_path() -> Option<(String, String, PathBuf)> {
+    let roots = collect_gemini_cli_roots();
+    log::info!(
+        "[Gemini] refresh: probing {} candidate gemini-cli install root(s)",
+        roots.len()
+    );
+    for root in &roots {
         // Try legacy direct path first (Homebrew / old source layouts).
         let legacy = root.join(legacy_relative_path());
         if let Ok(content) = std::fs::read_to_string(&legacy) {
-            if let Some(creds) = extract_oauth_credentials(&content) {
-                return Some(creds);
+            if let Some((id, secret)) = extract_oauth_credentials(&content) {
+                return Some((id, secret, legacy));
             }
         }
 
         // Walk known JS-containing subdirs for the bundled releases.
         for subdir in SEARCH_SUBDIRS {
             let dir = root.join(subdir);
-            if let Some(creds) = scan_dir_for_credentials(&dir) {
-                return Some(creds);
+            if let Some((id, secret, hit)) = scan_dir_for_credentials(&dir) {
+                return Some((id, secret, hit));
             }
         }
     }
+    log::info!(
+        "[Gemini] refresh: no OAuth client creds found in any of {} root(s) — first roots tried: {:?}",
+        roots.len(),
+        roots
+            .iter()
+            .take(3)
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>(),
+    );
     None
 }
 
@@ -133,8 +158,9 @@ fn legacy_relative_path() -> PathBuf {
 /// Scan all `.js` files in `dir` (non-recursive) for the OAuth pair.
 /// Returns the first match. Files larger than `MAX_JS_FILE_SIZE` are
 /// skipped to avoid pathological scans.
-fn scan_dir_for_credentials(dir: &std::path::Path) -> Option<(String, String)> {
+fn scan_dir_for_credentials(dir: &std::path::Path) -> Option<(String, String, PathBuf)> {
     let entries = std::fs::read_dir(dir).ok()?;
+    let mut scanned = 0u32;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("js") {
@@ -145,11 +171,24 @@ fn scan_dir_for_credentials(dir: &std::path::Path) -> Option<(String, String)> {
                 continue;
             }
         }
+        scanned += 1;
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Some(creds) = extract_oauth_credentials(&content) {
-                return Some(creds);
+            if let Some((id, secret)) = extract_oauth_credentials(&content) {
+                log::info!(
+                    "[Gemini] refresh: found OAuth pair in {} (after scanning {} .js file(s) in this dir)",
+                    path.display(),
+                    scanned
+                );
+                return Some((id, secret, path));
             }
         }
+    }
+    if scanned > 0 {
+        log::info!(
+            "[Gemini] refresh: scanned {} .js file(s) in {} — no OAuth pair matched",
+            scanned,
+            dir.display()
+        );
     }
     None
 }

@@ -2,6 +2,37 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.10] — 2026-05-03
+
+### Changed
+- **Gemini collector now logs every branch at INFO level.** v0.4.9 VM
+  verification produced a "silent half-fix": the Providers tab kept
+  rendering Gemini, but no `[Gemini]`-prefixed log line ever appeared
+  in the running v0.4.9 process, the `oauth_creds.json` mtime was
+  unchanged, AND `quota::collect_all` reported Gemini in the populated
+  list every cycle. The contradiction was that several `collect()`
+  exit paths logged at DEBUG (filtered by the global INFO filter from
+  v0.3.4) and the "token still valid" path logged nothing at all, so
+  any of those branches looked identical in the log file. v0.4.10
+  promotes every branch to INFO and adds an entry-point line that
+  prints the raw `expiry_date` and `now_ms` it's comparing, plus
+  whether `refresh_token` and `access_token` are present. With this,
+  the next VM run will tell us exactly which exit path is firing
+  (token still valid / no refresh token / refresh attempted-and-failed
+  / refresh attempted-and-succeeded) instead of leaving us inferring
+  it from server-side state.
+- `gemini_refresh::refresh()` now logs the OAuth client creds path it
+  discovered (or which root list it probed when it found nothing),
+  and `scan_dir_for_credentials()` reports the .js scan count per dir.
+  This pinpoints whether v0.4.9's bundle-walking is even reaching the
+  user's install or skipping it because the candidate root path is
+  wrong on their box.
+
+### Notes
+- No behavior change beyond logging — the actual refresh flow,
+  discovery order, and atomic write-back are byte-identical to v0.4.9.
+  This is a pure-diagnostics ship to debug v0.4.9 in the field.
+
 ## [0.4.9] — 2026-05-04
 
 ### Fixed
