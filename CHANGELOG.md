@@ -2,6 +2,47 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.12] — 2026-05-03
+
+### Fixed
+- **Gemini OAuth refresh now ships a guaranteed-fallback hardcoded
+  client_id+secret from upstream gemini-cli.** v0.4.11's recursive
+  bundle walk found the chunks but still couldn't extract the
+  client_id/client_secret pair from modern @google/gemini-cli
+  releases — esbuild's code-splitting + property-assignment
+  minification produces shapes that no realistic regex can match
+  reliably. VM substring count confirmed `client_id` is present in
+  14 chunk files and `client_secret` in 10, but they're emitted as
+  property keys on imported config objects rather than as
+  recognizable named constants OR co-located literal value pairs.
+  Rather than chase another regex iteration that the next esbuild
+  flag will break, v0.4.12 hardcodes the upstream public values
+  from `packages/core/src/code_assist/oauth2.ts` (Apache-2.0).
+  These are "installed application" OAuth credentials per Google's
+  own documentation — the secret is intentionally checked into
+  gemini-cli's open-source repo and is "obviously not treated as a
+  secret" (see developers.google.com/identity/protocols/oauth2#installed).
+  Local extraction still runs first so any future upstream rotation
+  is picked up automatically; the hardcoded values only kick in
+  when extraction returns None (which is the normal case for
+  modern bundled npm installs).
+
+### Added
+- `fallback_oauth_client_values_match_upstream_shape` test —
+  pins format invariants (apps.googleusercontent.com suffix on the
+  client_id, GOCSPX- prefix and minimum length on the secret) so a
+  typo at copy time can't silently 401 against Google.
+
+### Notes
+- License: gemini-cli is Apache-2.0. The two literal constants
+  themselves are not copyrightable (they're identifiers / facts);
+  the source-of-truth comment in `gemini_refresh.rs` cites the
+  upstream file path so attribution is clear.
+- Stability: in 9+ months on npm, gemini-cli has not rotated these
+  values — rotation would break every existing installed CLI's
+  refresh path simultaneously, so they're as stable as installed-app
+  credentials get.
+
 ## [0.4.11] — 2026-05-03
 
 ### Fixed
