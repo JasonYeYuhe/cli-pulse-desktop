@@ -13,6 +13,7 @@
 //! Per Codex 2026-05-02 review of v0.4.3 spec.
 
 pub mod claude;
+pub mod claude_refresh;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;

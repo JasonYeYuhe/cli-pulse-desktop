@@ -1,5 +1,15 @@
 //! v0.4.0 — Claude OAuth-based quota collection.
 //! v0.4.4 — schema corrected to nested-only.
+//! v0.4.14 — active OAuth refresh on expiry. Mirrors v0.4.7-v0.4.12
+//!   Gemini refresh work. When `expiresAt` is past (or within the 60s
+//!   safety margin), POST to Anthropic's `/v1/oauth/token` endpoint
+//!   with the public PKCE client_id, atomically write the rotated
+//!   refresh_token + new access_token + new expires_at back to disk
+//!   (mode 0600 set BEFORE rename), then continue with the usage fetch.
+//!   All branches log at INFO so a v0.4.9-style "silent half-fix"
+//!   can't hide which path was taken. Unknown keys at both nesting
+//!   levels round-trip via `flatten extra` so claude CLI's own
+//!   subscriptionType + scopes etc. survive our write-back.
 //!
 //! Mirrors macOS `ClaudeOAuthStrategy.swift`, ported to Rust + portable I/O
 //! so Win / Linux / Mac desktops can populate `provider_quotas` server-side
@@ -43,7 +53,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{QuotaSnapshot, TierEntry};
 
@@ -56,31 +66,55 @@ const EXPIRY_SAFETY_MARGIN_SECS: i64 = 60;
 
 /// Top-level shape of `~/.claude/.credentials.json` (claude CLI ≥2.x).
 /// Single key `claudeAiOauth` wrapping the OAuth payload.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// `flatten extra` preserves unknown top-level keys across our
+/// write-back path. Anthropic doesn't currently ship any sibling keys
+/// to `claudeAiOauth`, but if they ever add (e.g.) telemetry blocks,
+/// this guarantees we don't silently drop them when v0.4.14 writes
+/// the refreshed tokens back to disk.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ClaudeCredentialsFile {
-    #[serde(rename = "claudeAiOauth", default)]
+    #[serde(
+        rename = "claudeAiOauth",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     oauth: Option<ClaudeOAuthInner>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Inner OAuth block. Field names match CodexBar upstream
 /// `ClaudeOAuthCredentialModels.swift:65-78` exactly.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// `flatten extra` preserves keys we don't deserialize (notably
+/// `subscriptionType`, which claude CLI itself reads), so atomic
+/// write-back from the v0.4.14 refresh path doesn't drop them.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ClaudeOAuthInner {
-    #[serde(rename = "accessToken", default)]
+    #[serde(
+        rename = "accessToken",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     access_token: Option<String>,
-    /// Reserved — not currently consumed (passive refresh requires the
-    /// `claude` CLI; v0.4.5+ may add active refresh).
-    #[serde(rename = "refreshToken", default)]
-    #[allow(dead_code)]
+    /// v0.4.14 — consumed by `claude_refresh::refresh()` on expiry.
+    /// Anthropic rotates this on every refresh, so we persist the new
+    /// value the response carries.
+    #[serde(
+        rename = "refreshToken",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     refresh_token: Option<String>,
     /// Epoch milliseconds. CodexBar parses as Double, not String —
     /// real claude CLI never writes ISO-8601 here. v0.4.3 had a string|
     /// number branching deserializer based on incorrect docstring
     /// assumption; v0.4.4 drops the string path entirely.
-    #[serde(rename = "expiresAt", default)]
+    #[serde(rename = "expiresAt", default, skip_serializing_if = "Option::is_none")]
     expires_at: Option<f64>,
     /// Reserved — kept for completeness with CodexBar struct; not read.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[allow(dead_code)]
     scopes: Vec<String>,
     /// Plan tier source-of-truth ("max_20x", "max_5x", "pro", etc.).
@@ -88,8 +122,14 @@ struct ClaudeOAuthInner {
     /// lowercase substring matching used in `ClaudeSourceStrategy.swift:166-178`.
     /// Note: Anthropic also writes `subscriptionType` in the file but
     /// CodexBar upstream does NOT consume it — we follow upstream.
-    #[serde(rename = "rateLimitTier", default)]
+    #[serde(
+        rename = "rateLimitTier",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     rate_limit_tier: Option<String>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// One usage window in the OAuth /usage response.
@@ -157,54 +197,124 @@ where
 }
 
 /// Top-level entry. Reads the persisted Claude credentials, validates
-/// freshness, hits the OAuth /usage API, and maps the response to a
-/// portable `QuotaSnapshot`. Returns `None` on any failure — log levels
-/// distinguish "user not signed in" (debug) from "schema drift" (warn)
-/// per v0.4.4 module docstring.
+/// freshness, refreshes via Anthropic's OAuth endpoint when expired,
+/// hits the OAuth /usage API, and maps the response to a portable
+/// `QuotaSnapshot`. Returns `None` on any failure.
+///
+/// v0.4.14 — every branch logs at INFO. Previously several branches
+/// were DEBUG (filtered at INFO global level since v0.3.4) which made
+/// "expired token + no refresh attempt" indistinguishable from "file
+/// missing" in user logs. Mirrors the v0.4.10 Gemini fix.
 pub async fn collect() -> Option<QuotaSnapshot> {
     let path = credentials_path()?;
-    let oauth = match read_credentials(&path) {
-        Ok(Some(file)) => match file.oauth {
-            Some(o) => o,
-            None => {
-                log::warn!(
-                    "Claude .credentials.json missing 'claudeAiOauth' key — schema mismatch \
-                     (real claude CLI ≥2.x writes nested shape; see CodexBar 82bbcde)"
-                );
-                return None;
-            }
-        },
+    log::info!("[Claude] collect: reading creds from {}", path.display());
+    let mut file = match read_credentials(&path) {
+        Ok(Some(f)) => f,
         Ok(None) => {
-            log::debug!("Claude .credentials.json absent — skipping quota fetch");
+            log::info!(
+                "[Claude] collect: .credentials.json absent at {} — run `claude` CLI to authenticate",
+                path.display()
+            );
             return None;
         }
         Err(e) => {
-            log::warn!("Claude .credentials.json parse failed (non-fatal): {e}");
+            log::warn!("[Claude] .credentials.json parse failed (non-fatal): {e}");
             return None;
         }
     };
+    let mut oauth = match file.oauth.take() {
+        Some(o) => o,
+        None => {
+            log::warn!(
+                "[Claude] .credentials.json missing 'claudeAiOauth' key — schema mismatch \
+                 (real claude CLI ≥2.x writes nested shape; see CodexBar 82bbcde)"
+            );
+            return None;
+        }
+    };
+
+    let now_ms = Utc::now().timestamp_millis() as f64;
+    let fresh = is_token_fresh(&oauth);
+    log::info!(
+        "[Claude] collect: expires_at_ms={:?} now_ms={} fresh={} has_refresh_token={} has_access_token={}",
+        oauth.expires_at,
+        now_ms,
+        fresh,
+        oauth
+            .refresh_token
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        oauth
+            .access_token
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+    );
+
+    // v0.4.14 — active refresh on expiry.
+    if !fresh {
+        let refresh_token = match oauth.refresh_token.clone() {
+            Some(t) if !t.is_empty() => t,
+            _ => {
+                log::info!(
+                    "[Claude] expired access_token + no refresh_token in .credentials.json — \
+                     run `claude` CLI to re-authenticate"
+                );
+                return None;
+            }
+        };
+        log::info!(
+            "[Claude] expired access_token — attempting OAuth refresh via Anthropic console (refresh_token len={})",
+            refresh_token.len()
+        );
+        match super::claude_refresh::refresh(&refresh_token).await {
+            Ok(refreshed) => {
+                oauth.access_token = Some(refreshed.access_token.clone());
+                oauth.refresh_token = Some(refreshed.refresh_token.clone());
+                oauth.expires_at = Some(now_ms + (refreshed.expires_in as f64) * 1000.0);
+                file.oauth = Some(oauth.clone());
+                if let Err(e) = write_creds_atomic(&path, &file) {
+                    log::warn!(
+                        "[Claude] refresh succeeded but write-back to .credentials.json failed \
+                         (non-fatal — token used for this cycle, will re-refresh next launch): {e}"
+                    );
+                } else {
+                    log::info!(
+                        "[Claude] refresh wrote new tokens to {} (atomic, mode 0600)",
+                        path.display()
+                    );
+                }
+                log::info!(
+                    "[Claude] OAuth token refreshed via Anthropic console (expires in {}s)",
+                    refreshed.expires_in
+                );
+            }
+            Err(e) => {
+                log::warn!("[Claude] OAuth refresh failed (non-fatal, falling back to skip): {e}");
+                return None;
+            }
+        }
+    } else {
+        log::info!("[Claude] access_token still fresh — using cached creds without refresh");
+    }
+
     let access_token = match oauth.access_token.as_deref().filter(|s| !s.is_empty()) {
         Some(t) => t.to_string(),
         None => {
             log::warn!(
-                "Claude .credentials.json claudeAiOauth.accessToken absent or empty — \
+                "[Claude] claudeAiOauth.accessToken absent or empty after refresh decision — \
                  corrupted oauth block"
             );
             return None;
         }
     };
-    if !is_token_fresh(&oauth) {
-        log::debug!(
-            "Claude OAuth access token expired (or expiresAt missing) — \
-             run claude CLI to refresh"
-        );
-        return None;
-    }
+
     match fetch_usage(&access_token).await {
         Ok(usage) => {
             let snap = map_to_snapshot(&oauth, &usage);
             log::info!(
-                "Claude quota updated: plan={}, tiers={}, remaining={}",
+                "[Claude] collect: success — plan={} tiers={} remaining={}",
                 snap.plan_type,
                 snap.tiers.len(),
                 snap.remaining,
@@ -212,10 +322,55 @@ pub async fn collect() -> Option<QuotaSnapshot> {
             Some(snap)
         }
         Err(e) => {
-            log::warn!("Claude OAuth /usage fetch failed (non-fatal): {e}");
+            log::warn!("[Claude] OAuth /usage fetch failed (non-fatal): {e}");
             None
         }
     }
+}
+
+/// Atomic write to `~/.claude/.credentials.json` using the same
+/// temp-then-rename pattern as `gemini.rs::write_creds_atomic`. Mode
+/// 0600 set BEFORE rename so there's no permission window. The
+/// `flatten extra` fields on both struct levels guarantee we round-trip
+/// every key claude CLI itself writes (notably `subscriptionType` —
+/// claude CLI consumes it for its own gating).
+fn write_creds_atomic(target: &Path, file: &ClaudeCredentialsFile) -> Result<(), String> {
+    let dir = target.parent().ok_or_else(|| "no parent dir".to_string())?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
+    let tmp = tempfile::Builder::new()
+        .prefix(".credentials.")
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .map_err(|e| format!("tempfile: {e}"))?;
+    let text = serde_json::to_string_pretty(file).map_err(|e| format!("serialize: {e}"))?;
+    {
+        use std::io::Write;
+        let mut f = tmp.as_file();
+        f.write_all(text.as_bytes())
+            .map_err(|e| format!("write: {e}"))?;
+        f.sync_all().map_err(|e| format!("sync: {e}"))?;
+    }
+    set_creds_file_mode_0600(tmp.path())?;
+    tmp.persist(target)
+        .map_err(|e| format!("rename: {}", e.error))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_creds_file_mode_0600(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)
+        .map_err(|e| format!("stat: {e}"))?
+        .permissions();
+    perms.set_mode(0o600);
+    std::fs::set_permissions(path, perms).map_err(|e| format!("chmod: {e}"))
+}
+
+#[cfg(not(unix))]
+fn set_creds_file_mode_0600(_path: &Path) -> Result<(), String> {
+    // Windows: NTFS per-user ACL on the parent ~/.claude/ dir is
+    // inherited by .credentials.json — no chmod equivalent needed.
+    Ok(())
 }
 
 fn credentials_path() -> Option<PathBuf> {
@@ -386,6 +541,7 @@ mod tests {
             expires_at: exp_ms,
             scopes: vec![],
             rate_limit_tier: Some("max_20x".into()),
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -396,6 +552,7 @@ mod tests {
             expires_at: None,
             scopes: vec![],
             rate_limit_tier: tier.map(String::from),
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -418,8 +575,87 @@ mod tests {
         assert_eq!(oauth.access_token.as_deref(), Some("sk-ant-oat01-fake"));
         assert_eq!(oauth.expires_at, Some(1777761408739.0));
         assert_eq!(oauth.rate_limit_tier.as_deref(), Some("max_20x"));
-        // Unknown field `subscriptionType` is silently ignored by serde —
-        // CodexBar 82bbcde does not consume it; we follow upstream.
+        // v0.4.14: unknown field `subscriptionType` is now preserved in
+        // `extra` so atomic write-back doesn't silently drop it. CodexBar
+        // 82bbcde does not consume it for plan_type — we follow upstream.
+        assert_eq!(
+            oauth.extra.get("subscriptionType").and_then(|v| v.as_str()),
+            Some("max"),
+            "v0.4.14 must preserve subscriptionType in `extra` for round-trip"
+        );
+    }
+
+    // v0.4.14 — atomic write-back round-trip preserves unknown keys.
+
+    #[test]
+    fn write_creds_atomic_round_trip_preserves_subscription_type() {
+        // Real claude CLI writes `subscriptionType` in the file. v0.4.14's
+        // refresh path mutates oauth.{accessToken,refreshToken,expiresAt}
+        // and writes the file back. Without `flatten extra`, every refresh
+        // would silently drop subscriptionType — claude CLI may consume
+        // it for its own gating, so this is a real regression risk.
+        let original = r#"{
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "refreshToken": "old-refresh",
+                "expiresAt": 1777761408739,
+                "scopes": ["user:profile"],
+                "subscriptionType": "max",
+                "rateLimitTier": "max_20x"
+            }
+        }"#;
+        let mut file: ClaudeCredentialsFile = serde_json::from_str(original).unwrap();
+        // Mutate the way the v0.4.14 refresh path does.
+        if let Some(oauth) = file.oauth.as_mut() {
+            oauth.access_token = Some("new-access".into());
+            oauth.refresh_token = Some("new-refresh".into());
+            oauth.expires_at = Some(1900000000000.0);
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".credentials.json");
+        write_creds_atomic(&path, &file).unwrap();
+
+        // Read back and assert all fields including the unknowns survived.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let parsed: ClaudeCredentialsFile = serde_json::from_str(&text).unwrap();
+        let oauth = parsed.oauth.unwrap();
+        assert_eq!(oauth.access_token.as_deref(), Some("new-access"));
+        assert_eq!(oauth.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(oauth.expires_at, Some(1900000000000.0));
+        assert_eq!(oauth.rate_limit_tier.as_deref(), Some("max_20x"));
+        assert_eq!(
+            oauth.extra.get("subscriptionType").and_then(|v| v.as_str()),
+            Some("max"),
+            "subscriptionType must survive atomic write-back"
+        );
+    }
+
+    #[test]
+    fn write_creds_atomic_preserves_top_level_unknown_keys() {
+        // Defensive: if Anthropic ever adds a sibling key to claudeAiOauth
+        // (telemetry, feature flags, etc.), our write-back must not drop it.
+        let original = r#"{
+            "claudeAiOauth": {
+                "accessToken": "x",
+                "expiresAt": 1777761408739,
+                "rateLimitTier": "pro"
+            },
+            "futureTelemetryBlob": {"foo": "bar", "n": 42}
+        }"#;
+        let file: ClaudeCredentialsFile = serde_json::from_str(original).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".credentials.json");
+        write_creds_atomic(&path, &file).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            v.get("futureTelemetryBlob")
+                .and_then(|f| f.get("foo"))
+                .and_then(|f| f.as_str()),
+            Some("bar"),
+            "top-level unknown keys must survive atomic write-back"
+        );
     }
 
     #[test]

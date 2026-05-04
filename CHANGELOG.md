@@ -2,6 +2,35 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.14] — 2026-05-04
+
+### Added
+- **Active OAuth refresh for Claude tokens.** When `~/.claude/.credentials.json`
+  has an expired `accessToken` but a present `refreshToken`, we now POST
+  to Anthropic's OAuth endpoint (`console.anthropic.com/v1/oauth/token`,
+  PKCE public client, no client_secret) and atomically write the
+  refreshed tokens back to disk. Mirrors the v0.4.7-v0.4.12 Gemini
+  refresh work. Previously expired Claude tokens silently skipped
+  collection until the user re-launched `claude` CLI to refresh,
+  which gave a stale Claude card on the Providers tab if the user
+  hadn't opened a Claude session in ~8h.
+
+### Changed
+- Promoted all `[Claude]` collector log lines from DEBUG to INFO
+  (matching the v0.4.10 Gemini pattern), so users + future debugging
+  can see which exit path was taken without the "silent half-fix"
+  failure mode.
+- `ClaudeCredentialsFile` and `ClaudeOAuthInner` now `flatten extra`
+  unknown fields so atomic write-back from the refresh path
+  preserves keys like `subscriptionType` (which `claude` CLI itself
+  consumes) instead of silently dropping them.
+
+### Notes
+- **Anthropic Acceptable Use:** the read-only quota fetch (`/api/oauth/usage`)
+  this app has been doing since v0.4.0 is unchanged. v0.4.14 only
+  refreshes the access_token to keep that read-only fetch working
+  past the ~8h token expiry — we do not proxy any inference traffic.
+
 ## [0.4.13] — 2026-05-04
 
 ### Fixed
