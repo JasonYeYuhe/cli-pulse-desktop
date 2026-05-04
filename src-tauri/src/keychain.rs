@@ -1,21 +1,24 @@
-//! OS-native credential store wrapper for the v0.3.0 OTP refresh token.
+//! OS-native credential store wrapper.
 //!
 //! Service: `dev.clipulse.desktop`
-//! Account: `supabase-refresh-token`
+//! Accounts (one entry per account name):
+//!   - `supabase-refresh-token` — v0.3.0 OTP refresh token
+//!   - `cursor-cookie`, `copilot-token`, `openrouter-api-key`,
+//!     `openrouter-base-url` — v0.4.16 provider creds (migrated from
+//!     the v0.4.6 plaintext provider_creds.json)
 //!
 //! Backends (selected at compile time via `keyring` features):
 //!   - macOS  → Keychain (`apple-native`)
 //!   - Windows → Credential Manager (`windows-native`)
 //!   - Linux  → Secret Service via libsecret (`linux-native-sync-persistent`)
 //!
-//! **Fail-closed on Linux without Secret Service.** Codex review of the
-//! v0.3.0 plan correctly flagged that machine-id-derived "encryption" is
-//! not security — `/etc/machine-id` is an identifier, not a secret. An
-//! attacker who reads the encrypted file can usually derive the key.
-//! Refresh tokens grant ~1 week of account access; storing them with weak
-//! crypto is worse than asking the user to install libsecret. So when
-//! the platform backend is missing, we surface a clear error and the UI
-//! offers the existing pair-from-Mac flow as a workaround.
+//! **Fail-closed on Linux without Secret Service for OTP.** Codex review
+//! of the v0.3.0 plan correctly flagged that machine-id-derived
+//! "encryption" is not security — `/etc/machine-id` is an identifier,
+//! not a secret. So for the OTP refresh token the keychain is the only
+//! storage path. v0.4.16 provider creds DO have a file fallback (plaintext
+//! mode-0600), preserving v0.4.6 behavior on platforms where keychain
+//! isn't available — see `provider_creds.rs`.
 //!
 //! `.deb` / `.rpm` package metadata declares `libsecret-1-0` as a runtime
 //! dependency so default installs already have it; the failure only
@@ -25,7 +28,7 @@ use keyring::Entry;
 use thiserror::Error;
 
 const SERVICE: &str = "dev.clipulse.desktop";
-const ACCOUNT: &str = "supabase-refresh-token";
+const ACCOUNT_REFRESH_TOKEN: &str = "supabase-refresh-token";
 
 #[derive(Debug, Error)]
 pub enum KeychainError {
@@ -40,8 +43,8 @@ pub enum KeychainError {
     Backend(String),
 }
 
-fn entry() -> Result<Entry, KeychainError> {
-    Entry::new(SERVICE, ACCOUNT).map_err(map_err)
+fn entry_for(account: &str) -> Result<Entry, KeychainError> {
+    Entry::new(SERVICE, account).map_err(map_err)
 }
 
 /// Translate a `keyring::Error` into our typed error. The crate
@@ -75,28 +78,59 @@ fn map_err(e: keyring::Error) -> KeychainError {
     }
 }
 
-pub fn store_refresh_token(token: &str) -> Result<(), KeychainError> {
-    entry()?.set_password(token).map_err(map_err)
+// ---- Generic API (used by provider_creds.rs since v0.4.16) ----
+
+/// Set the value at `<service=dev.clipulse.desktop, account=<name>>`.
+/// Returns `Err(NotAvailable)` if the backend is missing — caller
+/// decides whether to fail-closed (OTP) or fall back to file
+/// (provider creds, v0.4.6 behavior).
+pub fn store_at(account: &str, value: &str) -> Result<(), KeychainError> {
+    entry_for(account)?.set_password(value).map_err(map_err)
 }
 
-/// Read the refresh token. Returns `Ok(None)` if no entry exists,
-/// `Err(NotAvailable)` if the backend is missing.
-pub fn read_refresh_token() -> Result<Option<String>, KeychainError> {
-    match entry()?.get_password() {
+/// Read the value at the given account. `Ok(None)` for "entry doesn't
+/// exist" (a normal state for never-set creds), `Err(NotAvailable)`
+/// for "OS keychain backend missing".
+pub fn read_at(account: &str) -> Result<Option<String>, KeychainError> {
+    match entry_for(account)?.get_password() {
         Ok(s) => Ok(Some(s)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(map_err(e)),
     }
 }
 
-/// Delete the refresh token. Best-effort — a missing entry is treated
-/// as success (the goal "no token in keychain" is already achieved).
-pub fn delete_refresh_token() -> Result<(), KeychainError> {
-    match entry()?.delete_credential() {
+/// Delete the entry at `account`. A missing entry is treated as success
+/// (the goal "no value in keychain" is already achieved).
+pub fn delete_at(account: &str) -> Result<(), KeychainError> {
+    match entry_for(account)?.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(map_err(e)),
     }
+}
+
+/// Probe whether the keychain backend is available on this host.
+/// Cheap operation — creates an entry handle and immediately calls
+/// `get_password` against a probe account, treating `NoEntry` (the
+/// expected response) as "available" and `PlatformFailure / DBus not
+/// running` etc. as "unavailable". Used by `provider_creds.rs` at
+/// startup to decide whether to migrate from file → keychain.
+pub fn is_available() -> bool {
+    read_at("__probe__").is_ok()
+}
+
+// ---- v0.3.0 OTP refresh-token wrappers (kept for backward compat) ----
+
+pub fn store_refresh_token(token: &str) -> Result<(), KeychainError> {
+    store_at(ACCOUNT_REFRESH_TOKEN, token)
+}
+
+pub fn read_refresh_token() -> Result<Option<String>, KeychainError> {
+    read_at(ACCOUNT_REFRESH_TOKEN)
+}
+
+pub fn delete_refresh_token() -> Result<(), KeychainError> {
+    delete_at(ACCOUNT_REFRESH_TOKEN)
 }
 
 #[cfg(test)]

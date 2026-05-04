@@ -149,6 +149,12 @@ struct DiagnosticSnapshot {
     /// `app_log_dir()` which matches the path tauri-plugin-log uses
     /// at runtime.
     log_dir: Option<String>,
+    /// v0.4.16 — surface which storage backend `provider_creds`
+    /// chose at startup. Lets security-conscious users (esp. on
+    /// headless Linux) verify they're on the OS keychain not the
+    /// plaintext file. Per Gemini 3.1 Pro review: silent fallback
+    /// can mislead users; the diagnostic copy makes it visible.
+    provider_creds_backend: provider_creds::Backend,
 }
 
 /// Used by the About panel to render a copyable diagnostic block when
@@ -176,6 +182,7 @@ fn diagnostic_snapshot(app: tauri::AppHandle) -> Result<DiagnosticSnapshot, Stri
             .map(|c| c.device_id.chars().take(8).collect::<String>()),
         cache_dir,
         log_dir,
+        provider_creds_backend: provider_creds::current_backend(),
     })
 }
 
@@ -1184,6 +1191,13 @@ pub fn run() {
                 ),
                 _ => log::info!("Not paired — sign in via Settings to start syncing"),
             }
+            // v0.4.16 — initialize provider-creds storage backend (OS
+            // keychain primary, file fallback) and run the one-shot
+            // v1->v2 migration if a plaintext provider_creds.json
+            // exists. Per Gemini 3.1 Pro review: at startup, NOT on
+            // first save() — otherwise users who never edit creds
+            // stay on the plaintext file forever.
+            provider_creds::init_backend();
             spawn_background_sync(app.handle().clone(), stop_bg.clone());
             // System tray — Windows first-class, Linux works with AppIndicator
             // when libayatana-appindicator3 is installed, otherwise we log and

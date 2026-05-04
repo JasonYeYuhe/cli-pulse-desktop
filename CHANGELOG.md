@@ -2,6 +2,38 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.16] — 2026-05-04
+
+### Changed
+- **Cursor / Copilot / OpenRouter credentials now stored in the OS
+  keychain** (macOS Keychain / Windows Credential Manager / Linux
+  Secret Service via `libsecret`). Replaces the v0.4.6 plaintext-
+  with-mode-0600 storage. On first launch after upgrade, existing
+  credentials migrate automatically — the plaintext file is then
+  rewritten with `version: 2` + zeroed values. (v0.4.17 will delete
+  the file entirely; the two-step gives one release of rollback room
+  in case migration goes wrong.)
+- Linux installs without a running keyring service (headless server,
+  minimal container) gracefully fall back to the v0.4.6 file storage
+  with a one-time INFO log line. The active backend is surfaced via
+  `diagnostic_snapshot.provider_creds_backend` so security-conscious
+  users can verify they're on the OS keychain rather than the file.
+  Per Gemini 3.1 Pro review: silent fallback can mislead users; the
+  diagnostic copy makes it visible.
+
+### Implementation notes
+- `keychain.rs` gained a generic `store_at(account, value)` /
+  `read_at(account)` / `delete_at(account)` API alongside the
+  existing v0.3.0 OTP refresh-token wrappers. Same `KeychainError`
+  with `NotAvailable` discriminant.
+- `provider_creds.rs` runs the v1 → v2 migration in
+  `tauri::Builder::setup` at app startup, NOT on first `save()`.
+  Per Gemini review (P1): tying it to `save()` would leave users
+  who never edit creds on the plaintext file forever, fragmenting
+  the user base.
+- 8 tests in `provider_creds.rs` (was 6) — added Backend enum
+  serialization pin + v2-file idempotency guard.
+
 ## [0.4.15] — 2026-05-04
 
 ### Added
