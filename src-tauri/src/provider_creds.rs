@@ -117,9 +117,15 @@ static BACKEND: OnceLock<Backend> = OnceLock::new();
 /// runs once at startup.
 ///
 /// Side effects:
-///   - Probes keychain via `keychain::is_available()`.
-///   - If keychain is available AND file is at v1, runs the one-shot
-///     v1 → keychain migration.
+/// - Probes keychain via `keychain::is_available()`.
+/// - If keychain is available AND file is at v1, runs the one-shot
+///   v1 → keychain migration.
+/// - v0.4.19 — if file is at v2 AND keychain is the active backend,
+///   spawns an off-thread cleanup that deletes the breadcrumb file.
+///   The file was a rollback safety-net for v0.4.16-v0.4.18; with
+///   v0.4.18 published and stable, the rollback window has closed.
+///   Per Gemini 3.1 Pro review of the v0.4.19 plan: filesystem I/O
+///   during init must NOT block the main thread (boot metric).
 pub fn init_backend() -> Backend {
     let chosen = if keychain::is_available() {
         Backend::OsKeychain
@@ -134,6 +140,16 @@ pub fn init_backend() -> Backend {
                 "[ProviderCreds] v1->v2 migration failed (non-fatal, will retry next launch): {e}"
             );
         }
+        // v0.4.19 — delete v2 breadcrumb on a background thread so
+        // we don't block app launch on filesystem I/O. The file
+        // contains zeroed values + a `version: 2` marker; deletion
+        // is reversible at the next launch (re-migrate from keychain
+        // if the file is somehow recreated).
+        std::thread::spawn(|| {
+            if let Err(e) = cleanup_v2_breadcrumb_if_present() {
+                log::warn!("[ProviderCreds] v2 breadcrumb cleanup failed (non-fatal): {e}");
+            }
+        });
     }
     chosen
 }
@@ -261,6 +277,52 @@ fn set_private_mode(path: &Path) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn set_private_mode(_path: &Path) -> anyhow::Result<()> {
     // %APPDATA%\dev.clipulse.desktop is per-user by NTFS default.
+    Ok(())
+}
+
+/// v0.4.19 — delete the `version: 2` zeroed breadcrumb file written
+/// by v0.4.16's migration. By v0.4.19, all the rollback room v0.4.16
+/// reserved (one release of "if the keychain write went wrong I can
+/// revert by editing the file") has been used: v0.4.16 + v0.4.17 +
+/// v0.4.18 shipped without keychain-write incident.
+///
+/// Per Gemini 3.1 Pro review (Q1): no checksum / readback verification
+/// needed before deletion. The file's values are already zeroed by
+/// v0.4.16; reading it back can't restore creds even if the keychain
+/// is corrupt. The `version: 2` marker is the entire safety contract —
+/// if it's there, the file is safe to delete.
+fn cleanup_v2_breadcrumb_if_present() -> anyhow::Result<()> {
+    let path = match config_path() {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+    if !path.exists() {
+        return Ok(());
+    }
+    let text = fs::read_to_string(&path)?;
+    let creds: ProviderCreds = match serde_json::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => {
+            // Defensive: don't delete an unparseable file. It might be
+            // a hand-edited v1 with corruption; user might want to
+            // recover it manually.
+            return Err(anyhow::anyhow!(
+                "file at {} unparseable, refusing to delete: {e}",
+                path.display()
+            ));
+        }
+    };
+    if creds.version < 2 {
+        // v1 file — keychain backend may have been unavailable when
+        // this was written, OR migration hasn't run yet on this
+        // launch. Leave it alone.
+        return Ok(());
+    }
+    fs::remove_file(&path).map_err(|e| anyhow::anyhow!("remove {}: {e}", path.display()))?;
+    log::info!(
+        "[ProviderCreds] v0.4.19 — deleted v2 breadcrumb file at {} (rollback window closed; values live in OS keychain)",
+        path.display()
+    );
     Ok(())
 }
 
@@ -417,5 +479,83 @@ mod tests {
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.version, 2);
         assert!(parsed.cursor_cookie.is_none());
+    }
+
+    // v0.4.19 — cleanup of v2 breadcrumb file.
+
+    /// Helper: write the given creds to a tempdir-rooted path that
+    /// mimics the real config_path() shape, returning the path. Caller
+    /// is responsible for the tempdir lifetime.
+    fn write_creds_at(dir: &Path, creds: &ProviderCreds) -> PathBuf {
+        let path = dir.join("provider_creds.json");
+        let text = serde_json::to_string_pretty(creds).unwrap();
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    /// Direct test of the deletion predicate (parses file, checks
+    /// version, deletes). Doesn't go through `cleanup_v2_breadcrumb_if_present`
+    /// because that uses the global `config_path()` which would clobber
+    /// the user's real file. Mirrors the same control flow inline.
+    fn delete_if_v2(path: &Path) -> anyhow::Result<bool> {
+        if !path.exists() {
+            return Ok(false);
+        }
+        let text = fs::read_to_string(path)?;
+        let creds: ProviderCreds = serde_json::from_str(&text)?;
+        if creds.version < 2 {
+            return Ok(false);
+        }
+        fs::remove_file(path)?;
+        Ok(true)
+    }
+
+    #[test]
+    fn cleanup_removes_v2_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_creds_at(
+            tmp.path(),
+            &ProviderCreds {
+                version: 2,
+                cursor_cookie: None,
+                copilot_token: None,
+                openrouter_api_key: None,
+                openrouter_base_url: None,
+            },
+        );
+        assert!(path.exists());
+        let removed = delete_if_v2(&path).unwrap();
+        assert!(removed, "v2 file should be deleted");
+        assert!(!path.exists(), "file must not exist after cleanup");
+    }
+
+    #[test]
+    fn cleanup_keeps_v1_file() {
+        // Defensive: a v1 file means migration hasn't run OR keychain
+        // was unavailable — the file is the SOLE storage of secrets.
+        // Deleting it would lose the user's creds.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_creds_at(
+            tmp.path(),
+            &ProviderCreds {
+                version: 1,
+                cursor_cookie: Some("real-secret-cookie".into()),
+                copilot_token: None,
+                openrouter_api_key: None,
+                openrouter_base_url: None,
+            },
+        );
+        assert!(path.exists());
+        let removed = delete_if_v2(&path).unwrap();
+        assert!(!removed, "v1 file must NEVER be deleted");
+        assert!(path.exists(), "v1 file must still exist");
+    }
+
+    #[test]
+    fn cleanup_no_op_when_file_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("does-not-exist.json");
+        let removed = delete_if_v2(&path).unwrap();
+        assert!(!removed);
     }
 }

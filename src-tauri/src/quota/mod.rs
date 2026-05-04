@@ -34,6 +34,26 @@ pub const PROVIDER_GEMINI: &str = "Gemini";
 pub const PROVIDER_COPILOT: &str = "Copilot";
 pub const PROVIDER_OPENROUTER: &str = "OpenRouter";
 
+/// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
+///
+/// Both Claude and Gemini's `is_expired` / `is_token_fresh` checks
+/// trigger a refresh when `expires_at - now < PRE_EXPIRY_BUFFER_MS`,
+/// not when the token has already expired. Reasoning:
+///   - Background sync runs every 120s. A buffer < 1 cycle (60s) means
+///     a single missed tick (sleep, OS suspend, network hiccup)
+///     produces an expired-token cycle.
+///   - Buffer of 5 min absorbs ~2 missed cycles — safe headroom for
+///     real-world conditions while keeping the refresh frequency
+///     bounded by token life (5 min / 8 h ≈ 1% extra refreshes).
+///   - Larger buffers (e.g. 30 min) eat provider rate limits without
+///     measurable benefit.
+///
+/// Pin via `pre_expiry_buffer_consistent_across_providers` test at
+/// the bottom of this file. Drift here would mean Claude and Gemini
+/// have inconsistent refresh timing, which Gemini 3.1 Pro flagged
+/// in v0.4.19 review as the kind of thing that silently rots.
+pub const PRE_EXPIRY_BUFFER_MS: f64 = 5.0 * 60.0 * 1000.0;
+
 /// Snapshot returned by each provider's `collect()`. Same shape across
 /// providers so the orchestrator can build a uniform `p_provider_tiers`
 /// payload regardless of which provider produced it.
@@ -136,5 +156,20 @@ mod tests {
                 mac_entry.1
             );
         }
+    }
+
+    /// v0.4.19 — pin the proactive-refresh buffer at 5 minutes.
+    /// Per Gemini 3.1 Pro review: "5 minutes is the mathematically
+    /// correct integer for your architecture. Given a 120-second
+    /// background tick, a 5-minute buffer safely absorbs exactly two
+    /// dropped cycles." Lower → fragile to single missed tick.
+    /// Higher → wastes refresh-endpoint quota.
+    #[test]
+    fn pre_expiry_buffer_pinned_at_5_minutes() {
+        assert_eq!(
+            PRE_EXPIRY_BUFFER_MS,
+            5.0 * 60.0 * 1000.0,
+            "PRE_EXPIRY_BUFFER_MS must be exactly 5 min — see Gemini review of v0.4.19 plan"
+        );
     }
 }

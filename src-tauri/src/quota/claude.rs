@@ -55,14 +55,11 @@ use std::time::Duration;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use super::{QuotaSnapshot, TierEntry};
+use super::{QuotaSnapshot, TierEntry, PRE_EXPIRY_BUFFER_MS};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const ANTHROPIC_BETA: &str = "oauth-2025-04-20";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-/// Skip the API call if the persisted access_token expires within this
-/// window. Avoids racing token rotation when Claude Code refreshes.
-const EXPIRY_SAFETY_MARGIN_SECS: i64 = 60;
 
 /// Top-level shape of `~/.claude/.credentials.json` (claude CLI ≥2.x).
 /// Single key `claudeAiOauth` wrapping the OAuth payload.
@@ -392,16 +389,22 @@ fn read_credentials(path: &Path) -> Result<Option<ClaudeCredentialsFile>, String
 }
 
 /// Token is fresh if `expiresAt` is present and at least
-/// `EXPIRY_SAFETY_MARGIN_SECS` seconds in the future. Missing
-/// `expiresAt` is treated as not-fresh (defensive — a credentials block
-/// without expiry can't be safely used).
+/// `PRE_EXPIRY_BUFFER_MS` (5 min) in the future. Missing `expiresAt`
+/// is treated as not-fresh (defensive — a credentials block without
+/// expiry can't be safely used).
+///
+/// v0.4.19 — buffer bumped from 60s to 5 min so refresh fires PROACTIVELY,
+/// before the token actually expires. With a 120s background sync
+/// cycle, a 60s buffer left no headroom for missed ticks; 5 min
+/// absorbs ~2 missed cycles. Shared with Gemini via the
+/// `quota::PRE_EXPIRY_BUFFER_MS` constant so refresh timing stays
+/// consistent across providers.
 fn is_token_fresh(oauth: &ClaudeOAuthInner) -> bool {
     let Some(exp_ms) = oauth.expires_at else {
         return false;
     };
-    let margin_ms = (EXPIRY_SAFETY_MARGIN_SECS as f64) * 1000.0;
     let now_ms = Utc::now().timestamp_millis() as f64;
-    exp_ms > now_ms + margin_ms
+    exp_ms > now_ms + PRE_EXPIRY_BUFFER_MS
 }
 
 async fn fetch_usage(access_token: &str) -> Result<UsageResponse, String> {
@@ -721,10 +724,27 @@ mod tests {
 
     #[test]
     fn token_not_fresh_within_grace_window() {
-        // 30s in future → less than 60s safety margin → NOT fresh.
+        // v0.4.19: buffer is now 5 min (PRE_EXPIRY_BUFFER_MS). Token
+        // expiring in 4 min is INSIDE the buffer → not fresh, refresh
+        // will fire proactively this cycle.
         let now_ms = Utc::now().timestamp_millis() as f64;
-        let near = oauth_with_expires_ms(Some(now_ms + 30_000.0));
-        assert!(!is_token_fresh(&near));
+        let inside_buffer = oauth_with_expires_ms(Some(now_ms + 4.0 * 60.0 * 1000.0));
+        assert!(
+            !is_token_fresh(&inside_buffer),
+            "token expiring within PRE_EXPIRY_BUFFER_MS must NOT be considered fresh"
+        );
+    }
+
+    #[test]
+    fn token_fresh_outside_pre_expiry_buffer() {
+        // Token expiring in 6 min is OUTSIDE the 5-min buffer → still
+        // fresh, refresh defers to next cycle.
+        let now_ms = Utc::now().timestamp_millis() as f64;
+        let outside_buffer = oauth_with_expires_ms(Some(now_ms + 6.0 * 60.0 * 1000.0));
+        assert!(
+            is_token_fresh(&outside_buffer),
+            "token expiring outside PRE_EXPIRY_BUFFER_MS is still fresh"
+        );
     }
 
     // ---- existing usage-response + map_to_snapshot tests (unchanged behavior) ----

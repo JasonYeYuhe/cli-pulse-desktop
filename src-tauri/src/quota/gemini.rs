@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::{QuotaSnapshot, TierEntry};
+use super::{QuotaSnapshot, TierEntry, PRE_EXPIRY_BUFFER_MS};
 
 const TIER_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 const QUOTA_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
@@ -53,9 +53,19 @@ struct CredsFile {
     expiry_date: Option<f64>,
 }
 
+/// True when the token has expired OR is within the proactive
+/// pre-expiry buffer (`PRE_EXPIRY_BUFFER_MS`, 5 min). Triggering refresh
+/// inside the buffer means the next sync cycle starts with a fresh
+/// token rather than racing the expiry. Shared with Claude via
+/// `quota::PRE_EXPIRY_BUFFER_MS` so refresh timing stays consistent
+/// across providers (v0.4.19 — was 0s on the comparison, refreshing
+/// only after expiry).
 fn is_expired(creds: &CredsFile) -> bool {
     match creds.expiry_date {
-        Some(exp_ms) => exp_ms < chrono::Utc::now().timestamp_millis() as f64,
+        Some(exp_ms) => {
+            let now_ms = chrono::Utc::now().timestamp_millis() as f64;
+            exp_ms < now_ms + PRE_EXPIRY_BUFFER_MS
+        }
         None => false, // No expiry recorded → assume valid; if API rejects, sync_now logs warn.
     }
 }

@@ -662,6 +662,23 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
   // useful regardless.
   const [serverRows, setServerRows] = useState<ProviderSummaryRow[] | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  // v0.4.19 — Force refresh now button state. Gemini review P1: the
+  // button MUST be `disabled` while in-flight (not just spinner-only)
+  // or spam-clicks fire concurrent sync_now invocations against
+  // provider rate limits.
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchSummary = useCallback(async () => {
+    try {
+      const rows = await invoke<ProviderSummaryRow[]>("get_provider_summary");
+      setServerRows(rows);
+      setServerError(null);
+    } catch (e: any) {
+      setServerRows(null);
+      setServerError(String(e));
+    }
+  }, []);
+
   useEffect(() => {
     if (!paired) {
       setServerRows(null);
@@ -686,6 +703,24 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
       cancelled = true;
     };
   }, [paired]);
+
+  // v0.4.19 — manual force-refresh. Calls sync_now (re-runs all 6
+  // provider collectors + uploads) then re-fetches provider_summary
+  // so the freshly-synced data appears without waiting 120s for
+  // the next background tick. `disabled` while in-flight per
+  // Gemini review P1.
+  async function forceRefresh() {
+    if (refreshing || !paired) return;
+    setRefreshing(true);
+    try {
+      await invoke("sync_now");
+      await fetchSummary();
+    } catch (e: any) {
+      setServerError(String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
   // Index server rows by provider name for O(1) lookup during render.
   const serverByProvider = useMemo(() => {
     const m = new Map<string, ProviderSummaryRow>();
@@ -779,6 +814,19 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
 
   return (
     <div className="space-y-3">
+      {paired && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={forceRefresh}
+            disabled={refreshing}
+            className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={t("providers.force_refresh_tooltip") || ""}
+          >
+            {refreshing ? t("providers.force_refresh_loading") : t("providers.force_refresh_button")}
+          </button>
+        </div>
+      )}
       {paired && serverError && (
         <div className="text-xs text-neutral-500 px-3 py-2 rounded-md border border-neutral-800/60 bg-neutral-900/30">
           {t("providers.server_unavailable")}

@@ -2,6 +2,47 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.19] — 2026-05-05
+
+### Added
+- **"Refresh now" button on the Providers tab.** Click to run all 6
+  provider collectors (Claude/Codex/Cursor/Gemini/Copilot/OpenRouter)
+  + reload server-side quota data immediately, instead of waiting up
+  to 120s for the next background sync cycle. Disabled while a manual
+  sync is in flight (per Gemini 3.1 Pro review of the v0.4.19 plan —
+  spam-clicks would fire concurrent sync_now calls against provider
+  rate limits).
+
+### Changed
+- **Proactive Claude/Gemini OAuth refresh** — refresh now fires when
+  the token has < 5 minutes of life remaining (was: only after expiry,
+  with a 60s safety margin for Claude / 0s for Gemini). With the
+  120-second background sync cycle, a 5-minute buffer absorbs ~2
+  missed ticks before the token actually expires. The shared constant
+  `quota::PRE_EXPIRY_BUFFER_MS` keeps Claude and Gemini consistent —
+  pinned via `pre_expiry_buffer_pinned_at_5_minutes` test so future
+  drift is caught.
+
+### Fixed
+- **Removed v0.4.16's `provider_creds.json` breadcrumb.** v0.4.16
+  rewrote the file with `version: 2` + zeroed values as a one-release
+  rollback safety net during the keychain migration. v0.4.18 is now
+  stable in production; the breadcrumb is no longer needed.
+  v0.4.19 deletes it on a background thread at app startup (per
+  Gemini review: filesystem I/O during init must not block the main
+  thread). The deletion is gated on `version >= 2` AND keychain being
+  the active backend — v1 files (where the file IS the storage) are
+  never touched.
+
+### Notes
+- The deferral note in the v0.4.14-v0.4.16 dev plan claiming
+  "Codex auth model is different (long-lived session + cookie). Not a
+  refresh-token flow" was wrong. `quota/codex.rs::refresh_tokens` has
+  shipped active OAuth refresh against `auth.openai.com/oauth/token`
+  with the public PKCE client_id since v0.4.3 — it just uses an
+  8-day `last_refresh` staleness gate instead of `expiresAt`. No work
+  needed; deferral deleted from internal notes.
+
 ## [0.4.18] — 2026-05-05
 
 ### Fixed
