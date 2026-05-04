@@ -1354,8 +1354,6 @@ function Settings({
 
       <ExportSection scan={scan} />
 
-      <IntegrationsSection />
-
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
         <h2 className="text-sm font-semibold text-neutral-300">{t("settings.updates_heading")}</h2>
         <UpdaterPanel
@@ -1371,6 +1369,13 @@ function Settings({
         />
         <p className="text-xs text-neutral-600" dangerouslySetInnerHTML={{ __html: t("settings.updates_hint") }} />
       </section>
+
+      {/* v0.4.7 — Integrations placed at true bottom of Settings tab,
+          after Updates, per v0.4.6 dev plan §3 (was incorrectly between
+          Export and Updates in v0.4.6 first ship; VM verification flagged
+          the discrepancy). Kept this position so the section visually
+          reads as "advanced / opt-in" tail of the Settings tab. */}
+      <IntegrationsSection />
 
       {msg && (
         <div

@@ -17,6 +17,7 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod gemini;
+pub mod gemini_refresh;
 pub mod openrouter;
 
 use serde::Serialize;

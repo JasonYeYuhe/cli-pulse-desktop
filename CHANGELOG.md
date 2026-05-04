@@ -2,6 +2,65 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.7] — 2026-05-04
+
+### Added
+- **Active Gemini OAuth refresh.** Gemini's access token expires
+  ~8 hours after issue. v0.4.6 silently skipped collection past expiry,
+  forcing the user to re-run `gemini` CLI to get fresh quota data.
+  v0.4.7 now refreshes automatically by:
+  - Locating the user's Gemini CLI installation's bundled `oauth2.js`
+    (npm / Homebrew / Nix paths covered).
+  - Regex-extracting `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` (these
+    are the values Gemini CLI uses internally; not secrets per
+    RFC 6749 §2.2 — already shipped in the user's local CLI binary).
+  - POSTing to `https://oauth2.googleapis.com/token` with
+    `grant_type=refresh_token`.
+  - Atomically writing the new tokens back to
+    `~/.gemini/oauth_creds.json` (mode 0600 set BEFORE rename).
+  Mirrors macOS CodexBar `GeminiStatusProbe.swift:520-600` (commit
+  82bbcde) — same scrape paths, same Google OAuth flow.
+- **Best-effort fallback chain.** If `oauth2.js` can't be located OR
+  the refresh API rejects, fall back to v0.4.6 silent-skip. No
+  regression; expired-token + missing-CLI users see the same empty
+  state they did before.
+- **Structured success log.** `[Gemini] OAuth token refreshed via
+  gemini-cli local credentials (expires in <N>s)` at INFO level — first
+  evidence in `cli-pulse.log` that the refresh path is firing on
+  real-user systems.
+
+### Changed
+- **Settings → Integrations panel position.** Moved from above
+  Updates section to truly below Updates, per v0.4.6 dev plan §3
+  ("dedicated section at the bottom"). VM verification of v0.4.6
+  flagged the discrepancy. No functionality change.
+- `quota/gemini.rs` `CredsFile` now retains `refresh_token` + `id_token`
+  fields (was previously read-and-discarded). Required for the active
+  refresh path; backwards-compatible for legacy file shapes that omit
+  these fields.
+
+### Tests
+- 6 new Rust tests in `quota/gemini_refresh.rs`: `OAUTH_CLIENT_ID` /
+  `OAUTH_CLIENT_SECRET` regex extraction (single/double quote, missing
+  pair refused, empty content), Google refresh response parse
+  (minimal + rotated tokens), candidate path collection smoke.
+- Total: **127 Rust lib tests** (was 121 in v0.4.6) + 33 Vitest tests.
+
+### CI infrastructure
+- First v0.4.x tag built under the streamlined matrix
+  (`f2eed29` 2026-05-04 dropped Win ARM64 + Linux ARM64 from the
+  default matrix — public-repo Standard runners are FREE; ARM larger
+  runners were billed for 0 real-user downloads). Tag-push CI cost
+  drops from ~50 quota-min to ~25 quota-min per tag, $0 spend.
+
+### Notes
+- iOS / Android / Mac unaffected. Server-side schema unchanged.
+- v0.4.x desktops on auto-update pick this up automatically once
+  v0.4.7 promotes to Latest.
+- v0.4.8+ candidates: OS keychain / `tauri-plugin-stronghold`
+  migration for `provider_creds.json`; OpenRouter i32 overflow
+  bigint migration (needs user backend-schema flag).
+
 ## [0.4.6] — 2026-05-04
 
 ### Added

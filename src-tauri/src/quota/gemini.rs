@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{QuotaSnapshot, TierEntry};
 
@@ -35,13 +35,71 @@ const QUOTA_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieve
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const PREFERRED_FAMILIES: &[&str] = &["Pro", "Flash", "Flash Lite"];
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct CredsFile {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     access_token: Option<String>,
+    /// Required for v0.4.7 active refresh. Without it, expired tokens
+    /// fall back to silent-skip (v0.4.6 behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_token: Option<String>,
+    /// Optional id_token preserved across refreshes when Google rotates
+    /// it alongside the access token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id_token: Option<String>,
     /// Epoch milliseconds (Mac line 102-104).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     expiry_date: Option<f64>,
+}
+
+fn is_expired(creds: &CredsFile) -> bool {
+    match creds.expiry_date {
+        Some(exp_ms) => exp_ms < chrono::Utc::now().timestamp_millis() as f64,
+        None => false, // No expiry recorded → assume valid; if API rejects, sync_now logs warn.
+    }
+}
+
+/// Atomic write to `~/.gemini/oauth_creds.json` using the same temp-then-
+/// rename pattern as `provider_creds.rs`. Mode 0600 set BEFORE rename so
+/// there's no permission window. We're writing into a directory the user
+/// already owns (`gemini` CLI created it), so create_dir_all is a safety
+/// net not normally exercised.
+fn write_creds_atomic(target: &Path, creds: &CredsFile) -> Result<(), String> {
+    let dir = target.parent().ok_or_else(|| "no parent dir".to_string())?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
+    let tmp = tempfile::Builder::new()
+        .prefix(".oauth_creds.")
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .map_err(|e| format!("tempfile: {e}"))?;
+    let text = serde_json::to_string_pretty(creds).map_err(|e| format!("serialize: {e}"))?;
+    {
+        use std::io::Write;
+        let mut f = tmp.as_file();
+        f.write_all(text.as_bytes())
+            .map_err(|e| format!("write: {e}"))?;
+        f.sync_all().map_err(|e| format!("sync: {e}"))?;
+    }
+    set_creds_file_mode_0600(tmp.path())?;
+    tmp.persist(target)
+        .map_err(|e| format!("rename: {}", e.error))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_creds_file_mode_0600(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)
+        .map_err(|e| format!("stat: {e}"))?
+        .permissions();
+    perms.set_mode(0o600);
+    std::fs::set_permissions(path, perms).map_err(|e| format!("chmod: {e}"))
+}
+
+#[cfg(not(unix))]
+fn set_creds_file_mode_0600(_path: &Path) -> Result<(), String> {
+    // %APPDATA%\* is per-user by NTFS default on Win.
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -95,12 +153,14 @@ struct TierInfo {
 }
 
 /// Collect Gemini quota from `~/.gemini/oauth_creds.json`. Returns
-/// `None` if file absent / token expired / HTTP fails — `[Gemini]`
+/// `None` if file absent / refresh fails / HTTP fails — `[Gemini]`
 /// log line in each case.
 ///
-/// Log levels (v0.4.4 align with claude/codex):
-///   - file absent / token expired / no access_token: `debug!` (expected)
-///   - file present but JSON parse fails: `warn!` (schema drift)
+/// v0.4.7 — when the access token has expired (`expiry_date < now`),
+/// attempt active refresh via `gemini_refresh::refresh()` instead of
+/// the v0.4.6 silent-skip. On refresh success, write the new tokens
+/// back to the file atomically (mode 0600) and continue. On refresh
+/// failure, log warn and fall back to silent-skip (v0.4.6 behavior).
 pub async fn collect() -> Option<QuotaSnapshot> {
     let path = match creds_path() {
         Some(p) => p,
@@ -109,7 +169,7 @@ pub async fn collect() -> Option<QuotaSnapshot> {
             return None;
         }
     };
-    let creds = match read_creds(&path) {
+    let mut creds = match read_creds(&path) {
         Ok(Some(c)) => c,
         Ok(None) => {
             log::debug!("[Gemini] oauth_creds.json absent — run `gemini` CLI to authenticate");
@@ -120,18 +180,52 @@ pub async fn collect() -> Option<QuotaSnapshot> {
             return None;
         }
     };
-    let token = creds.access_token?;
-    if let Some(exp_ms) = creds.expiry_date {
-        let now_ms = chrono::Utc::now().timestamp_millis() as f64;
-        if exp_ms < now_ms {
-            log::debug!(
-                "[Gemini] oauth_creds.json expiry_date past now() — run `gemini` CLI to refresh \
-                 (active OAuth refresh deferred to v0.4.5+)"
-            );
-            return None;
+
+    // v0.4.7 — active refresh on expiry instead of silent skip.
+    if is_expired(&creds) {
+        let refresh_token = match creds.refresh_token.clone() {
+            Some(t) if !t.is_empty() => t,
+            _ => {
+                log::debug!(
+                    "[Gemini] expired access_token + no refresh_token — run `gemini` CLI to re-auth"
+                );
+                return None;
+            }
+        };
+        match super::gemini_refresh::refresh(&refresh_token).await {
+            Ok(refreshed) => {
+                // Persist the new tokens atomically. If write fails the
+                // refresh still succeeded for THIS sync cycle; the next
+                // launch will see the old expiry and re-refresh, which
+                // is correct degraded behavior.
+                creds.access_token = Some(refreshed.access_token.clone());
+                if let Some(rt) = refreshed.refresh_token.clone() {
+                    creds.refresh_token = Some(rt);
+                }
+                if let Some(it) = refreshed.id_token.clone() {
+                    creds.id_token = Some(it);
+                }
+                let now_ms = chrono::Utc::now().timestamp_millis() as f64;
+                creds.expiry_date = Some(now_ms + (refreshed.expires_in as f64) * 1000.0);
+                if let Err(e) = write_creds_atomic(&path, &creds) {
+                    log::warn!(
+                        "[Gemini] refresh succeeded but write-back to oauth_creds.json failed \
+                         (non-fatal — token used for this cycle, will re-refresh next launch): {e}"
+                    );
+                }
+                log::info!(
+                    "[Gemini] OAuth token refreshed via gemini-cli local credentials (expires in {}s)",
+                    refreshed.expires_in
+                );
+            }
+            Err(e) => {
+                log::warn!("[Gemini] OAuth refresh failed (non-fatal, falling back to skip): {e}");
+                return None;
+            }
         }
     }
 
+    let token = creds.access_token?;
     let tier_info = fetch_tier(&token).await.unwrap_or(TierInfo {
         tier_id: None,
         project_id: None,
