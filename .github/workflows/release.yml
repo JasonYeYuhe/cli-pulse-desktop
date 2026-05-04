@@ -29,11 +29,23 @@ jobs:
   publish:
     name: Build & publish (${{ matrix.platform }} / ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
-    # NOTE: previous attempt at job-level `if:` with matrix.platform did
-    # not work — GitHub Actions doesn't expose the matrix context to
-    # job-level `if:` (matrix expansion happens after if evaluation).
-    # The `platforms` workflow_dispatch input is now a no-op until the
-    # logic is rewritten as a dynamic-matrix setup job (v0.4.6+).
+    # 2026-05-04 — ARM matrix entries removed. Public-repo standard
+    # runners (windows-latest, ubuntu-latest) are FREE on GitHub
+    # Actions; ARM runners (windows-11-arm, ubuntu-24.04-arm) are
+    # "larger runners" and BILLED even on public repos. Across 9
+    # months / 31 v* releases, total ARM downloads = 0 (every ARM
+    # asset has download count ≤ 1, all attributable to internal
+    # CI testing). Win ARM64 + Linux ARM64 were burning ~$11/month
+    # for zero real-user value.
+    #
+    # If ARM demand surfaces: re-add the two entries here and
+    # tag-trigger as usual, OR add a separate `release-arm.yml`
+    # workflow_dispatch-only file to build a single tag's ARM
+    # artifacts on demand.
+    #
+    # The `platforms` workflow_dispatch input declared above is
+    # currently inert — kept as a placeholder for a v0.4.7+ dynamic-
+    # matrix rewrite if/when ARM is re-introduced as an opt-in build.
     strategy:
       fail-fast: false
       matrix:
@@ -43,21 +55,11 @@ jobs:
             os: windows-latest
             bundles: "nsis"
             rust-target: x86_64-pc-windows-msvc
-          - platform: windows
-            arch: arm64
-            os: windows-11-arm
-            bundles: "nsis"
-            rust-target: aarch64-pc-windows-msvc
           - platform: linux
             arch: x64
             os: ubuntu-latest
             bundles: "deb,rpm,appimage"
             rust-target: x86_64-unknown-linux-gnu
-          - platform: linux
-            arch: arm64
-            os: ubuntu-24.04-arm
-            bundles: "deb,rpm,appimage"
-            rust-target: aarch64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v4
