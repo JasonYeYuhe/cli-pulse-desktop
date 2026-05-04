@@ -682,41 +682,75 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
   }, [serverRows]);
 
   const grouped = useMemo<ProviderAgg[] | null>(() => {
-    if (!scan) return null;
+    // v0.4.8 — also render cards when only server data is available
+    // (paired user with valid Gemini/Codex creds but no local scan
+    // history yet). v0.4.7 and earlier gated card visibility on
+    // local scan cache existence, so a freshly-paired user with a
+    // populated provider_quotas row but no recent local activity saw
+    // an empty Providers tab. VM verification of v0.4.7 confirmed the
+    // gap (Gemini card missing despite server having a row).
+    if (!scan && !serverRows) return null;
     const map = new Map<string, ProviderAgg>();
-    for (const e of scan.entries) {
-      const cur =
-        map.get(e.provider) ??
-        ({
-          provider: e.provider,
-          cost: 0,
-          input: 0,
-          output: 0,
-          cached: 0,
-          msgs: 0,
-          days: new Set<string>(),
-          models: new Map(),
-        } satisfies ProviderAgg);
-      if (e.model === CLAUDE_MSG_BUCKET) {
-        cur.msgs += e.message_count;
+    if (scan) {
+      for (const e of scan.entries) {
+        const cur =
+          map.get(e.provider) ??
+          ({
+            provider: e.provider,
+            cost: 0,
+            input: 0,
+            output: 0,
+            cached: 0,
+            msgs: 0,
+            days: new Set<string>(),
+            models: new Map(),
+          } satisfies ProviderAgg);
+        if (e.model === CLAUDE_MSG_BUCKET) {
+          cur.msgs += e.message_count;
+          map.set(e.provider, cur);
+          continue;
+        }
+        cur.input += e.input_tokens;
+        cur.output += e.output_tokens;
+        cur.cached += e.cached_tokens;
+        cur.cost += e.cost_usd ?? 0;
+        cur.days.add(e.date);
+        const m = cur.models.get(e.model) ?? { cost: 0, input: 0, output: 0, cached: 0 };
+        m.cost += e.cost_usd ?? 0;
+        m.input += e.input_tokens;
+        m.output += e.output_tokens;
+        m.cached += e.cached_tokens;
+        cur.models.set(e.model, m);
         map.set(e.provider, cur);
-        continue;
       }
-      cur.input += e.input_tokens;
-      cur.output += e.output_tokens;
-      cur.cached += e.cached_tokens;
-      cur.cost += e.cost_usd ?? 0;
-      cur.days.add(e.date);
-      const m = cur.models.get(e.model) ?? { cost: 0, input: 0, output: 0, cached: 0 };
-      m.cost += e.cost_usd ?? 0;
-      m.input += e.input_tokens;
-      m.output += e.output_tokens;
-      m.cached += e.cached_tokens;
-      cur.models.set(e.model, m);
-      map.set(e.provider, cur);
     }
-    return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
-  }, [scan]);
+    // Backfill any server-known providers absent from local scan with
+    // empty aggregates. The card still renders the plan badge +
+    // tier bars from server data even though local-scan numbers are
+    // zero. Subtitle below distinguishes "no local activity yet" copy.
+    if (serverRows) {
+      for (const row of serverRows) {
+        if (!map.has(row.provider)) {
+          map.set(row.provider, {
+            provider: row.provider,
+            cost: 0,
+            input: 0,
+            output: 0,
+            cached: 0,
+            msgs: 0,
+            days: new Set<string>(),
+            models: new Map(),
+          });
+        }
+      }
+    }
+    // Sort by cost desc; secondary key on provider name so server-only
+    // entries (cost=0) have a stable order instead of insertion order.
+    return Array.from(map.values()).sort((a, b) => {
+      if (b.cost !== a.cost) return b.cost - a.cost;
+      return a.provider.localeCompare(b.provider);
+    });
+  }, [scan, serverRows]);
 
   if (!grouped) return null;
 
@@ -761,13 +795,24 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                     {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
                   </div>
                   <div className="text-xs text-neutral-500">
-                    {t("providers.active_days", { count: v.days.size })}
-                    {" · "}
-                    {t("providers.messages", { count: v.msgs })}
-                    {v.models.size > 0 && (
+                    {/* v0.4.8 — when server-only provider has no local
+                        scan history (zero days/msgs/models), show a
+                        single "no local activity yet" line instead of
+                        "0 active days · 0 msgs". Tier bars below come
+                        from server data. */}
+                    {v.days.size === 0 && v.msgs === 0 && v.models.size === 0 ? (
+                      <span>{t("providers.no_local_scan_yet")}</span>
+                    ) : (
                       <>
+                        {t("providers.active_days", { count: v.days.size })}
                         {" · "}
-                        {t("providers.models", { count: v.models.size })}
+                        {t("providers.messages", { count: v.msgs })}
+                        {v.models.size > 0 && (
+                          <>
+                            {" · "}
+                            {t("providers.models", { count: v.models.size })}
+                          </>
+                        )}
                       </>
                     )}
                   </div>

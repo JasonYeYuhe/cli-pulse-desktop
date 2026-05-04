@@ -62,6 +62,7 @@
     "models_one": "{{count}} model",
     "models_other": "{{count}} models",
     "no_usage": "No usage found in last 30 days.",
+    "no_local_scan_yet": "No local activity yet — quota from your account",
     "io_tokens": "{{value}} I/O tokens",
     "tier_left": "{{remaining}}/{{quota}} left",
     "quota_label": "Quota",

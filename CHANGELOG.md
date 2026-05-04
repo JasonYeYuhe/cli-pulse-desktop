@@ -2,6 +2,52 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.8] — 2026-05-04
+
+### Fixed
+- **Provider card visibility no longer gated on local scan cache.**
+  v0.4.3 through v0.4.7 only rendered Provider cards when the local
+  cost-usage scan had at least one entry for that provider. A user
+  who'd just paired the desktop and had a populated server-side
+  `provider_quotas` row (from another paired device, or from active
+  Gemini OAuth refresh in v0.4.7) but no recent local activity for
+  that provider got an empty Providers tab. VM verification of
+  v0.4.7 confirmed the gap (Gemini server row populated, no card
+  rendered).
+  v0.4.8 extends the card aggregation to backfill any
+  server-known provider absent from local scan with empty aggregate
+  values. Tier bars + plan badge still render from server data; the
+  card subtitle distinguishes the no-local-scan case with a
+  dedicated copy line ("No local activity yet — quota from your
+  account" / "暂无本地活动 — 配额来自账号" /
+  "ローカル使用履歴なし — クォータはアカウントから取得").
+
+### Added
+- New i18n key `providers.no_local_scan_yet` in all 3 locales
+  (en / zh-CN / ja).
+
+### Notes
+- Pure frontend fix. No backend / collector / schema changes.
+- Local-scan-based numbers (active days, msgs, models, cost) stay
+  zero for server-only cards; tier bars + plan badge show real
+  quota state.
+- Sort order: cost desc, then provider name asc as a tie-breaker
+  (so server-only zero-cost entries have a stable order).
+- v0.4.x desktops on auto-update pick this up automatically once
+  v0.4.8 is published.
+
+### v0.4.9+ backlog
+- **Stale indicator on provider cards** when last-server-update is
+  > N hours old. Requires backend `provider_summary` to expose
+  `updated_at` (currently shipped omitted) — schema change pending
+  user flag per autonomy rules.
+- **Claude active OAuth refresh.** Different mechanism from Gemini
+  (Anthropic doesn't expose a simple POST /token; Claude CLI
+  rotates via its own internal flow). Investigation pending.
+- **OS keychain / `tauri-plugin-stronghold`** migration for
+  `provider_creds.json`.
+- **OpenRouter i32 overflow → bigint migration**. Pending user flag.
+
 ## [0.4.7] — 2026-05-04
 
 ### Added

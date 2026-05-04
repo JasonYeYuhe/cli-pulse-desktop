@@ -59,6 +59,7 @@
     "messages_other": "{{count, number}} メッセージ",
     "models_other": "{{count}} モデル",
     "no_usage": "直近 30 日間の利用はありません。",
+    "no_local_scan_yet": "ローカル使用履歴なし — クォータはアカウントから取得",
     "io_tokens": "{{value}} I/O トークン",
     "tier_left": "残り {{remaining}}/{{quota}}",
     "quota_label": "クォータ",
