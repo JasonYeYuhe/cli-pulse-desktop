@@ -2,6 +2,20 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.13] — 2026-05-04
+
+### Fixed
+- **Header app icon now renders the real CLI Pulse logo instead of
+  a placeholder green-cyan gradient square.** The `<div>` placeholder
+  in `App.tsx`'s top-left header was originally added during the
+  v0.1 scaffold and was never replaced with the actual icon. The
+  app icon at `src-tauri/icons/icon.png` (and its size variants)
+  was correctly bundled by Tauri for the OS-level window title bar
+  and tray, but the in-app header was rendering a Tailwind gradient
+  div instead. v0.4.13 imports `src/assets/app-icon.png` (copied
+  from `src-tauri/icons/128x128.png`) and renders it as an `<img>`
+  in the header.
+
 ## [0.4.12] — 2026-05-03
 
 ### Fixed

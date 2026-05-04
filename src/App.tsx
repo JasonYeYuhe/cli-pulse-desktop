@@ -5,6 +5,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { useTranslation } from "react-i18next";
 import { SUPPORTED_LANGS, setLang, type LangCode } from "./i18n";
 import { formatInt, formatUSD, rowsToCsv } from "./lib/format";
+import appIcon from "./assets/app-icon.png";
 import "./App.css";
 
 type DailyEntry = {
@@ -217,7 +218,12 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
       <header className="border-b border-neutral-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded bg-gradient-to-br from-emerald-400 to-cyan-500" />
+          <img
+            src={appIcon}
+            alt="CLI Pulse"
+            className="w-7 h-7 rounded"
+            draggable={false}
+          />
           <div>
             <div className="font-semibold text-sm">{t("app.name")}</div>
             <div className="text-xs text-neutral-500">
