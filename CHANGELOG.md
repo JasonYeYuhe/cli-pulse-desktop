@@ -2,6 +2,17 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.18] — 2026-05-05
+
+### Fixed
+- **OpenRouter custom endpoint URL row now has a Clear button**, matching
+  the parity of the 3 secret rows above (Cursor cookie / Copilot token /
+  OpenRouter API key). Previously the only way to clear the URL was to
+  manually empty the field and save — VM verification of v0.4.17 flagged
+  the inconsistency. The URL isn't a secret so we skip the confirm modal
+  (which exists for "expensive-to-recreate token" semantics) and clear
+  directly.
+
 ## [0.4.17] — 2026-05-05
 
 ### Fixed

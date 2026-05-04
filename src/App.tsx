@@ -1686,6 +1686,25 @@ function IntegrationsSection() {
                   ? "…"
                   : t("settings.integrations.save_button")}
               </button>
+              {/* v0.4.18 — UX parity with the 3 secret rows above. The URL
+                  isn't a secret so we skip the confirm modal (which is
+                  there for "expensive-to-recreate token" semantics) and
+                  clear directly. VM verification of v0.4.17 caught the
+                  inconsistency: the only way to clear the URL was to
+                  manually empty the field and save. */}
+              {view.openrouter_base_url && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setDrafts({ ...drafts, openrouter_base_url: "" });
+                    await saveField("openrouter_base_url", "");
+                  }}
+                  disabled={savingField === "openrouter_base_url"}
+                  className="px-3 py-1 text-xs rounded bg-red-950/40 hover:bg-red-900/60 border border-red-900 text-red-300 disabled:opacity-40"
+                >
+                  {t("settings.integrations.clear_button")}
+                </button>
+              )}
             </div>
           </div>
         )}
