@@ -2,6 +2,38 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.15] — 2026-05-04
+
+### Added
+- **Stale-data indicator on provider cards.** Each provider row now
+  shows a small amber "stale" badge when the cached server data is
+  more than 6 minutes old. Hover for an exact "Last updated N min/hr/d
+  ago" tooltip. Helps users distinguish "Gemini hasn't synced yet"
+  from "Gemini sync failed and the values are old". Threshold is 6
+  minutes (not 5) so it doesn't flap right before each 2-min sync
+  cycle — per Gemini 3.1 Pro's review of the v0.4.14-v0.4.16 dev
+  plan. Threshold pinned in a vitest test.
+
+### Fixed (backend)
+- **OpenRouter balance no longer truncates above ~$21,474.**
+  Supabase migration v0.43 (`v0_43_provider_quotas_bigint_and_updated_at`)
+  bumped `provider_quotas.{quota, remaining}` from `integer` (i32) to
+  `bigint`. Rust side has been i64 since v0.4.0; the cast happened on
+  INSERT inside the helper_sync RPC, so any user with an OpenRouter
+  balance ≥ ~$21k saw truncated values until now. Migration is
+  data-preserving (every existing row's value fits in both i32 and
+  bigint by definition).
+
+### Backend changes (server-side, no client action needed)
+- Migration `v0_43_provider_quotas_bigint_and_updated_at` applied to
+  prod Supabase (project `gkjwsxotmwrgqsvfijzs`):
+  - `ALTER TABLE provider_quotas ALTER COLUMN quota TYPE bigint`
+  - `ALTER TABLE provider_quotas ALTER COLUMN remaining TYPE bigint`
+  - `provider_summary()` RPC now projects `updated_at` per row
+- `ProviderSummaryRow` (Rust + TS) gains `updated_at: Option<String>`
+  / `updated_at: string | null`. Older clients still work — Supabase
+  returns the new field, old clients ignore unknown fields.
+
 ## [0.4.14] — 2026-05-04
 
 ### Added

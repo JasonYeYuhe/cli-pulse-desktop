@@ -4,7 +4,13 @@ import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useTranslation } from "react-i18next";
 import { SUPPORTED_LANGS, setLang, type LangCode } from "./i18n";
-import { formatInt, formatUSD, rowsToCsv } from "./lib/format";
+import {
+  formatInt,
+  formatUSD,
+  formatRelativeMinutes,
+  isStaleProviderRow,
+  rowsToCsv,
+} from "./lib/format";
 import appIcon from "./assets/app-icon.png";
 import "./App.css";
 
@@ -642,6 +648,8 @@ type ProviderSummaryRow = {
   plan_type: string | null;
   reset_time: string | null;
   tiers: ProviderTier[];
+  /** v0.4.15 — RFC3339 timestamp from server. null for usage-only rows. */
+  updated_at: string | null;
 };
 
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
@@ -799,6 +807,16 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold">{v.provider}</span>
                     {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
+                    {srv && isStaleProviderRow(srv.updated_at) && (
+                      <span
+                        className="px-1.5 py-0.5 text-xs rounded bg-amber-950/60 border border-amber-800 text-amber-300"
+                        title={t("providers.stale_tooltip", {
+                          age: formatRelativeMinutes(srv.updated_at!),
+                        })}
+                      >
+                        {t("providers.stale_badge")}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-neutral-500">
                     {/* v0.4.8 — when server-only provider has no local

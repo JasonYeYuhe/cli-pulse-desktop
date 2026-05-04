@@ -60,6 +60,8 @@
     "models_other": "{{count}} 个模型",
     "no_usage": "近 30 天未检测到使用。",
     "no_local_scan_yet": "暂无本地活动 — 配额来自账号",
+    "stale_badge": "已过期",
+    "stale_tooltip": "最后更新于 {{age}} 前。重新打开应用以刷新。",
     "io_tokens": "{{value}} 条 I/O Token",
     "tier_left": "剩余 {{remaining}}/{{quota}}",
     "quota_label": "配额",

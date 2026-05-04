@@ -51,3 +51,50 @@ export function csvEscape(value: string | number | null | undefined): string {
 export function rowsToCsv(rows: ReadonlyArray<ReadonlyArray<string | number | null | undefined>>): string {
   return rows.map((row) => row.map(csvEscape).join(",")).join("\n") + "\n";
 }
+
+/**
+ * v0.4.15 — provider-card stale indicator.
+ *
+ * 6 minutes — slightly above the 2-minute background sync cycle so the
+ * badge doesn't flap right before each refresh. Per Gemini 3.1 Pro
+ * review of the v0.4.14-v0.4.16 dev plan: a 5-min threshold matched
+ * the cycle exactly and would cause visible flicker on every sync.
+ */
+export const STALE_THRESHOLD_MS = 6 * 60_000;
+
+/**
+ * True when the server-side provider_summary row is older than
+ * STALE_THRESHOLD_MS. Returns false on null/undefined/garbage input —
+ * "no timestamp" is not the same as "stale" (synthetic rows from
+ * usage_agg in the SQL FULL OUTER JOIN have no quota row + thus no
+ * updated_at; we don't want to flag them as stale).
+ */
+export function isStaleProviderRow(updated_at: string | null | undefined): boolean {
+  if (!updated_at) return false;
+  const t = Date.parse(updated_at);
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t > STALE_THRESHOLD_MS;
+}
+
+/**
+ * Render a relative-time string like "5 min" / "2 hr" / "3 d" suitable
+ * for a tooltip. Always en-US-style ("min" not "minutes") because the
+ * tooltip text is interpolated into a localized string via
+ * `t("providers.stale_tooltip", { age })` — the unit names in the
+ * surrounding sentence carry the localization weight, this helper
+ * emits a compact value.
+ *
+ * Returns the raw input verbatim for unparseable timestamps (defensive:
+ * we'd rather surface the bad value than crash the render).
+ */
+export function formatRelativeMinutes(updated_at: string): string {
+  const t = Date.parse(updated_at);
+  if (Number.isNaN(t)) return updated_at;
+  const minutes = Math.floor((Date.now() - t) / 60_000);
+  if (minutes < 1) return "<1 min";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr`;
+  const days = Math.floor(hours / 24);
+  return `${days} d`;
+}

@@ -1,5 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { csvEscape, formatInt, formatUSD, rowsToCsv } from "./format";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  csvEscape,
+  formatInt,
+  formatRelativeMinutes,
+  formatUSD,
+  isStaleProviderRow,
+  rowsToCsv,
+  STALE_THRESHOLD_MS,
+} from "./format";
 
 describe("formatUSD", () => {
   it("renders zero as $0.00", () => {
@@ -115,5 +123,98 @@ describe("rowsToCsv", () => {
       "date,provider,model,input_tokens,cached_tokens,output_tokens,cost_usd,message_count\n" +
         "2026-04-26,Claude,claude-sonnet-4-6,1000,0,500,0.005000,1\n"
     );
+  });
+});
+
+// v0.4.15 — provider-card stale indicator helpers.
+
+describe("isStaleProviderRow", () => {
+  // Pin "now" to a fixed instant so tests are deterministic.
+  const NOW = Date.parse("2026-05-04T12:00:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns false for null/undefined/empty input", () => {
+    expect(isStaleProviderRow(null)).toBe(false);
+    expect(isStaleProviderRow(undefined)).toBe(false);
+    expect(isStaleProviderRow("")).toBe(false);
+  });
+
+  it("returns false when updated_at is unparseable", () => {
+    expect(isStaleProviderRow("not-a-date")).toBe(false);
+  });
+
+  it("returns false when updated_at is fresher than threshold", () => {
+    // 5 min ago — under the 6-min threshold per Gemini review.
+    const fiveMinAgo = new Date(NOW - 5 * 60_000).toISOString();
+    expect(isStaleProviderRow(fiveMinAgo)).toBe(false);
+  });
+
+  it("returns true when updated_at is older than threshold", () => {
+    // 7 min ago — over threshold.
+    const sevenMinAgo = new Date(NOW - 7 * 60_000).toISOString();
+    expect(isStaleProviderRow(sevenMinAgo)).toBe(true);
+  });
+
+  it("does NOT flap exactly at the 5-min sync cycle boundary", () => {
+    // Pin: at exactly 5 min, the badge must NOT show — that was the
+    // Gemini review's specific concern. The 6-min threshold buys us
+    // a 1-min buffer for sync to complete.
+    const exactlyFiveMin = new Date(NOW - 5 * 60_000).toISOString();
+    expect(isStaleProviderRow(exactlyFiveMin)).toBe(false);
+    expect(STALE_THRESHOLD_MS).toBe(6 * 60_000);
+  });
+
+  it("handles future timestamps as fresh (not stale)", () => {
+    // Defensive: clock skew or bad server data shouldn't flag rows
+    // from the future as stale.
+    const future = new Date(NOW + 60_000).toISOString();
+    expect(isStaleProviderRow(future)).toBe(false);
+  });
+});
+
+describe("formatRelativeMinutes", () => {
+  const NOW = Date.parse("2026-05-04T12:00:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders sub-minute as <1 min", () => {
+    const justNow = new Date(NOW - 30_000).toISOString();
+    expect(formatRelativeMinutes(justNow)).toBe("<1 min");
+  });
+
+  it("renders minutes for 1-59 min", () => {
+    expect(formatRelativeMinutes(new Date(NOW - 7 * 60_000).toISOString())).toBe("7 min");
+    expect(formatRelativeMinutes(new Date(NOW - 59 * 60_000).toISOString())).toBe("59 min");
+  });
+
+  it("renders hours for 1-23 hr", () => {
+    expect(formatRelativeMinutes(new Date(NOW - 60 * 60_000).toISOString())).toBe("1 hr");
+    expect(formatRelativeMinutes(new Date(NOW - 23 * 60 * 60_000).toISOString())).toBe("23 hr");
+  });
+
+  it("renders days for 24+ hr", () => {
+    expect(formatRelativeMinutes(new Date(NOW - 24 * 60 * 60_000).toISOString())).toBe("1 d");
+    expect(formatRelativeMinutes(new Date(NOW - 5 * 24 * 60 * 60_000).toISOString())).toBe("5 d");
+  });
+
+  it("returns the raw input verbatim for unparseable timestamps", () => {
+    // Defensive: the only thing worse than a bad timestamp is a
+    // crashed render. Show the bad value so it can be debugged.
+    expect(formatRelativeMinutes("not-a-date")).toBe("not-a-date");
   });
 });

@@ -382,6 +382,12 @@ pub struct ProviderSummaryRow {
     pub reset_time: Option<String>,
     #[serde(default)]
     pub tiers: Vec<ProviderTier>,
+    /// v0.4.15 — RFC3339 timestamp the server-side provider_quotas row
+    /// was last written. `None` for synthetic rows that come purely
+    /// from `usage_agg` (provider has daily_usage_metrics but never
+    /// uploaded a quota snapshot — the FULL OUTER JOIN includes them).
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 pub async fn provider_summary(user_jwt: &str) -> SupabaseResult<Vec<ProviderSummaryRow>> {
