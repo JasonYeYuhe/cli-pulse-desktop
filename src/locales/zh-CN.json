@@ -62,6 +62,8 @@
     "risk_signals_title": "风险信号",
     "risk_no_signals": "状态良好 — 无风险信号",
     "risk_more_count": "另有 {{count}} 条",
+    "risk_signals_offline": "无法连接服务器 — 告警可能不是最新",
+    "risk_signals_stale": "↻ 显示上次数据 — 刚才刷新失败",
     "top_projects_title": "热门项目(近 30 天)",
     "top_projects_unknown": "(无项目)",
     "top_projects_empty": "近 30 天内无项目活动",
@@ -189,7 +191,10 @@
     "ready": "更新已安装,重启后生效。",
     "error": "更新失败:{{error}}",
     "banner_available": "有新版本 v{{version}}",
-    "banner_action": "更新"
+    "banner_action": "更新",
+    "banner_downloading": "下载中…",
+    "banner_ready": "重启以应用",
+    "banner_error": "更新失败 — 查看设置"
   },
   "messages": {
     "paired_as": "已配对为\"{{name}}\" ({{id}}…)。",

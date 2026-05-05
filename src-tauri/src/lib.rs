@@ -782,6 +782,34 @@ async fn get_daily_usage(days: Option<u32>) -> Result<Vec<supabase::DailyUsageRo
     ensure_daily_usage(&cfg.user_id, days).await
 }
 
+/// v0.5.3 — server-stored alerts for the RiskSignalsCard. Reads
+/// the same `alerts` table that `dashboard_summary.unresolved_alerts`
+/// counts, so the Overview tile and the Risk card are now sourced
+/// from the same backend dataset. Previously the card used
+/// `preview_alerts` (client-computed from local scan + thresholds)
+/// which produced confusing divergence between the tile count and
+/// the card content.
+///
+/// Returns `Ok(vec![])` for unpaired users — the card renders an
+/// "(no paired account)" hint in that path. Network/auth errors
+/// propagate as `Err` so the card can render a distinct
+/// "Couldn't reach server" state (Gemini P2: defaulting an offline
+/// fetch to the empty state would render "Looking good — no risk
+/// signals" while the user is actually offline, which is a
+/// dangerous false positive for budget alerts).
+#[tauri::command]
+async fn get_server_alerts() -> Result<Vec<supabase::ServerAlert>, String> {
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    let user_id = cfg.user_id.clone();
+    with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::get_unresolved_alerts(&user_id, &jwt).await }
+    })
+    .await
+}
+
 /// v0.5.2 — top-projects aggregation. See `top_projects.rs` for
 /// the algorithm; this command pulls the underlying `sessions`
 /// rows for the past `days` days and returns the top-N rolled-up
@@ -1648,6 +1676,8 @@ pub fn run() {
             get_cost_forecast,
             // v0.5.2 — top-projects aggregation from sessions table
             get_top_projects,
+            // v0.5.3 — server-stored unresolved alerts for RiskSignalsCard
+            get_server_alerts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

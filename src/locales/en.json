@@ -63,6 +63,8 @@
     "risk_signals_title": "Risk signals",
     "risk_no_signals": "Looking good — no risk signals",
     "risk_more_count": "+{{count}} more",
+    "risk_signals_offline": "Couldn't reach server — alerts may be stale",
+    "risk_signals_stale": "↻ Showing previous data — last refresh failed",
     "top_projects_title": "Top projects (30 days)",
     "top_projects_unknown": "(no project)",
     "top_projects_empty": "No projects with activity in the last 30 days",
@@ -193,7 +195,10 @@
     "ready": "Update installed. Restart to apply.",
     "error": "Update failed: {{error}}",
     "banner_available": "v{{version}} is available",
-    "banner_action": "Update"
+    "banner_action": "Update",
+    "banner_downloading": "Downloading…",
+    "banner_ready": "Restart to apply",
+    "banner_error": "Update failed — see Settings"
   },
   "messages": {
     "paired_as": "Paired as \"{{name}}\" ({{id}}…).",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -127,7 +127,12 @@ export default function App() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [alertsLoading, setAlertsLoading] = useState(false);
-  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  // v0.5.3 — App-level updater state (was UI-component-local in
+  // Settings panel). The header banner consumes this directly so a
+  // click triggers install rather than tab-switching. UpdatesSection
+  // is now a pure presentation component (Codex P1+P2: single
+  // source of truth, no double state machine, no double-click race).
+  const [updater, dispatchUpdater] = useReducer(updaterReducer, { state: "idle" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<{ at: Date; report: SyncReport } | null>(null);
@@ -194,18 +199,79 @@ export default function App() {
     refreshAlerts();
 
     // Silent update check on first mount. We DON'T auto-download —
-    // user still controls the install via Settings → Updates.
-    // Failure is non-fatal (offline, GitHub down, etc.) — stay quiet
-    // so the user isn't pestered.
+    // the user still chooses when to install (banner click in v0.5.3
+    // or Settings → Updates). Failure is non-fatal (offline, GitHub
+    // down, etc.); we don't even surface it as an error state — that
+    // would render an angry banner on transient blips. The dispatch
+    // path stays in idle.
     (async () => {
       try {
         const upd = await checkUpdate();
-        if (upd) setUpdateAvailable(upd.version);
+        if (upd) {
+          dispatchUpdater({
+            type: "available",
+            version: upd.version,
+            body: upd.body,
+          });
+        }
       } catch (e) {
         console.warn("update check failed:", e);
       }
     })();
   }, [refreshConfig, runScan, refreshSessions, refreshAlerts]);
+
+  // v0.5.3 — runs the full check+download+install flow. Idempotent:
+  // calling twice while a download is in flight is a no-op (reducer
+  // guards `download_progress` against stale dispatches and
+  // `check_started` against re-entry mid-download). Used by both the
+  // header banner click and the Settings → Updates "Check now" button.
+  const doCheckUpdate = useCallback(async () => {
+    dispatchUpdater({ type: "check_started" });
+    try {
+      const upd = await checkUpdate();
+      if (!upd) {
+        dispatchUpdater({ type: "up_to_date" });
+        return;
+      }
+      dispatchUpdater({
+        type: "available",
+        version: upd.version,
+        body: upd.body,
+      });
+      let total = 0;
+      let downloaded = 0;
+      // Throttle progress dispatches to 5 % buckets (Gemini P1: a
+      // 7 MB NSIS at typical chunk size = ~1 700 chunks; dispatching
+      // setState on every one re-renders the App tree per chunk and
+      // locks the UI during the entire download).
+      let lastDispatchedPct = -5;
+      await upd.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? 0;
+          dispatchUpdater({ type: "download_started" });
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+          if (pct - lastDispatchedPct >= 5 || pct === 100) {
+            lastDispatchedPct = pct;
+            dispatchUpdater({ type: "download_progress", pct });
+          }
+        } else if (event.event === "Finished") {
+          dispatchUpdater({ type: "download_finished" });
+        }
+      });
+    } catch (e: any) {
+      dispatchUpdater({ type: "error", text: String(e) });
+    }
+  }, []);
+
+  const doRelaunchAfterUpdate = useCallback(async () => {
+    try {
+      await relaunch();
+    } catch (e: any) {
+      dispatchUpdater({ type: "error", text: String(e) });
+    }
+  }, []);
 
   // Sessions tab refreshes every 10s while visible
   useEffect(() => {
@@ -239,16 +305,59 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {updateAvailable && (
-            <button
-              onClick={() => setTab("settings")}
-              className="px-2.5 py-1 text-xs rounded-md bg-emerald-950/60 border border-emerald-700 text-emerald-200 hover:bg-emerald-900/60"
-              title={t("updater.banner_available", { version: updateAvailable })}
-            >
-              ⬆ {t("updater.banner_available", { version: updateAvailable })} ·{" "}
-              <span className="font-semibold">{t("updater.banner_action")}</span>
-            </button>
-          )}
+          {(() => {
+            // v0.5.3 — banner derived from App-level updater state.
+            // Click handler routes by state: available → start
+            // download; downloading → no-op (visible spinner is
+            // enough); ready → relaunch; error → navigate to Settings
+            // for detail. Granular pct stays in Settings → Updates;
+            // the header banner shows a static "下载中…" to avoid
+            // re-render flicker (Gemini P1).
+            const u = updater;
+            if (
+              u.state !== "available" &&
+              u.state !== "downloading" &&
+              u.state !== "ready" &&
+              u.state !== "error"
+            ) {
+              return null;
+            }
+            const onClick = () => {
+              if (u.state === "ready") {
+                doRelaunchAfterUpdate();
+              } else if (u.state === "available") {
+                doCheckUpdate();
+              } else if (u.state === "error") {
+                setTab("settings");
+              }
+              // downloading → no-op (defensive; the button is also
+              // visually muted via the className branch below)
+            };
+            const text =
+              u.state === "available"
+                ? `⬆ ${t("updater.banner_available", { version: u.version })} · ${t("updater.banner_action")}`
+                : u.state === "downloading"
+                  ? `⬇ ${t("updater.banner_downloading")}`
+                  : u.state === "ready"
+                    ? `✓ ${t("updater.banner_ready")}`
+                    : `⚠ ${t("updater.banner_error")}`;
+            const className =
+              u.state === "downloading"
+                ? "px-2.5 py-1 text-xs rounded-md bg-emerald-950/40 border border-emerald-800/50 text-emerald-300/70 cursor-default"
+                : u.state === "error"
+                  ? "px-2.5 py-1 text-xs rounded-md bg-red-950/60 border border-red-700 text-red-200 hover:bg-red-900/60"
+                  : "px-2.5 py-1 text-xs rounded-md bg-emerald-950/60 border border-emerald-700 text-emerald-200 hover:bg-emerald-900/60";
+            return (
+              <button
+                onClick={onClick}
+                className={className}
+                disabled={u.state === "downloading"}
+                title={text}
+              >
+                {text}
+              </button>
+            );
+          })()}
           <PairBadge paired={!!config?.paired} />
           <button
             onClick={runScan}
@@ -282,7 +391,7 @@ export default function App() {
             {error}
           </div>
         )}
-        {tab === "overview" && <Overview scan={scan} loading={loading} paired={!!config?.paired} alerts={alerts} />}
+        {tab === "overview" && <Overview scan={scan} loading={loading} paired={!!config?.paired} />}
         {tab === "providers" && <Providers scan={scan} paired={!!config?.paired} />}
         {tab === "sessions" && (
           <Sessions
@@ -299,6 +408,9 @@ export default function App() {
             config={config}
             scan={scan}
             lastSync={lastSync}
+            updater={updater}
+            onCheckUpdate={doCheckUpdate}
+            onRelaunchAfterUpdate={doRelaunchAfterUpdate}
             onPaired={async () => {
               await refreshConfig();
             }}
@@ -356,19 +468,112 @@ type TopProject = {
   last_active: string;
 };
 
+// v0.5.3 — server-stored alerts shape, mirrors `supabase::ServerAlert`.
+// `severity` matches the local `Alert["severity"]` enum at runtime
+// (server stores "Info"/"Warning"/"Critical" as text in the alerts
+// table). Typed as `string` here to keep the wire shape honest;
+// callers narrow via `severityRank` before rendering.
+type ServerAlert = {
+  id: string;
+  type: string;
+  severity: string;
+  title: string;
+  message: string | null;
+  created_at: string;
+  related_project_id: string | null;
+  related_project_name: string | null;
+  related_session_id: string | null;
+  related_session_name: string | null;
+  related_provider: string | null;
+  related_device_name: string | null;
+  is_read: boolean | null;
+  is_resolved: boolean | null;
+};
+
 const UNKNOWN_PROJECT = "<unknown>";
+
+// v0.5.3 — single source of truth for updater state, lifted from
+// the Settings panel to App-level so the header banner click can
+// trigger install directly (v0.4.x and v0.5.x VM verifies both
+// reported "banner click doesn't dispatch install" — root cause
+// was the banner only running setTab("settings"), not actually
+// reaching `downloadAndInstall`).
+//
+// Reducer (vs raw setState) per Codex 3.1 v0.5.3 review: it
+// consolidates legal transitions and lets the
+// `download_progress` arm guard against stale dispatches that
+// could land after `download_finished` in a race. The
+// `download_progress` callback is throttled at the dispatch
+// site to ~one update per 5 % (Gemini P1: setting `pct` on
+// every chunk re-renders the entire App tree, locking the UI
+// during a 7 MB download).
+type UpdaterState =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "up-to-date" }
+  | { state: "available"; version: string; body?: string }
+  | { state: "downloading"; pct: number }
+  | { state: "ready" }
+  | { state: "error"; text: string };
+
+type UpdaterAction =
+  | { type: "check_started" }
+  | { type: "up_to_date" }
+  | { type: "available"; version: string; body?: string }
+  | { type: "download_started" }
+  | { type: "download_progress"; pct: number }
+  | { type: "download_finished" }
+  | { type: "error"; text: string }
+  | { type: "reset" };
+
+function updaterReducer(state: UpdaterState, action: UpdaterAction): UpdaterState {
+  switch (action.type) {
+    case "check_started":
+      // Don't reset state if a download is already in flight or
+      // ready — protects against double-click races where the user
+      // clicks the banner twice before React updates the click
+      // handler. Per Codex P1.
+      if (state.state === "downloading" || state.state === "ready") return state;
+      return { state: "checking" };
+    case "up_to_date":
+      return { state: "up-to-date" };
+    case "available":
+      return { state: "available", version: action.version, body: action.body };
+    case "download_started":
+      return { state: "downloading", pct: 0 };
+    case "download_progress":
+      // Stale-dispatch guard: a `Progress` callback can fire after
+      // `Finished` if the channel is buffered. If we've already
+      // moved past `downloading`, drop the late progress.
+      if (state.state !== "downloading") return state;
+      // Skip identical-pct dispatches (caller already throttles
+      // to 5 % buckets but be defensive against duplicates).
+      if (state.pct === action.pct) return state;
+      return { state: "downloading", pct: action.pct };
+    case "download_finished":
+      return { state: "ready" };
+    case "error":
+      return { state: "error", text: action.text };
+    case "reset":
+      return { state: "idle" };
+    default:
+      return state;
+  }
+}
 
 function Overview({
   scan,
   loading,
   paired,
-  alerts,
 }: {
   scan: ScanResult | null;
   loading: boolean;
   paired: boolean;
-  alerts: Alert[] | null;
 }) {
+  // v0.5.3 — `alerts` prop removed. RiskSignalsCard now fetches its
+  // own data via `get_server_alerts`. The Alerts tab still uses
+  // App-level `alerts` state for the full list (different lifecycle,
+  // 30 s polling on tab focus), but Overview no longer needs it.
   const { t } = useTranslation();
   const today = useMemo(() => {
     if (!scan) return null;
@@ -480,7 +685,7 @@ function Overview({
       {paired && (
         <section className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           <CostForecastCard paired={paired} />
-          <RiskSignalsCard alerts={alerts} />
+          <RiskSignalsCard paired={paired} />
           <TopProjectsCard paired={paired} />
         </section>
       )}
@@ -601,12 +806,72 @@ function CostForecastCard({ paired }: { paired: boolean }) {
 /// Empty state ("looking good") fires when the alerts array is
 /// non-null but length 0. Loading state fires when alerts is null
 /// (the first preview_alerts hasn't completed yet).
-function RiskSignalsCard({ alerts }: { alerts: Alert[] | null }) {
+/// v0.5.3 — Risk signals card now sources from the SERVER `alerts`
+/// table via `get_server_alerts` (PostgREST GET), not the local
+/// `preview_alerts` output. This unifies the card's data with the
+/// `dashboard_summary.unresolved_alerts` tile so they no longer
+/// diverge (v0.5.0+v0.5.1+v0.5.2 VM verify caught: tile said 7
+/// unresolved, card said "looking good").
+///
+/// 3 distinct render states:
+/// - **loading**: card mounted, first fetch in flight
+/// - **error/offline**: fetch failed (no network, auth expired,
+///   server unreachable). NOT rendered as the empty "Looking
+///   good" state — that would falsely reassure a user whose phone
+///   has surfaced budget alerts via push that the desktop can't
+///   see right now (Gemini P2 v0.5.3 review).
+/// - **success-empty**: fetch succeeded, 0 unresolved alerts. The
+///   "Looking good" state.
+/// - **success-with-data**: top 3 by severity DESC + "+N more"
+///   overflow.
+function RiskSignalsCard({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
-  // v0.5.1 — sort by severity DESC before slicing (Gemini 3.1 Pro
-  // v0.5.1 review P1). Without this, an Info-heavy queue could
-  // bump a Critical alert out of the top 3 and the card would
-  // silently miss the very thing it's there to surface.
+  const [alerts, setAlerts] = useState<ServerAlert[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  // Poll every 60 s while the card is mounted (matches Forecast +
+  // TopProjects cadence). Per Gemini 3.1 Pro v0.5.2 review P1: a
+  // background sync_now or push-driven server-side alert append
+  // would otherwise be invisible until the user navigates away
+  // and back.
+  useEffect(() => {
+    if (!paired) {
+      setAlerts([]);
+      setError(null);
+      setLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    const fetchOnce = async () => {
+      try {
+        const v = await invoke<ServerAlert[]>("get_server_alerts");
+        if (cancelled) return;
+        setAlerts(v);
+        setError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        // Don't clobber the previously-fetched alerts on a
+        // transient error — keep the last good list visible
+        // (slightly stale > totally absent). Surface the error
+        // separately so the card can show an offline indicator.
+        setError(String(e));
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    fetchOnce();
+    const id = setInterval(fetchOnce, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [paired]);
+
+  // Sort by severity DESC before slicing (Gemini 3.1 Pro v0.5.1
+  // review P1). Server returns ordered by created_at; we
+  // re-rank for severity priority on the client so a fresh Info
+  // doesn't bump an older Critical out of the visible top-3.
   const ranked = alerts
     ? [...alerts].sort(
         (a, b) => severityRank(b.severity) - severityRank(a.severity),
@@ -620,9 +885,16 @@ function RiskSignalsCard({ alerts }: { alerts: Alert[] | null }) {
       <h2 className="text-sm font-semibold text-neutral-400 mb-2">
         {t("overview.risk_signals_title")}
       </h2>
-      {ranked === null ? (
+      {!loaded ? (
         <div className="text-sm text-neutral-500">{t("misc.loading")}</div>
-      ) : ranked.length === 0 ? (
+      ) : error && !ranked ? (
+        // Error AND no previously-fetched data → offline state.
+        // Distinct from the empty "Looking good" state.
+        <div className="flex items-center gap-2 text-xs text-red-400/80">
+          <SeverityIcon severity="Warning" />
+          <span>{t("overview.risk_signals_offline")}</span>
+        </div>
+      ) : !ranked || ranked.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-emerald-400">
           <SeverityIcon severity="Info" intent="ok" />
           <span>{t("overview.risk_no_signals")}</span>
@@ -631,7 +903,9 @@ function RiskSignalsCard({ alerts }: { alerts: Alert[] | null }) {
         <ul className="space-y-1.5 text-sm">
           {ranked.slice(0, displayCount).map((a) => (
             <li key={a.id} className="flex items-start gap-2">
-              <SeverityIcon severity={a.severity} />
+              <SeverityIcon
+                severity={a.severity as Alert["severity"]}
+              />
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate" title={a.title}>
                   {a.title}
@@ -649,13 +923,21 @@ function RiskSignalsCard({ alerts }: { alerts: Alert[] | null }) {
               {t("overview.risk_more_count", { count: overflow })}
             </li>
           )}
+          {error && (
+            // Stale-data hint: we have a previous successful fetch
+            // but the latest poll failed. Don't hide the data, but
+            // do tell the user we couldn't refresh.
+            <li className="text-[10px] text-amber-500/70 pt-1">
+              {t("overview.risk_signals_stale")}
+            </li>
+          )}
         </ul>
       )}
     </div>
   );
 }
 
-function severityRank(s: Alert["severity"]): number {
+function severityRank(s: Alert["severity"] | string): number {
   if (s === "Critical") return 3;
   if (s === "Warning") return 2;
   return 1; // Info
@@ -1569,6 +1851,9 @@ function Settings({
   config,
   scan,
   lastSync,
+  updater,
+  onCheckUpdate,
+  onRelaunchAfterUpdate,
   onPaired,
   onUnpaired,
   onSynced,
@@ -1576,6 +1861,11 @@ function Settings({
   config: ConfigView | null;
   scan: ScanResult | null;
   lastSync: { at: Date; report: SyncReport } | null;
+  // v0.5.3 — updater state lifted to App-level. Settings is now a
+  // pure presentation consumer; no local useState. Codex P1+P2.
+  updater: UpdaterState;
+  onCheckUpdate: () => Promise<void>;
+  onRelaunchAfterUpdate: () => Promise<void>;
   onPaired: () => Promise<void>;
   onUnpaired: () => Promise<void>;
   onSynced: (r: SyncReport) => void;
@@ -1615,43 +1905,10 @@ function Settings({
     const id = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
     return () => clearTimeout(id);
   }, [resendCooldown]);
-  const [updater, setUpdater] = useState<
-    | { state: "idle" }
-    | { state: "checking" }
-    | { state: "up-to-date" }
-    | { state: "available"; version: string; body?: string }
-    | { state: "downloading"; pct: number }
-    | { state: "ready" }
-    | { state: "error"; text: string }
-  >({ state: "idle" });
-
-  async function doCheckUpdate() {
-    setUpdater({ state: "checking" });
-    try {
-      const upd = await checkUpdate();
-      if (!upd) {
-        setUpdater({ state: "up-to-date" });
-        return;
-      }
-      setUpdater({ state: "available", version: upd.version, body: upd.body });
-      let total = 0;
-      let downloaded = 0;
-      await upd.downloadAndInstall((event) => {
-        if (event.event === "Started") {
-          total = event.data.contentLength ?? 0;
-          setUpdater({ state: "downloading", pct: 0 });
-        } else if (event.event === "Progress") {
-          downloaded += event.data.chunkLength;
-          const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
-          setUpdater({ state: "downloading", pct });
-        } else if (event.event === "Finished") {
-          setUpdater({ state: "ready" });
-        }
-      });
-    } catch (e: any) {
-      setUpdater({ state: "error", text: String(e) });
-    }
-  }
+  // v0.5.3 — local `updater` + `doCheckUpdate` removed. State now
+  // lives at App-level (single source of truth) and is passed in
+  // via props. The UpdaterPanel below receives the same state +
+  // callbacks the App uses for the header banner.
 
   async function doSendOtp(e: React.FormEvent) {
     e.preventDefault();
@@ -2004,14 +2261,8 @@ function Settings({
         <h2 className="text-sm font-semibold text-neutral-300">{t("settings.updates_heading")}</h2>
         <UpdaterPanel
           state={updater}
-          onCheck={doCheckUpdate}
-          onRelaunch={async () => {
-            try {
-              await relaunch();
-            } catch (e: any) {
-              setUpdater({ state: "error", text: String(e) });
-            }
-          }}
+          onCheck={onCheckUpdate}
+          onRelaunch={onRelaunchAfterUpdate}
         />
         <p className="text-xs text-neutral-600" dangerouslySetInnerHTML={{ __html: t("settings.updates_hint") }} />
       </section>
@@ -2730,14 +2981,9 @@ function UpdaterPanel({
   onCheck,
   onRelaunch,
 }: {
-  state:
-    | { state: "idle" }
-    | { state: "checking" }
-    | { state: "up-to-date" }
-    | { state: "available"; version: string; body?: string }
-    | { state: "downloading"; pct: number }
-    | { state: "ready" }
-    | { state: "error"; text: string };
+  // v0.5.3 — uses the App-level `UpdaterState` shared type instead
+  // of the inline duplicate that lived here through v0.5.2.
+  state: UpdaterState;
   onCheck: () => void;
   onRelaunch: () => void;
 }) {

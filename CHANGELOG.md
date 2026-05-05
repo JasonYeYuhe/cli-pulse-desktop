@@ -2,6 +2,69 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.3] — 2026-05-05
+
+Polish ship closing the three real findings from the
+v0.5.0+0.5.1+0.5.2 VM verify report. Both Codex and Gemini 3.1 Pro
+reviewed the v0.5.3+0.5.4 dev plan and caught 5 P1 + 4 P2 issues
+pre-ship — all incorporated below.
+
+### Fixed
+- **Auto-updater banner click now actually triggers install.** Both
+  v0.4.21+22+23 and v0.5.0+0.5.1+0.5.2 VM verify reports flagged
+  "banner click doesn't dispatch — fell back to fresh-install /S."
+  Hypothesis was a WebView2 / focus quirk; root cause was simpler:
+  `src/App.tsx` had the banner's `onClick` hard-coded to
+  `setTab("settings")`, never reaching the `downloadAndInstall(...)`
+  flow that lived inside `UpdatesSection`. v0.5.3 lifts the updater
+  state to App-level via `useReducer`, wires the banner click
+  directly to the install path, and converts `UpdatesSection` to
+  a pure presentation component receiving state + dispatch as
+  props (Codex P1+P2: single source of truth, no double state
+  machine, no double-click race during `available → downloading`
+  transition). Banner text changes per state: "有新版本 vX.Y.Z ·
+  更新" / "下载中…" / "重启以应用" / "更新失败 — 查看设置".
+- **Risk signals card source-of-truth now matches Overview tile.**
+  v0.5.0+0.5.1+0.5.2 VM verify caught a divergence: top tile read
+  "未解决告警 7" while same-Overview's RiskSignalsCard read
+  "无风险信号". Tile sourced from `dashboard_summary.unresolved_alerts`
+  (server-stored alerts table); card sourced from `preview_alerts`
+  (client-computed from local scan + thresholds). Different
+  datasets, no contract to agree. v0.5.3 adds new
+  `supabase::get_unresolved_alerts` PostgREST GET against the
+  `alerts` table (RLS pre-flight via Supabase MCP confirmed
+  `auth.uid() = user_id` policy, same posture as the v0.5.2
+  sessions read). New `get_server_alerts` Tauri command. Card
+  fetches its own data with 60 s polling, distinct offline /
+  empty / loaded states, and a stale-data hint when a poll fails
+  on top of previously-fetched data (Gemini P2: rendering
+  "Looking good" while offline is a dangerous false positive
+  for budget alerts; the offline state must be visually
+  distinct from the success-empty state).
+
+### Notes
+- **Memory updates (no code):** `reference_sentry.md` gains the
+  issue-vs-event release-filter semantics gotcha (sentry-cli
+  filters by first-seen release, not event-emit release).
+  `reference_desktop_repo.md` documents the auto-updater banner
+  click bug as known-fixed-in-v0.5.3 with the actual root cause.
+- 234 tests green (180 backend, +0; 54 frontend, +0). PostgREST
+  GET against the `alerts` table is integration-tested by VM
+  verify, not unit-mocked — the existing v0.5.2 sessions GET
+  has the same coverage shape.
+- Reducer-based updater state means progress dispatches are
+  throttled to 5 % buckets (Gemini P1: dispatching `setState`
+  on every download chunk caused the entire App tree to re-render
+  hundreds of times per second on a 7 MB NSIS, locking the UI
+  during install).
+- Banner shows static "下载中…" text (no granular pct) to avoid
+  header text jumping (Gemini P1). Detail granular % stays in
+  Settings → Updates where it belongs.
+- v0.5.4 onboarding wizard is deferred per Codex's plan-review
+  recommendation: "real value lower than closing the updater +
+  alert trust issues cleanly." Will revisit if there's user
+  signal asking for it.
+
 ## [0.5.2] — 2026-05-05
 
 Closes the Mac-Overview parity sprint: third and final Insights-row

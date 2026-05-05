@@ -510,6 +510,90 @@ pub async fn get_sessions_since(
 }
 
 // ========================================================================
+// alerts table — direct PostgREST GET (v0.5.3)
+// ========================================================================
+//
+// Powers the v0.5.3 RiskSignalsCard data-source switch. Previously
+// the card consumed `preview_alerts` output (client-computed alerts
+// from local scan + thresholds), which produced a confusing
+// divergence with the Overview tile's `unresolved_alerts` count
+// (the tile reads server-stored alerts via `dashboard_summary`,
+// not the client-computed set). v0.5.3 unifies the card's data
+// source with the tile's by reading the same `alerts` table.
+//
+// RLS pre-flight (Supabase MCP, 2026-05-05): `alerts` table has
+// RLS enabled with policy "Users can manage own alerts" using
+// `(auth.uid() = user_id)` for ALL operations — same posture as
+// `sessions`. Authenticated user JWT scopes naturally to their
+// own rows.
+//
+// LIMIT 200 is generous — typical user has < 20 unresolved alerts
+// at any time. The card only renders top-3-by-severity; the rest
+// flow into the "+N more" overflow indicator. If a heavy account
+// exceeds 200 unresolved, we'd undercount the overflow but the
+// top-3 are still correct.
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServerAlert {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub alert_type: String,
+    pub severity: String, // "Info" / "Warning" / "Critical"
+    pub title: String,
+    pub message: Option<String>,
+    pub created_at: String,
+    pub related_project_id: Option<String>,
+    pub related_project_name: Option<String>,
+    pub related_session_id: Option<String>,
+    pub related_session_name: Option<String>,
+    pub related_provider: Option<String>,
+    pub related_device_name: Option<String>,
+    pub is_read: Option<bool>,
+    pub is_resolved: Option<bool>,
+}
+
+/// Fetch unresolved alerts for the given user. Direct PostgREST GET
+/// (server-side filter on `is_resolved=eq.false` + RLS-enforced
+/// `user_id`). Ordered by `created_at.desc` so the most recent
+/// alert is always in the top-of-card position.
+pub async fn get_unresolved_alerts(
+    user_id: &str,
+    user_jwt: &str,
+) -> SupabaseResult<Vec<ServerAlert>> {
+    const LIMIT: u32 = 200;
+    let url = format!("{}/rest/v1/alerts", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .get(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .query(&[
+            ("user_id", format!("eq.{user_id}")),
+            ("is_resolved", "eq.false".to_string()),
+            (
+                "select",
+                "id,type,severity,title,message,created_at,related_project_id,\
+                 related_project_name,related_session_id,related_session_name,\
+                 related_provider,related_device_name,is_read,is_resolved"
+                    .to_string(),
+            ),
+            ("order", "created_at.desc".to_string()),
+            ("limit", LIMIT.to_string()),
+        ])
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await?;
+    if !(200..300).contains(&status) {
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
+// ========================================================================
 // helper_heartbeat
 // ========================================================================
 
