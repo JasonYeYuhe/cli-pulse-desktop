@@ -2,6 +2,51 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.23] — 2026-05-05
+
+### Fixed
+- **Shutdown latency capped at ~100 ms (was up to 120 s).**
+  `wait_for_next_tick` previously had two `select!` arms (sleep,
+  manual-refresh recv); a `stop` flag raised mid-sleep wasn't
+  observed until the 120 s sleep elapsed. v0.4.21 + v0.4.22 added
+  `&& !stop.load(...)` guards on the inner `while` loops as a
+  partial fix, but those checks only ran AFTER the wait returned.
+  v0.4.23 adds a third `Stopped` variant and a third select arm
+  (`poll_stop_signal` polls every 100 ms) so a stop signal during
+  the 120 s sleep returns immediately. Net: closing the app no
+  longer hangs on a stale background-sync thread for up to 2
+  minutes.
+
+### Changed
+- **Single retry-after-backoff on transient HTTP 5xx / network
+  errors.** A one-shot Anthropic 503, Supabase 502 during a deploy,
+  or DNS hiccup during VPN reconnect previously ticked the
+  `consecutive_failures` counter on the very next 120 s cycle —
+  meaning two unlucky transients could cross the
+  `SYNC_FAILURE_NOTIFY_THRESHOLD` and fire a desktop notification
+  the user shouldn't see. v0.4.23 retries ONCE after a 5 s sleep
+  before counting; if the retry succeeds, the failure is invisible
+  to the streak counter. Conservative: covers HTTP 500/502/503/504/
+  429 plus textual matches for "connection reset/refused", "timed
+  out", "network is unreachable", "temporary failure in name
+  resolution". 4xx / auth failures are NOT retried (those are real,
+  user-actionable). Plain `Err` variants for local issues (JSON
+  parse, file IO, panic) also not retried.
+
+### Notes
+- 4 new backend tests:
+  - `stop_signal_during_idle_returns_stopped_promptly` — pins the
+    100 ms-cadence guarantee using start_paused virtual time.
+  - `stop_already_set_at_entry_returns_stopped_immediately` —
+    fast-path: if `stop` was set BEFORE the wait was entered (e.g.
+    the previous tick took long enough for stop to land), return
+    `Stopped` immediately, not after the first 100 ms poll cycle.
+  - `looks_like_transient_5xx_matches_common_shapes` — 10 positive
+    cases covering all the upstream / network shapes.
+  - `looks_like_transient_5xx_rejects_4xx_and_local` — 7 negative
+    cases (4xx, JSON parse, file IO, panic, success messages).
+- 217 tests green (167 backend, +4 new; 50 frontend, +0).
+
 ## [0.4.22] — 2026-05-05
 
 ### Added

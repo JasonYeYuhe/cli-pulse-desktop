@@ -1128,6 +1128,13 @@ fn poke_manual_refresh() {
 /// redundant call. v0.4.20 collapsed both outcomes to `()` and ate the
 /// extra tick (VM-flagged as the `+2s spurious entry` in the v0.4.20
 /// Block A report).
+///
+/// v0.4.22 added the `&& !stop` guard at call sites for shutdown-
+/// during-Reset-storm safety. v0.4.23 adds a third `Stopped` variant
+/// and a `stop`-watching select arm so a stop signal during the 120 s
+/// sleep is observed within ~100 ms instead of waiting for the sleep
+/// to fully elapse, closing the worst case from 120 s to ~100 ms
+/// shutdown latency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WaitOutcome {
     /// `interval` elapsed without interruption — caller should run a
@@ -1138,6 +1145,11 @@ pub(crate) enum WaitOutcome {
     /// manual path) and should re-enter the wait for another full
     /// `interval` of idle.
     Reset,
+    /// `stop` flag was raised during the wait — caller should exit
+    /// the loop. The outer `while !stop.load(...)` will catch it on
+    /// the next iteration, but returning early lets the loop unwind
+    /// without burning the rest of the 120 s sleep.
+    Stopped,
 }
 
 /// Sleep for `interval` OR until the manual-refresh channel signals
@@ -1147,14 +1159,13 @@ pub(crate) enum WaitOutcome {
 /// via the manual `sync_now` path; we only want to react to clicks
 /// that happen while we're idle.
 ///
-/// Returns `Elapsed` on a clean 120s sleep, `Reset` when interrupted.
-/// Per v0.4.20 VM Block A: the caller MUST treat `Reset` as
-/// "skip the next tick AND wait again" — otherwise a redundant
-/// `background_tick` fires immediately after the user's manual sync.
-/// Use the `while … == Reset && !stop` pattern at the call site
-/// (the `&& !stop` half is what keeps shutdown responsive — without
-/// it, repeated manual clicks could keep the task alive past
-/// shutdown indefinitely; per Gemini 3.1 Pro v0.4.21 review P2).
+/// Returns `Elapsed` on a clean 120 s sleep, `Reset` when a manual
+/// refresh interrupted, `Stopped` when the `stop` flag was raised
+/// during the wait. Per v0.4.20 VM Block A: the caller MUST treat
+/// `Reset` as "skip the next tick AND wait again" — otherwise a
+/// redundant `background_tick` fires immediately after the user's
+/// manual sync. Use the `while … == Reset && !stop` pattern at the
+/// call site.
 ///
 /// The `Some(_) = rx.recv()` pattern (vs the bare `_ = rx.recv()`)
 /// is load-bearing: when `MANUAL_REFRESH_TX.set(tx)` fails (e.g. a
@@ -1168,18 +1179,62 @@ pub(crate) enum WaitOutcome {
 /// continues normally (just without manual-refresh wake capability).
 /// Per Gemini 3.1 Pro v0.4.21 review P1.
 ///
+/// v0.4.23: takes `stop: &AtomicBool` and adds a third select arm
+/// that polls the flag every 100 ms. When the app is shutting down,
+/// the loop exits within ~100 ms of `stop.store(true)` instead of
+/// waiting for the current 120 s sleep to elapse. The polling cost
+/// is ~10 atomic loads per second per loop instance — negligible.
+///
 /// Extracted as `pub(crate)` for unit testing — see `mod tests` below.
 pub(crate) async fn wait_for_next_tick(
     rx: &mut mpsc::Receiver<()>,
     interval: Duration,
+    stop: &AtomicBool,
 ) -> WaitOutcome {
     while rx.try_recv().is_ok() {}
+    // Fast path: if stop was set BEFORE we entered the wait (e.g.
+    // the previous tick finished after stop was raised), return
+    // immediately rather than starting a 100 ms poll cycle.
+    if stop.load(Ordering::Relaxed) {
+        return WaitOutcome::Stopped;
+    }
     tokio::select! {
         _ = tokio::time::sleep(interval) => WaitOutcome::Elapsed,
         Some(_) = rx.recv() => {
             log::debug!("background tick reset by manual refresh during idle window");
             WaitOutcome::Reset
         }
+        _ = poll_stop_signal(stop) => WaitOutcome::Stopped,
+    }
+}
+
+/// Polls `stop` every 100 ms until it flips to `true`, then returns.
+/// 100 ms granularity is plenty for human-perceptible shutdown
+/// responsiveness (a 100 ms delay closing an app feels instant).
+///
+/// Uses `tokio::time::interval` rather than allocating a fresh
+/// `Sleep` future per iteration — Gemini 3.1 Pro v0.4.23 review P2.
+/// `interval` reuses one timer slot in the timer wheel, so the cost
+/// is one register-on-entry plus self-rearming wakeups instead of
+/// register/deregister cycles. Negligible either way; this is the
+/// idiomatic tokio shape.
+///
+/// (Considered switching `stop: AtomicBool` to
+/// `tokio_util::sync::CancellationToken` for true cancel-arm
+/// semantics — Gemini's preferred approach. Deferred because the
+/// type signature ripples through `run()`, `spawn_background_sync`,
+/// and 4 tests; v0.4.23's scope is closed at "make stop observable
+/// within 100 ms," not "rewrite the cancellation primitive." Track
+/// for a later sprint.)
+async fn poll_stop_signal(stop: &AtomicBool) {
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    // First tick fires immediately at `interval.tick().await`; skip
+    // it so we always sleep at least one cadence before re-checking
+    // (the fast-path in `wait_for_next_tick` already handled the
+    // "stop true at entry" case).
+    interval.tick().await;
+    while !stop.load(Ordering::Relaxed) {
+        interval.tick().await;
     }
 }
 
@@ -1200,6 +1255,13 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
         // without racing the initial human pairing flow.
         tokio::time::sleep(Duration::from_secs(20)).await;
         let mut consecutive_failures: u32 = 0;
+        // v0.4.23 — single retry-after-backoff on transient 5xx /
+        // network errors. `tick_attempt = 0` is the first attempt of
+        // a 120 s cycle; `1` means we already retried once and the
+        // next failure should fall through to the streak counter.
+        // Reset on both Ok branches AND on non-transient Err so the
+        // next 120 s cycle starts fresh.
+        let mut tick_attempt: u32 = 0;
         while !stop.load(Ordering::Relaxed) {
             match background_tick(&app).await {
                 Ok(Some(report)) => {
@@ -1211,11 +1273,36 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                         report.metrics_errored
                     );
                     consecutive_failures = 0;
+                    tick_attempt = 0;
                 }
                 Ok(None) => {
                     log::debug!("background sync skipped — not paired");
+                    tick_attempt = 0;
+                }
+                // v0.4.23 — transient HTTP 5xx / network blip: retry
+                // ONCE after 5 s before counting toward the streak. A
+                // single Anthropic 503 should not cause a "2× consecutive"
+                // log line on the very next 120 s tick. Per the autonomy
+                // contract, sync_failure_streak fires the desktop
+                // notification at threshold — false positives are
+                // expensive, so retry first, count second.
+                Err(e) if tick_attempt == 0 && looks_like_transient_5xx(&e) => {
+                    log::info!("transient HTTP error ({e}) — retrying once in 5 s before counting");
+                    tick_attempt = 1;
+                    // Stop-responsive sleep: a stop raised during the
+                    // 5 s retry window breaks the sleep early.
+                    // Without this select, the 5 s retry would
+                    // inherit its own shutdown latency and undermine
+                    // the ~100 ms stop guarantee Item 1 made. Per
+                    // Gemini 3.1 Pro v0.4.23 review P3.
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                        _ = poll_stop_signal(&stop) => {}
+                    }
+                    continue;
                 }
                 Err(e) => {
+                    tick_attempt = 0;
                     consecutive_failures += 1;
                     log::warn!(
                         "background sync error ({}× consecutive): {e}",
@@ -1237,7 +1324,10 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                                 // doesn't trigger an immediate (now-no-op) tick.
                                 // `&& !stop` keeps shutdown responsive even
                                 // under repeated manual clicks (Gemini P2).
-                                while wait_for_next_tick(&mut rx, SYNC_INTERVAL).await
+                                // v0.4.23 — `wait_for_next_tick` also returns
+                                // `Stopped` for fast shutdown; `Stopped == Reset`
+                                // is false so the existing loop naturally exits.
+                                while wait_for_next_tick(&mut rx, SYNC_INTERVAL, &stop).await
                                     == WaitOutcome::Reset
                                     && !stop.load(Ordering::Relaxed)
                                 {
@@ -1267,7 +1357,10 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
             // `&& !stop` (Gemini P2 catch): without it, the inner loop
             // can outlive a shutdown request indefinitely if the user
             // keeps clicking faster than 120 s.
-            while wait_for_next_tick(&mut rx, SYNC_INTERVAL).await == WaitOutcome::Reset
+            // v0.4.23 — `wait_for_next_tick` also returns `Stopped` on
+            // shutdown, so the loop exits within ~100 ms instead of
+            // waiting for the current 120 s sleep to elapse.
+            while wait_for_next_tick(&mut rx, SYNC_INTERVAL, &stop).await == WaitOutcome::Reset
                 && !stop.load(Ordering::Relaxed)
             {}
         }
@@ -1283,6 +1376,33 @@ fn looks_like_auth_failure(msg: &str) -> bool {
     msg.contains("HTTP 401")
         || msg.contains("HTTP 403")
         || msg.contains("Device not found or unauthorized")
+}
+
+/// v0.4.23 — heuristic: does the sync error look like a transient
+/// network / upstream blip worth a single retry? Covers the common
+/// cases where a one-shot 503 from Anthropic, a TCP reset, or a DNS
+/// hiccup produces an `Err` that would otherwise immediately count
+/// toward the consecutive-failures streak.
+///
+/// Intentionally conservative: only retries on signals that almost
+/// certainly resolve themselves within seconds. 4xx / auth failures
+/// are NOT retried — those are real, user-actionable conditions.
+///
+/// All matching is case-insensitive (Gemini 3.1 Pro v0.4.23 review
+/// P3): some upstream proxies / SDKs lowercase the `HTTP` prefix or
+/// embed status codes inside larger messages with arbitrary casing.
+fn looks_like_transient_5xx(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("http 500")
+        || lower.contains("http 502")
+        || lower.contains("http 503")
+        || lower.contains("http 504")
+        || lower.contains("http 429")
+        || lower.contains("connection reset")
+        || lower.contains("connection refused")
+        || lower.contains("timed out")
+        || lower.contains("network is unreachable")
+        || lower.contains("temporary failure in name resolution")
 }
 
 /// Probe `device_status` and act on the response. Returns `Ok(true)`
@@ -1506,8 +1626,9 @@ mod tests {
         tx.send(()).await.unwrap();
 
         let interval = Duration::from_secs(120);
+        let stop = AtomicBool::new(false);
         let started = tokio::time::Instant::now();
-        let outcome = wait_for_next_tick(&mut rx, interval).await;
+        let outcome = wait_for_next_tick(&mut rx, interval, &stop).await;
         let elapsed = started.elapsed();
 
         assert_eq!(
@@ -1528,10 +1649,12 @@ mod tests {
         let (tx, mut rx) = mpsc::channel::<()>(1);
         let interval = Duration::from_secs(120);
         let click_at = Duration::from_secs(30);
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let stop_for_waiter = stop.clone();
 
         let waiter = tokio::spawn(async move {
             let started = tokio::time::Instant::now();
-            let outcome = wait_for_next_tick(&mut rx, interval).await;
+            let outcome = wait_for_next_tick(&mut rx, interval, &stop_for_waiter).await;
             (started.elapsed(), outcome)
         });
 
@@ -1547,6 +1670,65 @@ mod tests {
             outcome,
             WaitOutcome::Reset,
             "manual refresh fired during the idle window must yield Reset"
+        );
+    }
+
+    /// v0.4.23 — stop signal raised during the 120 s sleep should be
+    /// observed within ~100 ms (the poll cadence) instead of waiting
+    /// for the full sleep to elapse. Closes the worst-case shutdown
+    /// latency from 120 s to ~100 ms.
+    #[tokio::test(start_paused = true)]
+    async fn stop_signal_during_idle_returns_stopped_promptly() {
+        let (_tx, mut rx) = mpsc::channel::<()>(1);
+        let interval = Duration::from_secs(120);
+        let stop_at = Duration::from_secs(30);
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let stop_for_setter = stop.clone();
+        let stop_for_waiter = stop.clone();
+
+        let waiter = tokio::spawn(async move {
+            let started = tokio::time::Instant::now();
+            let outcome = wait_for_next_tick(&mut rx, interval, &stop_for_waiter).await;
+            (started.elapsed(), outcome)
+        });
+
+        tokio::time::sleep(stop_at).await;
+        stop_for_setter.store(true, Ordering::Relaxed);
+
+        let (elapsed, outcome) = waiter.await.unwrap();
+        assert_eq!(
+            outcome,
+            WaitOutcome::Stopped,
+            "stop flag during idle must yield WaitOutcome::Stopped"
+        );
+        // The poll cadence is 100 ms; we tolerate up to ~150 ms slack
+        // because virtual time can advance multiple poll iterations
+        // between the setter's store and the next poll-loop wake.
+        assert!(
+            elapsed >= stop_at && elapsed <= stop_at + Duration::from_millis(150),
+            "stop should be observed within ~100 ms of being set, got {elapsed:?}"
+        );
+    }
+
+    /// v0.4.23 — fast-path: if `stop` is already true when
+    /// `wait_for_next_tick` is entered (e.g. the previous `background_tick`
+    /// took long enough that `stop` got set in the meantime), the fn
+    /// should return `Stopped` immediately, NOT wait for the 100 ms
+    /// poll cycle.
+    #[tokio::test(start_paused = true)]
+    async fn stop_already_set_at_entry_returns_stopped_immediately() {
+        let (_tx, mut rx) = mpsc::channel::<()>(1);
+        let interval = Duration::from_secs(120);
+        let stop = AtomicBool::new(true);
+
+        let started = tokio::time::Instant::now();
+        let outcome = wait_for_next_tick(&mut rx, interval, &stop).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome, WaitOutcome::Stopped);
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "fast-path must skip the 100 ms poll cycle, got {elapsed:?}"
         );
     }
 
@@ -1578,9 +1760,12 @@ mod tests {
             // standing in for `background_tick`. Mirrors production's
             // `while … == Reset && !stop {}` pattern (the `&& !stop`
             // half is the P2 fix from Gemini's v0.4.21 review).
+            // v0.4.23 — `wait_for_next_tick` now also takes `&stop`
+            // and can return `Stopped`; mirror the production signature.
             while !stop_for_loop.load(AtomicOrdering::Relaxed) {
                 counter_for_loop.fetch_add(1, AtomicOrdering::SeqCst);
-                while wait_for_next_tick(&mut rx, interval).await == WaitOutcome::Reset
+                while wait_for_next_tick(&mut rx, interval, &stop_for_loop).await
+                    == WaitOutcome::Reset
                     && !stop_for_loop.load(AtomicOrdering::Relaxed)
                 {}
             }
@@ -1637,5 +1822,64 @@ mod tests {
         // Should now exit cleanly. If this hangs, the P1 / P2 fix has
         // regressed.
         loop_handle.await.expect("loop task should exit cleanly");
+    }
+
+    /// v0.4.23 — `looks_like_transient_5xx` powers the "retry once
+    /// before counting toward the streak" branch. Real transient
+    /// shapes seen in the field: Anthropic 503, Supabase 502 during
+    /// deploys, DNS resolution failures during VPN reconnects.
+    #[test]
+    fn looks_like_transient_5xx_matches_common_shapes() {
+        assert!(looks_like_transient_5xx(
+            "Supabase HTTP 503: service temporarily unavailable"
+        ));
+        assert!(looks_like_transient_5xx(
+            "Anthropic API HTTP 502: bad gateway"
+        ));
+        assert!(looks_like_transient_5xx(
+            "HTTP 504 Gateway Timeout from upstream"
+        ));
+        assert!(looks_like_transient_5xx("HTTP 500 internal server error"));
+        assert!(looks_like_transient_5xx(
+            "HTTP 429: Too many requests, retry-after 5s"
+        ));
+        assert!(looks_like_transient_5xx(
+            "Connection reset by peer (os error 54)"
+        ));
+        assert!(looks_like_transient_5xx("connection refused"));
+        assert!(looks_like_transient_5xx(
+            "Operation timed out after 30 seconds"
+        ));
+        assert!(looks_like_transient_5xx(
+            "Network is unreachable (os error 51)"
+        ));
+        assert!(looks_like_transient_5xx(
+            "Temporary failure in name resolution"
+        ));
+    }
+
+    #[test]
+    fn looks_like_transient_5xx_rejects_4xx_and_local() {
+        // 4xx is real, user-actionable — don't retry.
+        assert!(!looks_like_transient_5xx("HTTP 401 Unauthorized"));
+        assert!(!looks_like_transient_5xx("HTTP 403 Forbidden"));
+        assert!(!looks_like_transient_5xx("HTTP 404 Not Found"));
+        assert!(!looks_like_transient_5xx(
+            "Device not found or unauthorized"
+        ));
+        // Local issues — JSON parse, file IO, panic — also not retried.
+        assert!(!looks_like_transient_5xx(
+            "JSON: key must be a string at line 1 column 3"
+        ));
+        assert!(!looks_like_transient_5xx(
+            "atomic write to /Users/x/.gemini/oauth_creds.json failed"
+        ));
+        assert!(!looks_like_transient_5xx(
+            "collector panicked: thread 'tokio-runtime-worker' panicked"
+        ));
+        // Generic non-error message must not match.
+        assert!(!looks_like_transient_5xx(
+            "background sync ok — 12 sessions, 0 alerts"
+        ));
     }
 }
