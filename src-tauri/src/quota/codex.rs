@@ -37,7 +37,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{QuotaSnapshot, TierEntry};
+use super::{CollectorError, QuotaSnapshot, TierEntry};
 
 const REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -134,23 +134,35 @@ struct Credits {
 
 /// Top-level entry. Reads the persisted Codex auth, refreshes if
 /// stale (best-effort), hits /wham/usage, returns the snapshot.
-pub async fn collect() -> Option<QuotaSnapshot> {
+///
+/// Return shape (v0.4.20):
+/// - `Ok(Some(snap))` — success.
+/// - `Ok(None)` — user not signed in (auth.json absent or no usable
+///   token); silent debug skip.
+/// - `Err(...)` — parse failure or HTTP failure. Note: a failed
+///   *refresh* is NOT an Err here — Codex falls back to the stale
+///   token (Mac parity, line 30-35) and only fails if the subsequent
+///   /wham/usage call also fails. An Err means "we couldn't get fresh
+///   data this cycle".
+pub async fn collect() -> Result<Option<QuotaSnapshot>, CollectorError> {
     let path = match auth_path() {
         Some(p) => p,
         None => {
             log::debug!("[Codex] could not resolve home dir — skipping");
-            return None;
+            return Ok(None);
         }
     };
     let mut auth = match read_auth(&path) {
         Ok(Some(a)) => a,
         Ok(None) => {
             log::debug!("[Codex] auth.json absent or no access_token — skipping");
-            return None;
+            return Ok(None);
         }
         Err(e) => {
             log::warn!("[Codex] auth.json parse failed (non-fatal): {e}");
-            return None;
+            return Err(CollectorError::SchemaOrIo(format!(
+                "auth.json parse failed: {e}"
+            )));
         }
     };
     if auth.needs_refresh {
@@ -161,15 +173,16 @@ pub async fn collect() -> Option<QuotaSnapshot> {
             }
             Err(e) => {
                 log::warn!("[Codex] OAuth refresh failed (non-fatal, using stale token): {e}");
-                // Continue with existing token. Mac line 30-35.
+                // Continue with existing token. Mac line 30-35. The
+                // /wham/usage call below is the actual failure surface.
             }
         }
     }
     match fetch_usage(&auth).await {
-        Ok(usage) => Some(map_to_snapshot(&usage)),
+        Ok(usage) => Ok(Some(map_to_snapshot(&usage))),
         Err(e) => {
             log::warn!("[Codex] /wham/usage fetch failed (non-fatal): {e}");
-            None
+            Err(CollectorError::Http(format!("/wham/usage: {e}")))
         }
     }
 }
@@ -619,5 +632,32 @@ mod tests {
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
         let snap = map_to_snapshot(&usage);
         assert!(!snap.tiers.iter().any(|t| t.name == "Credits"));
+    }
+
+    // v0.4.20 — error-path reachability for the orchestrator's
+    // CollectorError surface. Same pattern as claude.rs — pin the
+    // read seam that schema-drift errors funnel through.
+
+    #[test]
+    fn read_auth_returns_ok_none_on_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("auth.json");
+        let result = read_auth(&missing).unwrap();
+        assert!(
+            result.is_none(),
+            "missing auth.json is the 'user not signed in' case → Ok(None)"
+        );
+    }
+
+    #[test]
+    fn read_auth_returns_err_on_malformed_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.json");
+        std::fs::write(&path, r#"{garbage"#).unwrap();
+        let result = read_auth(&path);
+        assert!(
+            result.is_err(),
+            "malformed auth.json must yield Err so collect() returns Err(SchemaOrIo)"
+        );
     }
 }

@@ -77,6 +77,14 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.updates_heading",
     "settings.export_heading",
     "settings.language_heading",
+    // v0.4.20 — storage backend visibility line in Settings → Integrations.
+    "settings.integrations.storage_label",
+    "settings.integrations.storage_os_keychain",
+    "settings.integrations.storage_file",
+    "settings.integrations.storage_file_tooltip",
+    // v0.4.20 — per-provider error badge on Providers tab.
+    "providers.error_badge",
+    "providers.error_tooltip",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

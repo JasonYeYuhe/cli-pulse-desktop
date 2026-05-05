@@ -457,6 +457,10 @@ mod tests {
         // The Tauri command surfaces this to the frontend so the
         // Settings UI / diagnostic panel can render "OS keychain" or
         // "File (keyring unavailable)". Pin the wire format.
+        // v0.4.20 — the same string is now also consumed by the Storage
+        // line at the top of Settings → Integrations, branching on
+        // `view.storage_backend === "os_keychain"`. Drift here would
+        // silently send every user to the amber "file fallback" state.
         let json = serde_json::to_string(&Backend::OsKeychain).unwrap();
         assert_eq!(json, r#""os_keychain""#);
         let json = serde_json::to_string(&Backend::File).unwrap();

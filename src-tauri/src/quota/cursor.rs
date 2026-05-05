@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::{QuotaSnapshot, TierEntry};
+use super::{CollectorError, QuotaSnapshot, TierEntry};
 
 const USAGE_URL: &str = "https://cursor.com/api/usage-summary";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -63,7 +63,12 @@ struct OnDemandUsage {
 ///   1. Env `CURSOR_COOKIE` (backwards compat for power users)
 ///   2. `provider_creds.json` `cursor_cookie` field (Settings UI)
 ///   3. None → silent debug skip.
-pub async fn collect() -> Option<QuotaSnapshot> {
+///
+/// v0.4.20 return shape:
+/// - `Ok(Some(snap))` — success.
+/// - `Ok(None)` — no cookie configured (env unset + Settings empty).
+/// - `Err(...)` — HTTP failure (auth, rate limit, network).
+pub async fn collect() -> Result<Option<QuotaSnapshot>, CollectorError> {
     let cookie = std::env::var("CURSOR_COOKIE")
         .ok()
         .filter(|s| !s.is_empty())
@@ -77,14 +82,14 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         Some(c) => c,
         None => {
             log::debug!("[Cursor] no credential (env or Settings UI) — skipping");
-            return None;
+            return Ok(None);
         }
     };
     match fetch_usage(&cookie).await {
-        Ok(usage) => Some(map_to_snapshot(&usage)),
+        Ok(usage) => Ok(Some(map_to_snapshot(&usage))),
         Err(e) => {
             log::warn!("[Cursor] /usage-summary fetch failed (non-fatal): {e}");
-            None
+            Err(CollectorError::Http(format!("/usage-summary: {e}")))
         }
     }
 }

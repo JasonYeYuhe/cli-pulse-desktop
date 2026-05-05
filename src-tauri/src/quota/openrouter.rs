@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::{QuotaSnapshot, TierEntry};
+use super::{CollectorError, QuotaSnapshot, TierEntry};
 
 const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const CREDITS_TIMEOUT: Duration = Duration::from_secs(15);
@@ -62,7 +62,14 @@ struct KeyData {
 ///   1. Env `OPENROUTER_API_KEY` / `OPENROUTER_API_URL` (backwards compat)
 ///   2. `provider_creds.json` `openrouter_api_key` / `openrouter_base_url`
 ///   3. None for key → silent debug skip; default for URL → openrouter.ai.
-pub async fn collect() -> Option<QuotaSnapshot> {
+///
+/// v0.4.20 return shape:
+/// - `Ok(Some(snap))` — success.
+/// - `Ok(None)` — no API key configured.
+/// - `Err(...)` — `/credits` HTTP failure. Note: `/key` failure stays
+///   non-fatal (key info is optional metadata that just enriches the
+///   snapshot).
+pub async fn collect() -> Result<Option<QuotaSnapshot>, CollectorError> {
     let saved = crate::provider_creds::load().ok();
 
     let api_key = std::env::var("OPENROUTER_API_KEY")
@@ -78,7 +85,7 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         Some(k) => k,
         None => {
             log::debug!("[OpenRouter] no API key (env or Settings UI) — skipping");
-            return None;
+            return Ok(None);
         }
     };
 
@@ -97,11 +104,11 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         Ok(c) => c,
         Err(e) => {
             log::warn!("[OpenRouter] /credits fetch failed (non-fatal): {e}");
-            return None;
+            return Err(CollectorError::Http(format!("/credits: {e}")));
         }
     };
     let key_info = fetch_key_info(&base_url, &api_key).await.ok();
-    Some(map_to_snapshot(&credits, key_info.as_ref()))
+    Ok(Some(map_to_snapshot(&credits, key_info.as_ref())))
 }
 
 async fn fetch_credits(base_url: &str, api_key: &str) -> Result<CreditsData, String> {

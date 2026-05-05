@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::{QuotaSnapshot, TierEntry, PRE_EXPIRY_BUFFER_MS};
+use super::{CollectorError, QuotaSnapshot, TierEntry, PRE_EXPIRY_BUFFER_MS};
 
 const TIER_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 const QUOTA_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
@@ -163,33 +163,34 @@ struct TierInfo {
     project_id: Option<String>,
 }
 
-/// Collect Gemini quota from `~/.gemini/oauth_creds.json`. Returns
-/// `None` if file absent / refresh fails / HTTP fails — `[Gemini]`
-/// log line in each case.
+/// Collect Gemini quota from `~/.gemini/oauth_creds.json`.
+///
+/// Return shape (v0.4.20):
+/// - `Ok(Some(snap))` — success.
+/// - `Ok(None)` — file absent (user not signed in) OR expired token
+///   without a refresh_token (user must re-auth via `gemini` CLI).
+///   Both are silent "not configured" states — no error badge.
+/// - `Err(...)` — schema drift / OAuth refresh failure / HTTP failure.
+///   UI surfaces as a red badge with `error.message()` in the tooltip.
 ///
 /// v0.4.7 — when the access token has expired (`expiry_date < now`),
 /// attempt active refresh via `gemini_refresh::refresh()` instead of
 /// the v0.4.6 silent-skip. On refresh success, write the new tokens
-/// back to the file atomically (mode 0600) and continue. On refresh
-/// failure, log warn and fall back to silent-skip (v0.4.6 behavior).
+/// back to the file atomically (mode 0600) and continue.
 ///
 /// v0.4.10 — diagnostic INFO-level logs at every branch. v0.4.9 VM
 /// verification produced a "silent half-fix" where the Gemini card
 /// rendered but no `[Gemini]` log fired, even though VM measured the
-/// access_token as 8.4h expired. The previous code was silent on the
-/// "token still valid" path AND used DEBUG (filtered at INFO global
-/// level) for the "no home dir" / "file absent" / "no refresh_token"
-/// branches, so any of those exit paths looked identical from a log
-/// reader's perspective. Each branch now emits an INFO-level line
-/// with enough state to disambiguate (raw expiry_ms vs now_ms, whether
-/// refresh_token was present, etc.) so we can identify which branch
-/// is firing in the field.
-pub async fn collect() -> Option<QuotaSnapshot> {
+/// access_token as 8.4h expired. Each branch now emits an INFO-level
+/// line with enough state to disambiguate (raw expiry_ms vs now_ms,
+/// whether refresh_token was present, etc.) so we can identify which
+/// branch is firing in the field.
+pub async fn collect() -> Result<Option<QuotaSnapshot>, CollectorError> {
     let path = match creds_path() {
         Some(p) => p,
         None => {
             log::info!("[Gemini] collect: could not resolve home dir — skipping");
-            return None;
+            return Ok(None);
         }
     };
     log::info!("[Gemini] collect: reading creds from {}", path.display());
@@ -200,11 +201,13 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 "[Gemini] collect: oauth_creds.json absent at {} — run `gemini` CLI to authenticate",
                 path.display()
             );
-            return None;
+            return Ok(None);
         }
         Err(e) => {
             log::warn!("[Gemini] oauth_creds.json parse failed (non-fatal): {e}");
-            return None;
+            return Err(CollectorError::SchemaOrIo(format!(
+                "oauth_creds.json parse failed: {e}"
+            )));
         }
     };
 
@@ -235,7 +238,7 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 log::info!(
                     "[Gemini] expired access_token + no refresh_token in oauth_creds.json — run `gemini` CLI to re-auth"
                 );
-                return None;
+                return Ok(None);
             }
         };
         log::info!(
@@ -274,14 +277,26 @@ pub async fn collect() -> Option<QuotaSnapshot> {
             }
             Err(e) => {
                 log::warn!("[Gemini] OAuth refresh failed (non-fatal, falling back to skip): {e}");
-                return None;
+                return Err(CollectorError::RefreshFailed(format!(
+                    "OAuth refresh failed: {e}"
+                )));
             }
         }
     } else {
         log::info!("[Gemini] access_token not expired — using cached creds without refresh");
     }
 
-    let token = creds.access_token?;
+    let token = match creds.access_token {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            log::warn!(
+                "[Gemini] access_token absent after refresh decision — corrupted creds block"
+            );
+            return Err(CollectorError::SchemaOrIo(
+                "access_token absent after refresh decision".into(),
+            ));
+        }
+    };
     let tier_info = fetch_tier(&token).await.unwrap_or(TierInfo {
         tier_id: None,
         project_id: None,
@@ -291,7 +306,7 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         Ok(q) => q,
         Err(e) => {
             log::warn!("[Gemini] retrieveUserQuota fetch failed (non-fatal): {e}");
-            return None;
+            return Err(CollectorError::Http(format!("retrieveUserQuota: {e}")));
         }
     };
 
@@ -301,7 +316,7 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         tier_info.project_id,
         quota.buckets.len()
     );
-    Some(map_to_snapshot(&tier_info, &quota))
+    Ok(Some(map_to_snapshot(&tier_info, &quota)))
 }
 
 fn creds_path() -> Option<PathBuf> {
@@ -627,6 +642,33 @@ mod tests {
         assert_eq!(
             snap.tiers[0].reset_time.as_deref(),
             Some("2026-05-09T00:00:00Z")
+        );
+    }
+
+    // v0.4.20 — error-path reachability. Same pattern as claude.rs /
+    // codex.rs: malformed creds.json → Err(SchemaOrIo); absent file →
+    // Ok(None) (silent skip).
+
+    #[test]
+    fn read_creds_returns_ok_none_on_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("oauth_creds.json");
+        let result = read_creds(&missing).unwrap();
+        assert!(
+            result.is_none(),
+            "missing oauth_creds.json is the 'user not signed in' case → Ok(None)"
+        );
+    }
+
+    #[test]
+    fn read_creds_returns_err_on_malformed_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("oauth_creds.json");
+        std::fs::write(&path, r#"this is not json"#).unwrap();
+        let result = read_creds(&path);
+        assert!(
+            result.is_err(),
+            "malformed oauth_creds.json must yield Err so collect() returns Err(SchemaOrIo)"
         );
     }
 }

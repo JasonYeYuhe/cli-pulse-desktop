@@ -55,7 +55,7 @@ use std::time::Duration;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use super::{QuotaSnapshot, TierEntry, PRE_EXPIRY_BUFFER_MS};
+use super::{CollectorError, QuotaSnapshot, TierEntry, PRE_EXPIRY_BUFFER_MS};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const ANTHROPIC_BETA: &str = "oauth-2025-04-20";
@@ -196,14 +196,28 @@ where
 /// Top-level entry. Reads the persisted Claude credentials, validates
 /// freshness, refreshes via Anthropic's OAuth endpoint when expired,
 /// hits the OAuth /usage API, and maps the response to a portable
-/// `QuotaSnapshot`. Returns `None` on any failure.
+/// `QuotaSnapshot`.
+///
+/// Return shape (v0.4.20):
+/// - `Ok(Some(snap))` — success.
+/// - `Ok(None)` — user not signed in (expected idle state). Provider
+///   card stays at last-known cached state without an error badge.
+/// - `Err(...)` — schema drift / OAuth refresh failure / HTTP failure.
+///   The orchestrator caches this so the Providers tab can render a
+///   red badge with the tooltip set to `error.message()`.
 ///
 /// v0.4.14 — every branch logs at INFO. Previously several branches
 /// were DEBUG (filtered at INFO global level since v0.3.4) which made
 /// "expired token + no refresh attempt" indistinguishable from "file
 /// missing" in user logs. Mirrors the v0.4.10 Gemini fix.
-pub async fn collect() -> Option<QuotaSnapshot> {
-    let path = credentials_path()?;
+pub async fn collect() -> Result<Option<QuotaSnapshot>, CollectorError> {
+    let path = match credentials_path() {
+        Some(p) => p,
+        None => {
+            log::info!("[Claude] collect: could not resolve home dir — skipping");
+            return Ok(None);
+        }
+    };
     log::info!("[Claude] collect: reading creds from {}", path.display());
     let mut file = match read_credentials(&path) {
         Ok(Some(f)) => f,
@@ -212,11 +226,13 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 "[Claude] collect: .credentials.json absent at {} — run `claude` CLI to authenticate",
                 path.display()
             );
-            return None;
+            return Ok(None);
         }
         Err(e) => {
             log::warn!("[Claude] .credentials.json parse failed (non-fatal): {e}");
-            return None;
+            return Err(CollectorError::SchemaOrIo(format!(
+                ".credentials.json parse failed: {e}"
+            )));
         }
     };
     let mut oauth = match file.oauth.take() {
@@ -226,7 +242,9 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 "[Claude] .credentials.json missing 'claudeAiOauth' key — schema mismatch \
                  (real claude CLI ≥2.x writes nested shape; see CodexBar 82bbcde)"
             );
-            return None;
+            return Err(CollectorError::SchemaOrIo(
+                ".credentials.json missing 'claudeAiOauth' key — schema mismatch".into(),
+            ));
         }
     };
 
@@ -258,7 +276,7 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                     "[Claude] expired access_token + no refresh_token in .credentials.json — \
                      run `claude` CLI to re-authenticate"
                 );
-                return None;
+                return Ok(None);
             }
         };
         log::info!(
@@ -289,7 +307,9 @@ pub async fn collect() -> Option<QuotaSnapshot> {
             }
             Err(e) => {
                 log::warn!("[Claude] OAuth refresh failed (non-fatal, falling back to skip): {e}");
-                return None;
+                return Err(CollectorError::RefreshFailed(format!(
+                    "OAuth refresh failed: {e}"
+                )));
             }
         }
     } else {
@@ -303,7 +323,9 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 "[Claude] claudeAiOauth.accessToken absent or empty after refresh decision — \
                  corrupted oauth block"
             );
-            return None;
+            return Err(CollectorError::SchemaOrIo(
+                "claudeAiOauth.accessToken empty after refresh decision".into(),
+            ));
         }
     };
 
@@ -316,11 +338,11 @@ pub async fn collect() -> Option<QuotaSnapshot> {
                 snap.tiers.len(),
                 snap.remaining,
             );
-            Some(snap)
+            Ok(Some(snap))
         }
         Err(e) => {
             log::warn!("[Claude] OAuth /usage fetch failed (non-fatal): {e}");
-            None
+            Err(CollectorError::Http(format!("OAuth /usage: {e}")))
         }
     }
 }
@@ -897,5 +919,36 @@ mod tests {
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
         let snap = map_to_snapshot(&oauth_with_tier(None), &usage);
         assert!(snap.session_reset.is_none());
+    }
+
+    // v0.4.20 — error-path reachability for the orchestrator's
+    // CollectorError surface. The actual `collect()` end-to-end is
+    // network-bound; here we pin the read_credentials seam that all
+    // schema-drift error paths funnel through.
+
+    #[test]
+    fn read_credentials_returns_ok_none_on_missing_file() {
+        // collect() converts this to Ok(None) — silent skip, no badge.
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist.json");
+        let result = read_credentials(&missing).unwrap();
+        assert!(
+            result.is_none(),
+            "missing file is the 'user not signed in' case → Ok(None)"
+        );
+    }
+
+    #[test]
+    fn read_credentials_returns_err_on_malformed_json() {
+        // collect() converts this to Err(SchemaOrIo) — surfaces a red
+        // badge with "JSON: ..." in the tooltip.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".credentials.json");
+        std::fs::write(&path, r#"{not even close to json"#).unwrap();
+        let result = read_credentials(&path);
+        assert!(
+            result.is_err(),
+            "malformed JSON is the 'schema drift' case → Err(SchemaOrIo)"
+        );
     }
 }

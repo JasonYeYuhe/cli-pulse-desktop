@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::{QuotaSnapshot, TierEntry};
+use super::{CollectorError, QuotaSnapshot, TierEntry};
 
 const USAGE_URL: &str = "https://api.github.com/copilot_internal/user";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -54,7 +54,12 @@ struct TierSnapshot {
 ///   1. Env `COPILOT_API_TOKEN` (backwards compat for power users)
 ///   2. `provider_creds.json` `copilot_token` field (Settings UI)
 ///   3. None → silent debug skip.
-pub async fn collect() -> Option<QuotaSnapshot> {
+///
+/// v0.4.20 return shape:
+/// - `Ok(Some(snap))` — success.
+/// - `Ok(None)` — no token configured.
+/// - `Err(...)` — HTTP failure (auth, rate limit, network).
+pub async fn collect() -> Result<Option<QuotaSnapshot>, CollectorError> {
     let token = std::env::var("COPILOT_API_TOKEN")
         .ok()
         .filter(|s| !s.is_empty())
@@ -68,14 +73,14 @@ pub async fn collect() -> Option<QuotaSnapshot> {
         Some(t) => t,
         None => {
             log::debug!("[Copilot] no credential (env or Settings UI) — skipping");
-            return None;
+            return Ok(None);
         }
     };
     match fetch_usage(&token).await {
-        Ok(usage) => Some(map_to_snapshot(&usage)),
+        Ok(usage) => Ok(Some(map_to_snapshot(&usage))),
         Err(e) => {
             log::warn!("[Copilot] /copilot_internal/user fetch failed (non-fatal): {e}");
-            None
+            Err(CollectorError::Http(format!("/copilot_internal/user: {e}")))
         }
     }
 }

@@ -652,6 +652,18 @@ type ProviderSummaryRow = {
   updated_at: string | null;
 };
 
+// v0.4.20 — per-provider collector status surfaced from
+// `get_last_collector_status`. Empty Vec until the first background
+// `collect_all` cycle runs (~20s after launch). UI treats absent
+// entries as "no error known" (no badge), matching v0.4.15's stale-
+// indicator policy.
+type CollectorStatus = {
+  provider: string;
+  ok: boolean;
+  /// One-line failure message; null on success or "user not configured".
+  error: string | null;
+};
+
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -667,6 +679,12 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
   // or spam-clicks fire concurrent sync_now invocations against
   // provider rate limits.
   const [refreshing, setRefreshing] = useState(false);
+  // v0.4.20 — per-provider collector status. Refreshed on mount and
+  // after every forceRefresh. The 120s background sync also updates
+  // it server-side, but we don't poll on a timer — the next tick will
+  // refresh the cache and the user can click "Refresh now" to see the
+  // current state immediately.
+  const [collectorStatus, setCollectorStatus] = useState<CollectorStatus[]>([]);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -679,10 +697,22 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
     }
   }, []);
 
+  const fetchCollectorStatus = useCallback(async () => {
+    try {
+      const rows = await invoke<CollectorStatus[]>("get_last_collector_status");
+      setCollectorStatus(rows);
+    } catch {
+      // Best-effort — a missing/failing status query is not worth
+      // flagging in the UI; absent entries fall back to "no badge".
+      setCollectorStatus([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!paired) {
       setServerRows(null);
       setServerError(null);
+      setCollectorStatus([]);
       return;
     }
     let cancelled = false;
@@ -699,6 +729,13 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
           setServerError(String(e));
         }
       });
+    invoke<CollectorStatus[]>("get_last_collector_status")
+      .then((rows) => {
+        if (!cancelled) setCollectorStatus(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCollectorStatus([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -709,12 +746,15 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
   // so the freshly-synced data appears without waiting 120s for
   // the next background tick. `disabled` while in-flight per
   // Gemini review P1.
+  // v0.4.20 — also re-fetch the collector status afterwards so any
+  // newly-fixed (or freshly-broken) providers update their badge
+  // without waiting for the next 120s background cycle.
   async function forceRefresh() {
     if (refreshing || !paired) return;
     setRefreshing(true);
     try {
       await invoke("sync_now");
-      await fetchSummary();
+      await Promise.all([fetchSummary(), fetchCollectorStatus()]);
     } catch (e: any) {
       setServerError(String(e));
     } finally {
@@ -729,6 +769,13 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
     }
     return m;
   }, [serverRows]);
+
+  // v0.4.20 — index collector status by provider for the error badge.
+  const statusByProvider = useMemo(() => {
+    const m = new Map<string, CollectorStatus>();
+    for (const row of collectorStatus) m.set(row.provider, row);
+    return m;
+  }, [collectorStatus]);
 
   const grouped = useMemo<ProviderAgg[] | null>(() => {
     // v0.4.8 — also render cards when only server data is available
@@ -855,16 +902,37 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold">{v.provider}</span>
                     {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
-                    {srv && isStaleProviderRow(srv.updated_at) && (
-                      <span
-                        className="px-1.5 py-0.5 text-xs rounded bg-amber-950/60 border border-amber-800 text-amber-300"
-                        title={t("providers.stale_tooltip", {
-                          age: formatRelativeMinutes(srv.updated_at!),
-                        })}
-                      >
-                        {t("providers.stale_badge")}
-                      </span>
-                    )}
+                    {/* v0.4.20 — error badge takes precedence over the
+                        v0.4.15 stale badge: a known collect() failure
+                        is more actionable than "data went stale". A
+                        provider can be both errored and stale, but
+                        showing both badges crowds the row — pick one. */}
+                    {(() => {
+                      const st = statusByProvider.get(v.provider);
+                      if (st && !st.ok && st.error) {
+                        return (
+                          <span
+                            className="px-1.5 py-0.5 text-xs rounded bg-red-950/60 border border-red-800 text-red-300"
+                            title={t("providers.error_tooltip", { reason: st.error })}
+                          >
+                            {t("providers.error_badge")}
+                          </span>
+                        );
+                      }
+                      if (srv && isStaleProviderRow(srv.updated_at)) {
+                        return (
+                          <span
+                            className="px-1.5 py-0.5 text-xs rounded bg-amber-950/60 border border-amber-800 text-amber-300"
+                            title={t("providers.stale_tooltip", {
+                              age: formatRelativeMinutes(srv.updated_at!),
+                            })}
+                          >
+                            {t("providers.stale_badge")}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   <div className="text-xs text-neutral-500">
                     {/* v0.4.8 — when server-only provider has no local
@@ -1532,6 +1600,12 @@ type ProviderCredsView = {
   env_override_copilot: boolean;
   env_override_openrouter_key: boolean;
   env_override_openrouter_url: boolean;
+  // v0.4.20 — active credentials backend, surfaced as a Storage line
+  // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
+  // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
+  // file fallback gets a ⚠ icon with a tooltip — plain text alone is
+  // too easy to miss.
+  storage_backend: "os_keychain" | "file";
 };
 
 type ProviderCredsUpdateKey =
@@ -1636,6 +1710,27 @@ function IntegrationsSection() {
         {t("settings.integrations.heading")}
       </h2>
       <p className="text-xs text-neutral-500">{t("settings.integrations.description")}</p>
+      <div className="text-xs text-neutral-500">
+        {t("settings.integrations.storage_label")}:{" "}
+        {view.storage_backend === "os_keychain" ? (
+          <span className="text-emerald-300">
+            {t("settings.integrations.storage_os_keychain")}
+          </span>
+        ) : (
+          <>
+            <span className="text-amber-300">
+              {t("settings.integrations.storage_file")}
+            </span>{" "}
+            <span
+              className="cursor-help text-amber-400"
+              title={t("settings.integrations.storage_file_tooltip") || ""}
+              aria-label="info"
+            >
+              ⚠
+            </span>
+          </>
+        )}
+      </div>
 
       {rows.map((row) => {
         const draftVal = drafts[row.key];

@@ -22,7 +22,7 @@ pub mod supabase;
 pub mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use config::HelperConfig;
@@ -31,6 +31,7 @@ use scanner::ScanResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::async_runtime;
+use tokio::sync::mpsc;
 
 const HELPER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEVICE_TYPE_WIN: &str = "Windows";
@@ -745,6 +746,14 @@ struct ProviderCredsView {
     env_override_copilot: bool,
     env_override_openrouter_key: bool,
     env_override_openrouter_url: bool,
+    /// v0.4.20 — surface the active storage backend ("os_keychain" or
+    /// "file") inside the Settings → Integrations panel itself. v0.4.16
+    /// already exposed this on `DiagnosticSnapshot`, but a Linux user
+    /// without `libsecret` who never clicks "Copy diagnostic" silently
+    /// stays on file storage. Per Gemini 3.1 Pro v0.4.20 review: pair
+    /// every silent fallback with a discoverable surface; the diagnostic
+    /// copy alone is too easy to miss.
+    storage_backend: provider_creds::Backend,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -772,6 +781,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
         env_override_openrouter_key: env_set("OPENROUTER_API_KEY"),
         env_override_openrouter_url: env_set("OPENROUTER_API_URL"),
+        storage_backend: provider_creds::current_backend(),
     }
 }
 
@@ -811,6 +821,36 @@ async fn set_provider_creds(
     Ok(build_provider_creds_view(&current))
 }
 
+/// v0.4.20 — per-provider snapshot status for the Providers tab error
+/// badge. One entry per provider that ran in the last `collect_all`
+/// cycle, regardless of success/failure. The frontend reads `ok` and
+/// `error` to decide whether to show the red badge.
+///
+/// Empty Vec on first launch (before the first `collect_all` runs).
+/// The frontend treats empty as "no error known yet" — same policy as
+/// the v0.4.15 stale indicator.
+#[derive(Debug, Serialize)]
+struct CollectorStatusView {
+    provider: &'static str,
+    ok: bool,
+    /// Single-line human-readable failure reason, suitable for the
+    /// badge tooltip. `None` when the collector returned `Ok` (success
+    /// or "user not configured" — both surface as no badge).
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn get_last_collector_status() -> Vec<CollectorStatusView> {
+    quota::last_outcomes()
+        .into_iter()
+        .map(|o| CollectorStatusView {
+            provider: o.provider,
+            ok: o.snapshot.is_some(),
+            error: o.error.map(|e| e.message().to_string()),
+        })
+        .collect()
+}
+
 #[derive(Debug, Serialize)]
 struct SyncReport {
     sessions_synced: i64,
@@ -833,6 +873,19 @@ struct SyncReport {
 
 #[tauri::command]
 async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
+    // v0.4.20 — Tauri-exposed entry point. Wakes the background sync
+    // loop (if it's mid-sleep) so the next idle window restarts from
+    // "now" rather than continuing the previous 120s countdown — a
+    // user who clicks "Refresh now" at second 118 used to get a
+    // redundant background tick 2s later. The poke happens ONLY on
+    // this path; `background_tick` calls `perform_sync` directly to
+    // avoid pokeing itself.
+    let report = perform_sync(app).await?;
+    poke_manual_refresh();
+    Ok(report)
+}
+
+async fn perform_sync(app: tauri::AppHandle) -> Result<SyncReport, String> {
     let cfg = config::load()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Device not paired yet".to_string())?;
@@ -856,29 +909,34 @@ async fn sync_now(app: tauri::AppHandle) -> Result<SyncReport, String> {
 
     let alerts_payload = serde_json::to_value(&computed_alerts).unwrap_or(json!([]));
 
-    // 4a. (v0.4.3) — best-effort multi-provider quota scrape. Each
-    //     of the 6 collectors (Claude, Codex, Cursor, Gemini, Copilot,
-    //     OpenRouter) runs concurrently via tokio::spawn per arm with
-    //     panic isolation; each is best-effort and returns Option<>.
-    //     Failures and panics are logged per-provider; sessions + alerts
-    //     upload regardless.
-    let snaps = quota::collect_all().await;
-    let mut tier_map = serde_json::Map::with_capacity(snaps.len());
-    let mut remaining_map = serde_json::Map::with_capacity(snaps.len());
-    for (name, snap) in &snaps {
-        // Outer `reset_time` mirrors each provider's headline-tier
-        // reset (matches Mac for cross-writer parity per v0.4.2 audit).
-        tier_map.insert(
-            (*name).to_string(),
-            json!({
-                "quota": snap.quota,
-                "remaining": snap.remaining,
-                "plan_type": snap.plan_type,
-                "reset_time": snap.session_reset,
-                "tiers": snap.tiers,
-            }),
-        );
-        remaining_map.insert((*name).to_string(), json!(snap.remaining));
+    // 4a. (v0.4.3, refactored v0.4.20) — best-effort multi-provider
+    //     quota scrape. Each of the 6 collectors (Claude, Codex, Cursor,
+    //     Gemini, Copilot, OpenRouter) runs concurrently via tokio::spawn
+    //     per arm with panic isolation; each returns
+    //     `Result<Option<QuotaSnapshot>, CollectorError>`. Failures and
+    //     panics are logged per-provider AND cached in
+    //     `quota::LAST_OUTCOMES` so the UI can render a red badge on
+    //     the affected card via `get_last_collector_status`. Sessions
+    //     + alerts upload regardless.
+    let outcomes = quota::collect_all().await;
+    let mut tier_map = serde_json::Map::with_capacity(outcomes.len());
+    let mut remaining_map = serde_json::Map::with_capacity(outcomes.len());
+    for outcome in &outcomes {
+        if let Some(snap) = &outcome.snapshot {
+            // Outer `reset_time` mirrors each provider's headline-tier
+            // reset (matches Mac for cross-writer parity per v0.4.2 audit).
+            tier_map.insert(
+                outcome.provider.to_string(),
+                json!({
+                    "quota": snap.quota,
+                    "remaining": snap.remaining,
+                    "plan_type": snap.plan_type,
+                    "reset_time": snap.session_reset,
+                    "tiers": snap.tiers,
+                }),
+            );
+            remaining_map.insert(outcome.provider.to_string(), json!(snap.remaining));
+        }
     }
     let p_provider_remaining = serde_json::Value::Object(remaining_map);
     let p_provider_tiers = serde_json::Value::Object(tier_map);
@@ -991,7 +1049,59 @@ fn friendly(e: supabase::SupabaseError) -> String {
 /// (bad helper_secret, server outage, local clock drift, etc.).
 const SYNC_FAILURE_NOTIFY_THRESHOLD: u32 = 3;
 
+/// v0.4.20 — channel sender exposed to the Tauri `sync_now` command.
+/// Capacity 1 + drain-before-select discards any signals that fired
+/// during the active `background_tick` — only refreshes that hit
+/// during the sleep window cause an interval reset. Per Gemini 3.1
+/// Pro v0.4.20 review, which correctly flagged that `tokio::sync::Notify`
+/// would buffer permits earned during the active tick, then immediately
+/// consume them at the top of the next `select!` — i.e. fire a
+/// redundant tick right after the manual one, the exact bug we're
+/// trying to fix.
+static MANUAL_REFRESH_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
+
+/// Notify the background sync loop that a manual refresh just ran.
+/// If the loop is currently sleeping, the sleep returns early so the
+/// next 120s countdown starts from "now". If the loop is mid-tick or
+/// the channel is full (signals back up while a tick runs), the
+/// drain-before-select on the next iteration discards the signal so
+/// the loop doesn't immediately re-tick.
+///
+/// Best-effort: the channel uses `try_send` so this never blocks
+/// `sync_now`, even if the loop hasn't consumed the previous signal
+/// yet (capacity 1).
+fn poke_manual_refresh() {
+    if let Some(tx) = MANUAL_REFRESH_TX.get() {
+        let _ = tx.try_send(());
+    }
+}
+
+/// Sleep for `interval` OR until the manual-refresh channel signals
+/// (whichever comes first). Drains buffered signals first so any
+/// `poke_manual_refresh` call that landed during the previous
+/// `background_tick` is discarded — the user already got their result
+/// via the manual `sync_now` path; we only want to react to clicks
+/// that happen while we're idle.
+///
+/// Extracted as `pub(crate)` for unit testing — see `mod tests` below.
+pub(crate) async fn wait_for_next_tick(rx: &mut mpsc::Receiver<()>, interval: Duration) {
+    while rx.try_recv().is_ok() {}
+    tokio::select! {
+        _ = tokio::time::sleep(interval) => {}
+        _ = rx.recv() => {
+            log::debug!("background tick reset by manual refresh during idle window");
+        }
+    }
+}
+
 fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
+    let (tx, mut rx) = mpsc::channel::<()>(1);
+    // It's OK if `set` fails (e.g. the spawn somehow happens twice in
+    // a hot-reload dev cycle) — the second call's channel just isn't
+    // wired to the loop, so manual pokes from `sync_now` are no-ops
+    // until next launch. We don't panic.
+    let _ = MANUAL_REFRESH_TX.set(tx);
+
     async_runtime::spawn(async move {
         log::info!(
             "Background sync loop started — first tick in 20s, then every {}s",
@@ -1033,7 +1143,7 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                                 // so we don't spam another notification when the
                                 // (now-no-op) tick keeps not-syncing.
                                 consecutive_failures = 0;
-                                tokio::time::sleep(SYNC_INTERVAL).await;
+                                wait_for_next_tick(&mut rx, SYNC_INTERVAL).await;
                                 continue;
                             }
                             Ok(_) => {
@@ -1050,7 +1160,7 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                     }
                 }
             }
-            tokio::time::sleep(SYNC_INTERVAL).await;
+            wait_for_next_tick(&mut rx, SYNC_INTERVAL).await;
         }
     });
 }
@@ -1106,7 +1216,13 @@ async fn background_tick(app: &tauri::AppHandle) -> Result<Option<SyncReport>, S
     if !cfg_exists {
         return Ok(None);
     }
-    let report = sync_now(app.clone()).await?;
+    // v0.4.20 — call `perform_sync` directly (NOT the Tauri-exposed
+    // `sync_now`) so we don't fire `poke_manual_refresh` against
+    // ourselves. Pokeing from inside the background loop would create
+    // a self-feedback edge case: the manual-refresh channel has
+    // capacity 1, so a self-poke could displace a real user click
+    // that arrived during the same tick.
+    let report = perform_sync(app.clone()).await?;
     Ok(Some(report))
 }
 
@@ -1232,6 +1348,8 @@ pub fn run() {
             // v0.4.6 — Settings UI for provider credentials
             get_provider_creds,
             set_provider_creds,
+            // v0.4.20 — per-provider collect status for UI error badge
+            get_last_collector_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1243,3 +1361,70 @@ pub fn run() {
 // silence `Value` / `json` unused if not referenced elsewhere
 #[allow(dead_code)]
 fn _json_ref_placeholder(_v: Value) {}
+
+#[cfg(test)]
+mod tests {
+    //! v0.4.20 — `wait_for_next_tick` mpsc-channel sleep with manual-
+    //! refresh interrupt.
+    //!
+    //! Two cases pin the contract:
+    //!
+    //! 1. Drain semantics. A signal that arrived during the previous
+    //!    `background_tick` (i.e. before we entered the wait) must be
+    //!    discarded so we sleep the full interval. Without the drain,
+    //!    `tokio::sync::Notify` would buffer the permit and the next
+    //!    `select!` would fire it instantly — re-running a redundant
+    //!    background tick right after the manual one. This is the
+    //!    exact bug Gemini 3.1 Pro flagged in the v0.4.20 review.
+    //!
+    //! 2. Idle interrupt. A signal that arrives while we ARE in the
+    //!    sleep window (the user clicks "Refresh now" between two
+    //!    background ticks) must wake the sleep early.
+    //!
+    //! Both tests run with `start_paused = true` so virtual time
+    //! advances when all tasks block — no real wall-clock wait.
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn drained_signal_does_not_interrupt_idle_sleep() {
+        let (tx, mut rx) = mpsc::channel::<()>(1);
+        // Simulate the regression scenario: a `poke_manual_refresh()`
+        // fired DURING the prior `background_tick` and is buffered in
+        // the channel when we enter the wait.
+        tx.send(()).await.unwrap();
+
+        let interval = Duration::from_secs(120);
+        let started = tokio::time::Instant::now();
+        wait_for_next_tick(&mut rx, interval).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(
+            elapsed, interval,
+            "drained pre-wait signal must NOT shorten the idle sleep — \
+             that's the exact regression Gemini caught in the v0.4.20 review"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn signal_during_idle_window_wakes_sleep_early() {
+        let (tx, mut rx) = mpsc::channel::<()>(1);
+        let interval = Duration::from_secs(120);
+        let click_at = Duration::from_secs(30);
+
+        let waiter = tokio::spawn(async move {
+            let started = tokio::time::Instant::now();
+            wait_for_next_tick(&mut rx, interval).await;
+            started.elapsed()
+        });
+
+        tokio::time::sleep(click_at).await;
+        tx.send(()).await.unwrap();
+
+        let elapsed = waiter.await.unwrap();
+        assert_eq!(
+            elapsed, click_at,
+            "manual refresh fired during the idle window must wake the sleep at click time"
+        );
+    }
+}

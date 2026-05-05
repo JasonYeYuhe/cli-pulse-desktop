@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.4.19"
+version = "0.4.20"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -65,6 +65,13 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 # and we fail-closed via a clear UI error.
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 whoami = "1"
+
+[dev-dependencies]
+# v0.4.20 — `start_paused = true` on `#[tokio::test]` advances virtual
+# time when all tasks block. Without it, the manual-refresh tick-reset
+# tests in lib.rs would have to wait the full SYNC_INTERVAL (120 s
+# real wall-clock) per case.
+tokio = { version = "1", features = ["test-util"] }
 
 [profile.release]
 panic = "abort"

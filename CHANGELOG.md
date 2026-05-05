@@ -2,6 +2,60 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.20] — 2026-05-05
+
+### Added
+- **Per-provider error badge on the Providers tab.** When a collector
+  (Claude / Codex / Cursor / Gemini / Copilot / OpenRouter) fails — bad
+  credentials file, expired refresh, HTTP 5xx — the affected card now
+  renders a red "error" badge with the failure reason in the tooltip.
+  Closes the gap between v0.4.15's amber "stale" badge (which only
+  fires after 6 minutes of stale `updated_at`) and the user noticing
+  something's wrong. Worse: a provider that was NEVER successfully
+  collected (just signed in, refresh broken) had no row, so "stale"
+  never fired either — only "error" surfaces that case. Backend
+  refactored each `<provider>::collect()` from `Option<QuotaSnapshot>`
+  to `Result<Option<QuotaSnapshot>, CollectorError>` with three
+  discriminant variants (`Http`, `SchemaOrIo`, `RefreshFailed`); `Ok(None)`
+  preserves the silent "user not signed in" skip. Per Gemini 3.1 Pro
+  v0.4.20 review: the typed enum (vs raw `String`) keeps the door open
+  for future retry-policy work without revisiting collector signatures.
+- **Settings → Integrations now shows the active credentials backend.**
+  A "Storage: OS keychain" line in emerald, or "Storage: file (keyring
+  unavailable) ⚠" in amber with a tooltip explaining how to enable the
+  keychain on Linux. v0.4.16 already routed this state through Copy
+  Diagnostic, but a Linux user without `libsecret` who never copied
+  diagnostics silently stayed on file storage. Per Gemini 3.1 Pro
+  v0.4.20 review: pair every silent fallback with a discoverable
+  surface; the diagnostic copy alone is too easy to miss.
+
+### Changed
+- **"Refresh now" button now interrupts the background sync sleep.**
+  When the user clicks Refresh at second 118 of a 120 s background
+  cycle, the upcoming background tick used to fire 2 s later — a
+  redundant sync. v0.4.20 wires a `tokio::sync::mpsc` channel between
+  `sync_now` and the loop's idle window so the next 120 s countdown
+  restarts from "now" instead. Per Gemini 3.1 Pro v0.4.20 review:
+  the initial `tokio::sync::Notify` proposal had the exact bug we were
+  trying to fix — permits earned during the active tick get buffered,
+  then consumed by the next `select!`, firing a redundant background
+  tick right after the manual one. Fixed by drain-before-select on the
+  mpsc receiver so signals that arrive *during* the active tick are
+  discarded, and only signals that arrive *during* the idle window
+  cause a reset.
+
+### Notes
+- The user-invoked Tauri `sync_now` and the background loop now share
+  an inner `perform_sync` helper. `sync_now` calls it then pokes the
+  manual-refresh channel; `background_tick` calls it directly so the
+  loop doesn't poke itself.
+- 11 new tests (162 backend total, was 151; 44 frontend unchanged):
+  two `tokio::test(start_paused = true)` tests pin the
+  drain-before-select contract, three pin the `CollectorError` wire
+  format + helper, six pin the credentials-file read seam returns
+  `Ok(None)` on missing files and `Err` on malformed JSON across the
+  three OAuth-file collectors.
+
 ## [0.4.19] — 2026-05-05
 
 ### Added
