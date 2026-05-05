@@ -2,6 +2,63 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.21] — 2026-05-05
+
+### Fixed
+- **v0.4.20 Item 1 fix-to-the-fix.** v0.4.20 added an mpsc channel so a
+  manual "Refresh now" click resets the 120 s background-sync
+  countdown — but the loop still ran a `background_tick` at the top
+  of the next iteration after the wake, producing a redundant
+  `quota::collect_all` call ~2 s after every manual click. VM Block A
+  measured this exactly: manual click at 16:42:05, spurious extra
+  `collect_all` at 16:42:07 (+2 s), then the next regular tick at
+  16:44:09 (T_click + 120 s, which IS correct). v0.4.21 changes
+  `wait_for_next_tick` to return a `WaitOutcome` enum (`Elapsed` /
+  `Reset`) and the loop uses
+  `while wait_for_next_tick(...).await == WaitOutcome::Reset {}` so a
+  manual-refresh wake re-enters the wait without triggering an
+  intermediate tick. Net behavior: clicking Refresh in the idle window
+  now produces exactly ONE `collect_all` (the manual one) and shifts
+  the next background tick to T_click + 120 s, instead of producing
+  two close-together calls.
+
+### Changed
+- **Providers tab "Refresh now" → "Refresh quota now"**
+  (`立即刷新配额` / `クォータを今すぐ更新`). Disambiguates from the
+  global `Rescan` / `重新扫描` / `再スキャン` button in the top-right,
+  which scans local CLI usage data — not provider quotas. Spotted as
+  a UX nit in the v0.4.20 VM verify report.
+
+### Notes
+- **Gemini 3.1 Pro v0.4.21 review caught two more issues** beyond the
+  primary +2 s tick:
+  - **P1 (channel-close busy loop)**: the bare `_ = rx.recv()` select
+    arm matches both `Some(())` and `None`. If
+    `MANUAL_REFRESH_TX.set(tx)` ever fails (e.g. duplicate
+    `spawn_background_sync` from a hot-reload), the local `tx` is
+    dropped, closing the channel — `recv()` then returns `None`
+    instantly, the arm fires, the new `while … == Reset` pattern
+    busy-loops at 100 % CPU. Fixed by changing the arm to
+    `Some(_) = rx.recv()` so the arm is disabled (not fired) on
+    channel close, leaving the sleep arm to run normally.
+  - **P2 (shutdown latency under repeated clicks)**: the new inner
+    `while … == Reset {}` doesn't check `stop`. If the user keeps
+    clicking Refresh faster than 120 s, the loop can outlive a
+    shutdown request indefinitely. Fixed with `&& !stop.load(...)`
+    on the while condition at both call sites.
+- 1 new test: `manual_refresh_does_not_cause_extra_tick` simulates the
+  loop with a counter standing in for `background_tick` and asserts
+  the count stays at 1 after a manual refresh fires mid-idle, then
+  bumps to 2 only after a full `interval` has elapsed since the
+  click. Test cleanup uses `drop(tx)` directly (not `loop_handle.abort()`)
+  to validate the P1 fix end-to-end. The two existing v0.4.20 mpsc
+  tests now also assert the `WaitOutcome` discriminant.
+- Both call sites of `wait_for_next_tick` in `spawn_background_sync`
+  use the `while … == Reset && !stop {}` pattern — the
+  post-`device_status` cleared-credentials path also benefits (a
+  manual click after a pairing wipe no longer fires a useless tick).
+- 207 tests green (163 backend, +1 new; 44 frontend, +0).
+
 ## [0.4.20] — 2026-05-05
 
 ### Added

@@ -1076,6 +1076,25 @@ fn poke_manual_refresh() {
     }
 }
 
+/// Outcome of a `wait_for_next_tick` call. v0.4.21 distinguishes the
+/// two cases so the loop can SKIP the next `background_tick` when a
+/// manual refresh fired the wake — the user's `sync_now` already ran
+/// `quota::collect_all`, so an immediate background tick on top is a
+/// redundant call. v0.4.20 collapsed both outcomes to `()` and ate the
+/// extra tick (VM-flagged as the `+2s spurious entry` in the v0.4.20
+/// Block A report).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WaitOutcome {
+    /// `interval` elapsed without interruption — caller should run a
+    /// fresh `background_tick`.
+    Elapsed,
+    /// Manual refresh signal arrived during the idle window — caller
+    /// should NOT run a fresh `background_tick` (one just ran via the
+    /// manual path) and should re-enter the wait for another full
+    /// `interval` of idle.
+    Reset,
+}
+
 /// Sleep for `interval` OR until the manual-refresh channel signals
 /// (whichever comes first). Drains buffered signals first so any
 /// `poke_manual_refresh` call that landed during the previous
@@ -1083,13 +1102,38 @@ fn poke_manual_refresh() {
 /// via the manual `sync_now` path; we only want to react to clicks
 /// that happen while we're idle.
 ///
+/// Returns `Elapsed` on a clean 120s sleep, `Reset` when interrupted.
+/// Per v0.4.20 VM Block A: the caller MUST treat `Reset` as
+/// "skip the next tick AND wait again" — otherwise a redundant
+/// `background_tick` fires immediately after the user's manual sync.
+/// Use the `while … == Reset && !stop` pattern at the call site
+/// (the `&& !stop` half is what keeps shutdown responsive — without
+/// it, repeated manual clicks could keep the task alive past
+/// shutdown indefinitely; per Gemini 3.1 Pro v0.4.21 review P2).
+///
+/// The `Some(_) = rx.recv()` pattern (vs the bare `_ = rx.recv()`)
+/// is load-bearing: when `MANUAL_REFRESH_TX.set(tx)` fails (e.g. a
+/// hot-reload spawn raced and the static is already populated), the
+/// LOCAL `tx` is dropped, closing the channel, and `recv()` returns
+/// `None` instantly. With the bare pattern, `select!` would fire the
+/// recv arm immediately → return `Reset` → caller's `while` loops →
+/// recv() returns None again → busy loop at 100 % CPU. With the
+/// `Some(_)` pattern, the arm is disabled when `recv()` returns
+/// `None`, so `select!` falls through to the sleep arm and the loop
+/// continues normally (just without manual-refresh wake capability).
+/// Per Gemini 3.1 Pro v0.4.21 review P1.
+///
 /// Extracted as `pub(crate)` for unit testing — see `mod tests` below.
-pub(crate) async fn wait_for_next_tick(rx: &mut mpsc::Receiver<()>, interval: Duration) {
+pub(crate) async fn wait_for_next_tick(
+    rx: &mut mpsc::Receiver<()>,
+    interval: Duration,
+) -> WaitOutcome {
     while rx.try_recv().is_ok() {}
     tokio::select! {
-        _ = tokio::time::sleep(interval) => {}
-        _ = rx.recv() => {
+        _ = tokio::time::sleep(interval) => WaitOutcome::Elapsed,
+        Some(_) = rx.recv() => {
             log::debug!("background tick reset by manual refresh during idle window");
+            WaitOutcome::Reset
         }
     }
 }
@@ -1143,7 +1187,16 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                                 // so we don't spam another notification when the
                                 // (now-no-op) tick keeps not-syncing.
                                 consecutive_failures = 0;
-                                wait_for_next_tick(&mut rx, SYNC_INTERVAL).await;
+                                // v0.4.21 — keep waiting on Reset so a manual
+                                // refresh during the post-clear idle window
+                                // doesn't trigger an immediate (now-no-op) tick.
+                                // `&& !stop` keeps shutdown responsive even
+                                // under repeated manual clicks (Gemini P2).
+                                while wait_for_next_tick(&mut rx, SYNC_INTERVAL).await
+                                    == WaitOutcome::Reset
+                                    && !stop.load(Ordering::Relaxed)
+                                {
+                                }
                                 continue;
                             }
                             Ok(_) => {
@@ -1160,7 +1213,18 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                     }
                 }
             }
-            wait_for_next_tick(&mut rx, SYNC_INTERVAL).await;
+            // v0.4.21 — `Reset` means "user clicked Refresh now, which
+            // already ran a manual `quota::collect_all` via `sync_now`".
+            // Loop back into another full-interval wait instead of
+            // falling through to a redundant `background_tick` at the
+            // top of the next iteration. Multiple clicks in succession
+            // each defer the next tick by another 120 s — desired.
+            // `&& !stop` (Gemini P2 catch): without it, the inner loop
+            // can outlive a shutdown request indefinitely if the user
+            // keeps clicking faster than 120 s.
+            while wait_for_next_tick(&mut rx, SYNC_INTERVAL).await == WaitOutcome::Reset
+                && !stop.load(Ordering::Relaxed)
+            {}
         }
     });
 }
@@ -1396,13 +1460,19 @@ mod tests {
 
         let interval = Duration::from_secs(120);
         let started = tokio::time::Instant::now();
-        wait_for_next_tick(&mut rx, interval).await;
+        let outcome = wait_for_next_tick(&mut rx, interval).await;
         let elapsed = started.elapsed();
 
         assert_eq!(
             elapsed, interval,
             "drained pre-wait signal must NOT shorten the idle sleep — \
              that's the exact regression Gemini caught in the v0.4.20 review"
+        );
+        assert_eq!(
+            outcome,
+            WaitOutcome::Elapsed,
+            "drained pre-wait signal must yield Elapsed (not Reset) — \
+             the loop should run a fresh background_tick after this"
         );
     }
 
@@ -1414,17 +1484,111 @@ mod tests {
 
         let waiter = tokio::spawn(async move {
             let started = tokio::time::Instant::now();
-            wait_for_next_tick(&mut rx, interval).await;
-            started.elapsed()
+            let outcome = wait_for_next_tick(&mut rx, interval).await;
+            (started.elapsed(), outcome)
         });
 
         tokio::time::sleep(click_at).await;
         tx.send(()).await.unwrap();
 
-        let elapsed = waiter.await.unwrap();
+        let (elapsed, outcome) = waiter.await.unwrap();
         assert_eq!(
             elapsed, click_at,
             "manual refresh fired during the idle window must wake the sleep at click time"
         );
+        assert_eq!(
+            outcome,
+            WaitOutcome::Reset,
+            "manual refresh fired during the idle window must yield Reset"
+        );
+    }
+
+    /// v0.4.21 fix-to-the-fix. v0.4.20 VM Block A measured a +2 s
+    /// `quota::collect_all` entry immediately after a manual click —
+    /// the `wait_for_next_tick` woke up early (correct), then the
+    /// loop fell through and ran `background_tick` at the top of the
+    /// next iteration (NOT correct — the user's `sync_now` already
+    /// ran one). This test simulates the loop using a counter in
+    /// place of `background_tick` and asserts that a manual click
+    /// during the idle window does NOT increment the tick counter
+    /// until a full `interval` has actually elapsed since the click.
+    #[tokio::test(start_paused = true)]
+    async fn manual_refresh_does_not_cause_extra_tick() {
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+        let (tx, mut rx) = mpsc::channel::<()>(1);
+        let counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+
+        let counter_for_loop = counter.clone();
+        let stop_for_loop = stop.clone();
+
+        let interval = Duration::from_secs(120);
+        let click_at = Duration::from_secs(60);
+
+        let loop_handle = tokio::spawn(async move {
+            // Mirror of `spawn_background_sync`'s body, with a counter
+            // standing in for `background_tick`. Mirrors production's
+            // `while … == Reset && !stop {}` pattern (the `&& !stop`
+            // half is the P2 fix from Gemini's v0.4.21 review).
+            while !stop_for_loop.load(AtomicOrdering::Relaxed) {
+                counter_for_loop.fetch_add(1, AtomicOrdering::SeqCst);
+                while wait_for_next_tick(&mut rx, interval).await == WaitOutcome::Reset
+                    && !stop_for_loop.load(AtomicOrdering::Relaxed)
+                {}
+            }
+        });
+
+        // Let the initial tick land.
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(
+            counter.load(AtomicOrdering::SeqCst),
+            1,
+            "initial tick must fire at startup"
+        );
+
+        // Mid-idle: simulate a "Refresh now" click.
+        tokio::time::sleep(click_at).await;
+        tx.send(()).await.unwrap();
+
+        // Give the wait helper a virtual moment to react.
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(
+            counter.load(AtomicOrdering::SeqCst),
+            1,
+            "manual refresh during idle window must NOT trigger an extra background_tick — \
+             that's the v0.4.20 Block A regression VM caught at +2 s"
+        );
+
+        // Advance to one full `interval` after the click — next tick
+        // should fire here, not earlier.
+        tokio::time::sleep(interval - Duration::from_millis(10)).await;
+        assert_eq!(
+            counter.load(AtomicOrdering::SeqCst),
+            1,
+            "next tick must NOT fire earlier than `interval` after the manual click"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            counter.load(AtomicOrdering::SeqCst),
+            2,
+            "next tick MUST fire at `click_time + interval` (not the original schedule)"
+        );
+
+        // Cleanup. With v0.4.21's Gemini P1 fix (`Some(_) = rx.recv()`),
+        // dropping `tx` is now safe — `recv()` returning `None`
+        // disables that select arm instead of falling through to
+        // `Reset`. The pending sleep arm runs to completion, returns
+        // `Elapsed`, the inner `while … == Reset && !stop` exits, and
+        // the outer `while !stop` exits. Confirms the P1 fix end-to-
+        // end without resorting to `loop_handle.abort()`.
+        stop.store(true, AtomicOrdering::Relaxed);
+        drop(tx);
+        // Advance virtual time so the pending sleep inside
+        // `wait_for_next_tick` completes naturally.
+        tokio::time::sleep(interval + Duration::from_millis(10)).await;
+        // Should now exit cleanly. If this hangs, the P1 / P2 fix has
+        // regressed.
+        loop_handle.await.expect("loop task should exit cleanly");
     }
 }
