@@ -2,6 +2,83 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.4] — 2026-05-06
+
+Settings → Danger Zone: clear local caches + delete cloud account.
+First of the post-parity polish trio (v0.5.4–v0.5.6) that closes
+remaining Mac sibling parity surfaces. Plan reviewed by Codex +
+Gemini 3.1 Pro pre-implementation; both flagged the same P1 ordering
+bug in the v1 plan, which v0.5.4 ships with the corrected ordering.
+
+### Added
+- **Settings → Danger Zone section.** Two destructive actions live at
+  the bottom of Settings, behind a red-tinted card with an explicit
+  ⚠ heading:
+  - **Clear local caches** — wipes the in-memory dashboard cache
+    (30 s-TTL `DASHBOARD_CACHE` for `dashboard_summary` /
+    `provider_summary` / `daily_usage`) and the on-disk scan cache
+    (`<cache_dir>/cost-usage/{provider}-v1.json`). User stays signed
+    in; the next sync re-fetches everything. Reversible — meant for
+    "the dashboard looks stuck, force a clean refresh" recovery.
+  - **Delete cloud account** — calls the `delete_user_account` RPC
+    server-side, then best-effort wipes the OS keychain refresh
+    token, every provider credential slot, the helper config file,
+    and both cache layers. Type-to-confirm gate: the user must type
+    the literal phrase (`DELETE` / `删除` / `削除` per their app
+    language) into a text input to enable the destructive button.
+    Per Gemini 3.1 Pro decision: dev-tool audience, friction is a
+    feature.
+- **`clear_local_caches` and `delete_account_and_unpair` Tauri
+  commands.** Backend wrappers in `lib.rs`. The cache-clear path is
+  a single in-mem `cache_invalidate()` + `cache::wipe_all(None)`;
+  the delete-account path mints a fresh user JWT via the existing
+  `with_user_jwt` helper, calls the server RPC, and only then runs
+  best-effort local cleanup.
+- **`provider_creds::wipe()` helper.** Targets both the OS keychain
+  (4 cred slots: cursor cookie, copilot token, openrouter API key,
+  openrouter base URL) AND the file fallback at
+  `provider_creds.json` — robust to mid-session backend drift if a
+  user's keyring became unavailable after launch. Idempotent;
+  missing entries are treated as success.
+- **`supabase::delete_user_account` wrapper.** Thin user-JWT-scoped
+  RPC POST, mirrors the `dashboard_summary` shape (no args, returns
+  `{success: true}`). Server-side function exists since the iOS
+  4.x sprint.
+
+### Notes
+- **Critical reviewer P1 caught in the v1 plan (Codex + Gemini 3.1
+  Pro flagged independently): RPC FIRST, then local clear.** The v1
+  plan had keychain-clear-before-RPC. But `with_user_jwt`
+  (`lib.rs:688`) reads the refresh_token from the keychain to mint
+  the JWT — clearing the keychain first would ship an
+  unauthenticated request and silently leave the server row intact
+  while the user thought their data was gone (Gemini's words: "a
+  massive trust/privacy violation"). v0.5.4 ships the corrected
+  ordering: mint JWT → call RPC → on success, best-effort local
+  clear. On RPC failure, local state is preserved so the user can
+  retry without re-OTP.
+- **Codex P2 caught in plan: `clear_local_caches` scope was
+  underspecified.** v1 plan said "wipe scan + provider summary +
+  forecast caches" without naming the actual primitives. v0.5.4
+  uses exactly two: `cache_invalidate()` (in-mem) and
+  `cache::wipe_all(None)` (on-disk). Provider creds are NOT cleared
+  by this action — that's `delete_account_and_unpair`'s scope. The
+  Danger Zone copy makes the distinction explicit.
+- **Best-effort local clear ordering inside delete-account.** Each
+  step (cache, keychain, provider_creds, config) logs via
+  `log::warn!` on failure but doesn't abort the others. By the time
+  we're past the RPC, the server row is already gone — partial
+  local cleanup is strictly better than rolling back. Config-clear
+  failure is the most benign: the next background_tick will hit a
+  401, `classify_auth_failure` will detect `account_missing`, and
+  local state self-heals.
+- 191 tests green (185 backend +5; 60 frontend +6 incl. 3
+  delete-phrase per-language pins). Critical-labels list in
+  `i18n.test.ts` gains 12 `settings.danger.*` keys so a translation
+  drift on the destructive flow can't silently disable the gate.
+- v0.5.5 (Activity Timeline) and v0.5.6 (Tray mini-metrics) follow
+  in the same sprint.
+
 ## [0.5.3] — 2026-05-05
 
 Polish ship closing the three real findings from the

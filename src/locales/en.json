@@ -186,6 +186,23 @@
       "clear_confirm_body": "You'll need to re-paste it from the source. This can't be undone.",
       "clear_confirm_action": "Clear",
       "env_override_banner": "The environment variable {{var}} is currently overriding this saved value. Remove it from your system to use this setting."
+    },
+    "danger": {
+      "heading": "Danger Zone",
+      "clear_caches_title": "Clear local caches",
+      "clear_caches_body": "Wipes scan + dashboard caches on this machine. You stay signed in; the next sync re-fetches everything.",
+      "clear_caches_button": "Clear caches",
+      "clear_caches_confirm_button": "Yes, clear caches",
+      "clear_caches_processing": "Clearing…",
+      "clear_caches_done": "Caches cleared.",
+      "delete_account_title": "Delete cloud account",
+      "delete_account_body": "Permanently deletes your account, every paired device, and all server-side data. This cannot be undone.",
+      "delete_account_button": "Delete account",
+      "delete_account_confirm_prompt": "Type {{phrase}} below to confirm:",
+      "delete_account_confirm_button": "Delete forever",
+      "delete_account_processing": "Deleting…",
+      "delete_phrase": "DELETE",
+      "action_failed": "Operation failed: {{err}}"
     }
   },
   "updater": {

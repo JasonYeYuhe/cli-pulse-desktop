@@ -119,6 +119,25 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "overview.top_projects_unknown",
     "overview.top_projects_empty",
     "overview.top_projects_failed",
+    // v0.5.4 — Settings → Danger Zone. The full list of new keys is
+    // pinned because mistranslating any one of them on a destructive
+    // action (e.g. dropping the Japanese 削除 phrase) would silently
+    // soft-disable the type-to-confirm gate for that language.
+    "settings.danger.heading",
+    "settings.danger.clear_caches_title",
+    "settings.danger.clear_caches_body",
+    "settings.danger.clear_caches_button",
+    "settings.danger.clear_caches_confirm_button",
+    "settings.danger.clear_caches_processing",
+    "settings.danger.clear_caches_done",
+    "settings.danger.delete_account_title",
+    "settings.danger.delete_account_body",
+    "settings.danger.delete_account_button",
+    "settings.danger.delete_account_confirm_prompt",
+    "settings.danger.delete_account_confirm_button",
+    "settings.danger.delete_account_processing",
+    "settings.danger.delete_phrase",
+    "settings.danger.action_failed",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(
@@ -177,6 +196,34 @@ describe("i18n plural forms (v0.4.5)", () => {
     mod.setLang("ja");
     expect(mod.default.t("providers.models", { count: 1 })).toBe("1 モデル");
     expect(mod.default.t("providers.models", { count: 3 })).toBe("3 モデル");
+  });
+});
+
+describe("i18n delete-phrase per-language (v0.5.4)", () => {
+  // The Settings → Danger Zone delete-account flow requires the user to
+  // type a localized literal phrase to enable the destructive button.
+  // The frontend compares `state.typed === t("settings.danger.delete_phrase")`
+  // — string equality, no fuzzy matching. These tests pin the exact
+  // phrase per language so a translation drift can't silently disable
+  // the gate (e.g. zh-CN dropping back to "DELETE" would still resolve,
+  // but a Chinese user typing "删除" would no longer enable the button).
+
+  it("en delete phrase resolves to literal DELETE", async () => {
+    const { default: i18n } = await freshI18n();
+    i18n.changeLanguage("en");
+    expect(i18n.t("settings.danger.delete_phrase")).toBe("DELETE");
+  });
+
+  it("zh-CN delete phrase resolves to 删除", async () => {
+    const mod = await freshI18n();
+    mod.setLang("zh-CN");
+    expect(mod.default.t("settings.danger.delete_phrase")).toBe("删除");
+  });
+
+  it("ja delete phrase resolves to 削除", async () => {
+    const mod = await freshI18n();
+    mod.setLang("ja");
+    expect(mod.default.t("settings.danger.delete_phrase")).toBe("削除");
   });
 });
 

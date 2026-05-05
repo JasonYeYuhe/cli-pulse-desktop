@@ -835,6 +835,108 @@ async fn get_top_projects(days: Option<u32>) -> Result<Vec<top_projects::TopProj
     Ok(top_projects::aggregate_top_projects(&rows, 5))
 }
 
+// ------------------------------------------------------------------------
+// v0.5.4 — Settings → Danger Zone. Two destructive actions:
+//   - clear_local_caches: wipes in-memory dashboard cache + on-disk scan
+//     cache (cost-usage). User stays signed in; next sync re-fetches
+//     everything. Reversible.
+//   - delete_account_and_unpair: server-side `delete_user_account` RPC
+//     followed by best-effort local clear. Permanent.
+//
+// CRITICAL ORDERING for delete (Codex P1 + Gemini 3.1 Pro P1, both flagged
+// independently): RPC FIRST, then local clear. `with_user_jwt` reads the
+// refresh_token from keychain (lib.rs:688) to mint the JWT; clearing the
+// keychain BEFORE the RPC would ship an unauthenticated request and
+// silently leave the server row intact while the user thought their data
+// was gone — Gemini called this "a massive trust/privacy violation."
+// ------------------------------------------------------------------------
+
+/// Clear all in-memory and on-disk local caches. Does NOT touch keychain
+/// or config — user stays signed in; the next background sync (or manual
+/// "Sync now") re-fetches everything from the server. Reversible.
+///
+/// Scope (per Codex P2 reviewer finding — be explicit, not aspirational):
+///   - in-memory `DASHBOARD_CACHE` (dashboard_summary / provider_summary
+///     / daily_usage rows, 30 s TTL — see lib.rs:573)
+///   - on-disk `cache::wipe_all(None)` (scan cache under
+///     `<cache_dir>/cost-usage/{provider}-v1.json` — Codex / Claude
+///     incremental scan caches)
+///
+/// Provider creds and refresh tokens are explicitly NOT wiped here —
+/// that's `delete_account_and_unpair`'s scope. The Danger Zone copy
+/// makes this distinction explicit so users know "Clear caches" leaves
+/// them signed in.
+#[tauri::command]
+fn clear_local_caches() -> Result<(), String> {
+    cache_invalidate();
+    if let Err(e) = cache::wipe_all(None) {
+        // Disk cache wipe failure is rare (permissions / antivirus
+        // lock) but recoverable: we report it to the frontend so the
+        // user knows what went wrong, but in-mem cache was already
+        // cleared so the immediate UI state is fresh anyway.
+        return Err(format!("Failed to wipe scan cache: {e}"));
+    }
+    Ok(())
+}
+
+/// Permanently delete the user's cloud account and unpair this device.
+///
+/// Steps (ordering matters — see module-level comment):
+///   1. Mint a fresh user JWT via `with_user_jwt` (reads refresh_token
+///      from keychain → refreshes → persists rotated → returns access_token).
+///   2. Call `supabase::delete_user_account(jwt)` RPC. Server cascades
+///      the delete through `auth.users` to all owned rows.
+///   3. ON SUCCESS ONLY: best-effort local clear:
+///      - `cache_invalidate()` + `cache::wipe_all(None)`
+///      - `keychain::delete_refresh_token()`
+///      - `provider_creds::wipe()` (all 4 cred slots + the file fallback)
+///      - `config::clear()`
+///
+/// On RPC error: return `Err` to the frontend, leave local state
+/// intact. The user can retry — server-side data still exists, and
+/// keeping the local refresh_token / config means they don't have to
+/// re-OTP just to retry the delete.
+///
+/// Best-effort means each local clear step logs::warn on failure but
+/// does not abort the others — by the time we're here, the server row
+/// is already gone, so partial local cleanup is strictly better than
+/// rolling back.
+#[tauri::command]
+async fn delete_account_and_unpair() -> Result<(), String> {
+    // Step 1+2: RPC FIRST. with_user_jwt handles the keychain read →
+    // refresh → persist-rotated → call sequence atomically (lib.rs:688).
+    // If the user's session is expired, with_user_jwt returns the
+    // "Session expired — sign in again" error and clears keychain itself
+    // — that's the right behavior (no usable JWT means we can't auth
+    // the delete; the user must re-OTP first).
+    with_user_jwt(|jwt| async move { supabase::delete_user_account(&jwt).await }).await?;
+
+    // Step 3: best-effort local clear. By this point the server row is
+    // gone; we want as much local cleanup as possible but partial
+    // failure here doesn't undo the server delete.
+    cache_invalidate();
+    if let Err(e) = cache::wipe_all(None) {
+        log::warn!("delete_account: scan cache wipe failed (non-fatal): {e}");
+    }
+    if let Err(e) = keychain::delete_refresh_token() {
+        log::warn!("delete_account: refresh_token delete failed (non-fatal): {e:?}");
+    }
+    if let Err(e) = provider_creds::wipe() {
+        log::warn!("delete_account: provider_creds wipe failed (non-fatal): {e}");
+    }
+    if let Err(e) = config::clear() {
+        // config::clear failure leaves the device file behind; the next
+        // app launch will read a stale `paired=true` config but the
+        // server row is gone, so the next background_tick will fail with
+        // 401/404 and `classify_auth_failure` will detect device_missing
+        // / account_missing and clean up. So this is recoverable, just
+        // not immediate. Surface the warning via log; do NOT bubble up
+        // because that would suggest the delete itself failed.
+        log::warn!("delete_account: config clear failed (will self-heal on next sync): {e}");
+    }
+    Ok(())
+}
+
 /// v0.5.0 — month-end cost forecast (Mac sibling parity port of
 /// `CostForecastEngine.swift`). Reads the same `daily_usage` rows
 /// that power Overview's trend chart, runs linear regression on
@@ -1678,6 +1780,9 @@ pub fn run() {
             get_top_projects,
             // v0.5.3 — server-stored unresolved alerts for RiskSignalsCard
             get_server_alerts,
+            // v0.5.4 — Settings → Danger Zone (clear caches + delete account)
+            clear_local_caches,
+            delete_account_and_unpair,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

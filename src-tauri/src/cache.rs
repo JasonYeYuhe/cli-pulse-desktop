@@ -406,6 +406,54 @@ mod tests {
         assert!(cache.days.is_empty());
     }
 
+    /// v0.5.4 — `wipe_all` clears the cost-usage directory so the
+    /// "Clear local caches" Danger Zone action is a true reset, not
+    /// just a no-op (the layer above invalidates the in-memory
+    /// `DASHBOARD_CACHE` separately). Pin the round-trip:
+    /// save → wipe_all → load returns default (cache miss).
+    #[test]
+    fn wipe_all_removes_persisted_cache() {
+        let tmp = std::env::temp_dir().join(format!("cli-pulse-wipe-test-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // Seed a non-empty cache so wipe has something to actually clear.
+        let mut cache = CostUsageCache::default();
+        let mut models = HashMap::new();
+        models.insert("gpt-5".to_string(), vec![1000, 0, 200]);
+        cache.days.insert("2026-04-24".to_string(), models);
+        save("codex", &cache, Some(&tmp)).unwrap();
+
+        let path = cache_path("codex", Some(&tmp)).unwrap();
+        assert!(path.exists(), "cache file should exist after save");
+
+        wipe_all(Some(&tmp)).unwrap();
+
+        // After wipe, load returns a fresh default — no v0.5.4 surprise
+        // where users hit "Clear caches" but old days re-render.
+        let loaded = load("codex", Some(&tmp));
+        assert!(loaded.days.is_empty(), "load post-wipe must be empty");
+        assert!(!path.exists(), "cache file must be removed by wipe_all");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// v0.5.4 — `wipe_all` is idempotent: clearing an already-empty
+    /// directory must not error. Important because the Danger Zone
+    /// action's caller treats wipe_all errors as a hard fail; an
+    /// idempotent guarantee here means re-clicking "Clear caches" on
+    /// a fresh install doesn't surface a confusing error.
+    #[test]
+    fn wipe_all_is_idempotent_on_missing_dir() {
+        let tmp = std::env::temp_dir().join(format!("cli-pulse-wipe-empty-{}", std::process::id()));
+        // Note: tmp NEVER created — wipe_all called against a non-
+        // existent path. Must succeed, not error out.
+        let result = wipe_all(Some(&tmp));
+        assert!(
+            result.is_ok(),
+            "wipe_all on missing dir should be Ok, got {result:?}"
+        );
+    }
+
     #[test]
     fn prune_days_drops_out_of_range() {
         let mut cache = CostUsageCache::default();

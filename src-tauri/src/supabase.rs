@@ -594,6 +594,36 @@ pub async fn get_unresolved_alerts(
 }
 
 // ========================================================================
+// delete_user_account (v0.5.4) — server-side account deletion. RPC takes
+// no args; server reads `auth.uid()` from the user JWT and cascades the
+// delete through `auth.users`, removing rows in `sessions`,
+// `daily_usage_metrics`, `alerts`, `desktop_helpers`, etc. via FK
+// cascade. Returns `{success: true}` on completion.
+//
+// CALLER ORDERING IS LOAD-BEARING (see lib.rs::delete_account_and_unpair):
+// the caller MUST mint the user JWT BEFORE clearing keychain — `with_user_jwt`
+// reads the refresh_token from keychain to refresh, so a clear-keychain-first
+// ordering would ship an unauthenticated request and leave the user thinking
+// "account deleted" while the server still has all their rows. Codex P1 +
+// Gemini 3.1 Pro P1 (both flagged independently). Local clear runs ONLY
+// after the RPC returns Ok; on RPC error, local state is preserved so the
+// user can retry without re-pairing.
+// ========================================================================
+
+pub async fn delete_user_account(user_jwt: &str) -> SupabaseResult<()> {
+    let v = rpc_with_auth(
+        "delete_user_account",
+        &serde_json::json!({}),
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    // Server returns `{success: true}` on completion; we discard the body
+    // — the only signal we care about is the absence of an RPC error.
+    Ok(())
+}
+
+// ========================================================================
 // helper_heartbeat
 // ========================================================================
 
@@ -633,6 +663,32 @@ mod tests {
                 assert_eq!(message, "Invalid pairing code");
             }
             _ => panic!("wrong error variant"),
+        }
+    }
+
+    // v0.5.4 — delete_user_account RPC wrapper. We cannot call the live
+    // RPC from a unit test (it would actually delete an account); instead
+    // we pin the response-shape contract: a `{success: true}` payload
+    // round-trips through `check_rpc_error` cleanly, and a
+    // `{error: ..., message: ...}` payload becomes `SupabaseError::Rpc`.
+    // The same `check_rpc_error` path is shared with every other RPC,
+    // so this is also a regression catch for the universal path.
+
+    #[test]
+    fn delete_user_account_response_shape_passes_check() {
+        let success = json!({"success": true});
+        assert!(check_rpc_error(&success).is_ok());
+    }
+
+    #[test]
+    fn delete_user_account_error_shape_becomes_rpc_error() {
+        let err_body = json!({"error": "permission_denied", "message": "JWT missing or invalid"});
+        let result = check_rpc_error(&err_body);
+        match result {
+            Err(SupabaseError::Rpc { code, .. }) => {
+                assert_eq!(code, "permission_denied");
+            }
+            _ => panic!("expected SupabaseError::Rpc"),
         }
     }
 }

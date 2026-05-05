@@ -2274,6 +2274,15 @@ function Settings({
           reads as "advanced / opt-in" tail of the Settings tab. */}
       <IntegrationsSection />
 
+      {/* v0.5.4 — Danger Zone at the absolute bottom of Settings.
+          Visual distance + red-tinted border + last-position is the
+          conventional "destructive actions live here" pattern from
+          Vercel / Discord / Slack. Type-to-confirm gate on delete
+          per Gemini 3.1 Pro decision: dev-tool audience, friction is
+          a feature. Per Codex P1: RPC fires FIRST in the backend,
+          then best-effort local clear — see lib.rs::delete_account_and_unpair. */}
+      <DangerZoneSection paired={paired} onUnpaired={onUnpaired} />
+
       {msg && (
         <div
           className={`px-4 py-3 rounded-md text-sm border ${
@@ -2675,6 +2684,228 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
           {t("settings.export_json")}
         </button>
       </div>
+    </section>
+  );
+}
+
+// v0.5.4 — Settings → Danger Zone. Two destructive actions:
+//   - Clear local caches: reversible (next sync re-fetches everything)
+//   - Delete cloud account: irreversible, type-to-confirm gated
+//
+// Plan/review highlights baked in here:
+//   - Type-to-confirm phrase comes from i18n, so each language has its
+//     own literal (`DELETE` / `删除` / `削除`). String equality, not
+//     fuzzy match — Gemini decision: dev-tool audience, friction is a
+//     feature.
+//   - The ordering of the BACKEND call is RPC-first then local-clear
+//     (Codex + Gemini P1) — see lib.rs::delete_account_and_unpair. The
+//     frontend just calls the command and reacts to its result.
+//   - On delete success we call `onUnpaired()`, the same handler the
+//     "Unpair device" button uses; that refreshes config + auth status
+//     so the UI flips back to the OTP sign-in form on its own.
+//   - When the device isn't paired, "Delete cloud account" is hidden
+//     entirely — there's no JWT to mint and no server row to delete.
+//     Clear caches stays available because the on-disk scan cache
+//     persists across sign-out and a user might want to wipe it.
+type DangerState =
+  | { kind: "idle" }
+  | { kind: "confirming-clear" }
+  | { kind: "clearing" }
+  | { kind: "confirming-delete"; typed: string }
+  | { kind: "deleting" }
+  | { kind: "done-clear" }
+  | { kind: "done-delete-error"; error: string }
+  | { kind: "done-clear-error"; error: string };
+
+function DangerZoneSection({
+  paired,
+  onUnpaired,
+}: {
+  paired: boolean;
+  onUnpaired: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<DangerState>({ kind: "idle" });
+
+  // The localized confirmation phrase. Different per language by design
+  // (Gemini decision: keep the literal-match pattern, but localize the
+  // word). String equality is intentional — fuzzy matching would defeat
+  // the friction-is-feature aspect of the gate.
+  const deletePhrase = t("settings.danger.delete_phrase");
+
+  async function doClearCaches() {
+    setState({ kind: "clearing" });
+    try {
+      await invoke("clear_local_caches");
+      setState({ kind: "done-clear" });
+      // Auto-fade the success toast so the user isn't stuck in a "click
+      // here to dismiss" state machine.
+      setTimeout(() => {
+        setState((cur) => (cur.kind === "done-clear" ? { kind: "idle" } : cur));
+      }, 2500);
+    } catch (e: any) {
+      setState({ kind: "done-clear-error", error: String(e) });
+    }
+  }
+
+  async function doDeleteAccount() {
+    setState({ kind: "deleting" });
+    try {
+      await invoke("delete_account_and_unpair");
+      // onUnpaired refreshes config + auth status on the App level,
+      // which in turn flips this Settings tab back to the OTP sign-in
+      // form. By the time onUnpaired resolves, this DangerZoneSection
+      // has already been re-rendered with paired=false, hiding the
+      // delete branch entirely. The local state reset here is mostly
+      // defensive — if the parent's onUnpaired is somehow no-op, we
+      // at least don't get stuck in "deleting" forever.
+      await onUnpaired();
+      setState({ kind: "idle" });
+    } catch (e: any) {
+      // RPC error: the SERVER STATE IS UNCHANGED (we ordered RPC
+      // first; on failure the local clear didn't run either). User
+      // can retry, no recovery action needed.
+      setState({ kind: "done-delete-error", error: String(e) });
+    }
+  }
+
+  const deleteButtonEnabled =
+    state.kind === "confirming-delete" && state.typed === deletePhrase;
+
+  return (
+    <section className="p-4 rounded-lg border border-red-900/40 bg-red-950/10 space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-red-400">⚠</span>
+        <h2 className="text-sm font-semibold text-red-200">
+          {t("settings.danger.heading")}
+        </h2>
+      </div>
+
+      {/* Clear local caches — reversible. Always available regardless of
+          paired state because the on-disk scan cache persists across
+          sign-out, and a user who just signed out may still want to wipe. */}
+      <div className="space-y-2">
+        <div>
+          <h3 className="text-sm text-neutral-200">
+            {t("settings.danger.clear_caches_title")}
+          </h3>
+          <p className="text-xs text-neutral-500">
+            {t("settings.danger.clear_caches_body")}
+          </p>
+        </div>
+        {state.kind === "confirming-clear" ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={doClearCaches}
+              className="px-3 py-1.5 rounded-md bg-amber-900/60 hover:bg-amber-800 text-sm border border-amber-800 text-amber-100"
+            >
+              {t("settings.danger.clear_caches_confirm_button")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setState({ kind: "idle" })}
+              className="px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700"
+            >
+              {t("action.cancel")}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={state.kind === "clearing" || state.kind === "deleting"}
+            onClick={() => setState({ kind: "confirming-clear" })}
+            className="px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
+          >
+            {state.kind === "clearing"
+              ? t("settings.danger.clear_caches_processing")
+              : t("settings.danger.clear_caches_button")}
+          </button>
+        )}
+      </div>
+
+      {/* Delete cloud account — irreversible, type-to-confirm gate. Hidden
+          when not paired (no JWT to mint, no server row to delete). */}
+      {paired && (
+        <div className="space-y-2 pt-3 border-t border-red-900/30">
+          <div>
+            <h3 className="text-sm text-neutral-200">
+              {t("settings.danger.delete_account_title")}
+            </h3>
+            <p className="text-xs text-neutral-500">
+              {t("settings.danger.delete_account_body")}
+            </p>
+          </div>
+          {state.kind === "confirming-delete" ? (
+            <div className="space-y-2">
+              <label className="block text-xs text-red-300">
+                {t("settings.danger.delete_account_confirm_prompt", {
+                  phrase: deletePhrase,
+                })}
+              </label>
+              <input
+                type="text"
+                value={state.typed}
+                onChange={(e) =>
+                  setState({ kind: "confirming-delete", typed: e.target.value })
+                }
+                spellCheck={false}
+                autoComplete="off"
+                autoFocus
+                className="w-full max-w-xs px-2 py-1 text-sm font-mono bg-neutral-950 border border-red-900/60 rounded text-neutral-200 focus:outline-none focus:border-red-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={!deleteButtonEnabled}
+                  onClick={doDeleteAccount}
+                  className="px-3 py-1.5 rounded-md bg-red-900/70 hover:bg-red-800 text-sm border border-red-800 text-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {t("settings.danger.delete_account_confirm_button")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setState({ kind: "idle" })}
+                  className="px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700"
+                >
+                  {t("action.cancel")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={state.kind === "clearing" || state.kind === "deleting"}
+              onClick={() =>
+                setState({ kind: "confirming-delete", typed: "" })
+              }
+              className="px-3 py-1.5 rounded-md bg-red-950/60 hover:bg-red-900/60 text-sm border border-red-900 text-red-200 disabled:opacity-50"
+            >
+              {state.kind === "deleting"
+                ? t("settings.danger.delete_account_processing")
+                : t("settings.danger.delete_account_button")}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Status messages (idle states get no banner; only the terminal
+          "done" / "error" states render here). */}
+      {state.kind === "done-clear" && (
+        <div className="px-3 py-2 rounded-md bg-emerald-950/50 border border-emerald-900 text-emerald-200 text-xs">
+          {t("settings.danger.clear_caches_done")}
+        </div>
+      )}
+      {state.kind === "done-clear-error" && (
+        <div className="px-3 py-2 rounded-md bg-red-950/60 border border-red-900 text-red-200 text-xs">
+          {t("settings.danger.action_failed", { err: state.error })}
+        </div>
+      )}
+      {state.kind === "done-delete-error" && (
+        <div className="px-3 py-2 rounded-md bg-red-950/60 border border-red-900 text-red-200 text-xs">
+          {t("settings.danger.action_failed", { err: state.error })}
+        </div>
+      )}
     </section>
   );
 }

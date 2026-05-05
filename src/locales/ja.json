@@ -182,6 +182,23 @@
       "clear_confirm_body": "元のソースから再度貼り付ける必要があります。この操作は取り消せません。",
       "clear_confirm_action": "削除",
       "env_override_banner": "環境変数 {{var}} が保存された値を上書きしています。この設定を有効にするにはシステムから変数を削除してください。"
+    },
+    "danger": {
+      "heading": "危険な操作",
+      "clear_caches_title": "ローカルキャッシュをクリア",
+      "clear_caches_body": "このマシンのスキャンキャッシュとダッシュボードキャッシュを削除します。サインイン状態は維持され、次回の同期ですべて再取得されます。",
+      "clear_caches_button": "キャッシュをクリア",
+      "clear_caches_confirm_button": "クリアする",
+      "clear_caches_processing": "クリア中…",
+      "clear_caches_done": "キャッシュをクリアしました。",
+      "delete_account_title": "クラウドアカウントを削除",
+      "delete_account_body": "アカウント、ペアリング済みのすべてのデバイス、サーバー側のすべてのデータを完全に削除します。この操作は取り消せません。",
+      "delete_account_button": "アカウントを削除",
+      "delete_account_confirm_prompt": "確認のため下に {{phrase}} と入力してください:",
+      "delete_account_confirm_button": "完全に削除",
+      "delete_account_processing": "削除中…",
+      "delete_phrase": "削除",
+      "action_failed": "操作に失敗しました:{{err}}"
     }
   },
   "updater": {
