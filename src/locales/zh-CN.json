@@ -61,7 +61,11 @@
     "forecast_no_data": "本月暂无使用数据",
     "risk_signals_title": "风险信号",
     "risk_no_signals": "状态良好 — 无风险信号",
-    "risk_more_count": "另有 {{count}} 条"
+    "risk_more_count": "另有 {{count}} 条",
+    "top_projects_title": "热门项目(近 30 天)",
+    "top_projects_unknown": "(无项目)",
+    "top_projects_empty": "近 30 天内无项目活动",
+    "top_projects_failed": "无法加载项目列表"
   },
   "providers": {
     "active_days_other": "{{count, number}} 天活跃",

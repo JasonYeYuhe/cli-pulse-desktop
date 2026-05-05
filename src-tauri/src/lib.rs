@@ -20,6 +20,7 @@ pub mod scanner;
 pub mod sentry_init;
 pub mod sessions;
 pub mod supabase;
+pub mod top_projects;
 pub mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -779,6 +780,31 @@ async fn get_daily_usage(days: Option<u32>) -> Result<Vec<supabase::DailyUsageRo
     // from the UI, so keying on user_id alone is sufficient. If we add
     // multiple windows later, extend the cache key.
     ensure_daily_usage(&cfg.user_id, days).await
+}
+
+/// v0.5.2 — top-projects aggregation. See `top_projects.rs` for
+/// the algorithm; this command pulls the underlying `sessions`
+/// rows for the past `days` days and returns the top-N rolled-up
+/// projects sorted by total cost. Frontend `TopProjectsCard` on
+/// the Overview tab renders the result.
+///
+/// Returns `Ok(vec![])` when the user isn't paired (same convention
+/// as `get_cost_forecast`) — the card simply hides on the no-paired
+/// state. Errors propagate to the frontend's per-card error state.
+#[tauri::command]
+async fn get_top_projects(days: Option<u32>) -> Result<Vec<top_projects::TopProject>, String> {
+    let days = days.unwrap_or(30).clamp(1, 90);
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    let user_id = cfg.user_id.clone();
+    let since = chrono::Utc::now() - chrono::Duration::days(days as i64);
+    let rows = with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::get_sessions_since(&user_id, since, &jwt).await }
+    })
+    .await?;
+    Ok(top_projects::aggregate_top_projects(&rows, 5))
 }
 
 /// v0.5.0 — month-end cost forecast (Mac sibling parity port of
@@ -1620,6 +1646,8 @@ pub fn run() {
             emit_test_sentry_event,
             // v0.5.0 — month-end cost forecast (Mac sibling parity)
             get_cost_forecast,
+            // v0.5.2 — top-projects aggregation from sessions table
+            get_top_projects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

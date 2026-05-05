@@ -349,6 +349,15 @@ type CostForecast = {
   is_reliable: boolean;
 };
 
+type TopProject = {
+  project: string;
+  cost_usd: number;
+  session_count: number;
+  last_active: string;
+};
+
+const UNKNOWN_PROJECT = "<unknown>";
+
 function Overview({
   scan,
   loading,
@@ -469,9 +478,10 @@ function Overview({
           a hard requirement). Hidden when not paired — both cards
           need server data. */}
       {paired && (
-        <section className="grid md:grid-cols-2 gap-4">
+        <section className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           <CostForecastCard paired={paired} />
           <RiskSignalsCard alerts={alerts} />
+          <TopProjectsCard paired={paired} />
         </section>
       )}
 
@@ -502,23 +512,33 @@ function CostForecastCard({ paired }: { paired: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
+  // v0.5.2 — poll every 60 s while mounted (Gemini 3.1 Pro v0.5.2
+  // review P1: without polling, a manual sync_now leaves Forecast
+  // stale until the user navigates away and back, eroding trust
+  // in the dashboard). 60 s matches the relevant change cadence:
+  // forecast inputs are aggregated daily, so faster polling is
+  // wasted server load.
   useEffect(() => {
     if (!paired) return;
     let cancelled = false;
-    invoke<CostForecast | null>("get_cost_forecast")
-      .then((f) => {
+    const fetchOnce = async () => {
+      try {
+        const f = await invoke<CostForecast | null>("get_cost_forecast");
         if (cancelled) return;
         setForecast(f);
         setError(null);
-        setLoaded(true);
-      })
-      .catch((e) => {
+      } catch (e: any) {
         if (cancelled) return;
         setError(String(e));
-        setLoaded(true);
-      });
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    fetchOnce();
+    const id = setInterval(fetchOnce, 60_000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [paired]);
 
@@ -639,6 +659,101 @@ function severityRank(s: Alert["severity"]): number {
   if (s === "Critical") return 3;
   if (s === "Warning") return 2;
   return 1; // Info
+}
+
+/// v0.5.2 — top-projects card. Sources from the new `get_top_projects`
+/// Tauri command which aggregates sessions table rows client-side
+/// in Rust (per pre-flight check: `daily_usage_metrics` has no
+/// `project` column server-side, so projects only live on
+/// `sessions`). Renders top 5 by cost with session count and last-
+/// active relative time.
+///
+/// Self-renders error / loading / empty states (Gemini 3.1 Pro
+/// v0.5.0 review hard requirement). The `<unknown>` bucket from
+/// the backend gets pretty-printed as a localized "(no project)"
+/// label so we don't show literal angle brackets in the UI.
+function TopProjectsCard({ paired }: { paired: boolean }) {
+  const { t } = useTranslation();
+  const [projects, setProjects] = useState<TopProject[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  // v0.5.2 — poll every 60 s, same rationale as `CostForecastCard`.
+  // Aggregating sessions table client-side per call is cheap
+  // (server-side LIMIT 5000 + projection + RLS); the 60 s cadence
+  // matches the project-attribution data's effective refresh rate
+  // (sessions sync every 120 s background + on manual click).
+  useEffect(() => {
+    if (!paired) return;
+    let cancelled = false;
+    const fetchOnce = async () => {
+      try {
+        const p = await invoke<TopProject[]>("get_top_projects");
+        if (cancelled) return;
+        setProjects(p);
+        setError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(String(e));
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    fetchOnce();
+    const id = setInterval(fetchOnce, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [paired]);
+
+  return (
+    <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <h2 className="text-sm font-semibold text-neutral-400 mb-2">
+        {t("overview.top_projects_title")}
+      </h2>
+      {!loaded && <div className="text-sm text-neutral-500">{t("misc.loading")}</div>}
+      {loaded && error && (
+        <div className="text-xs text-red-400/80">
+          {t("overview.top_projects_failed")}
+        </div>
+      )}
+      {loaded && !error && projects && projects.length === 0 && (
+        <div className="text-xs text-neutral-500">
+          {t("overview.top_projects_empty")}
+        </div>
+      )}
+      {loaded && !error && projects && projects.length > 0 && (
+        <ul className="space-y-1.5 text-sm">
+          {projects.map((p) => {
+            const parts = p.last_active
+              ? formatRelativeShortParts(p.last_active)
+              : null;
+            return (
+              <li key={p.project} className="flex items-baseline gap-2">
+                <span
+                  className="font-medium truncate flex-1 min-w-0"
+                  title={p.project === UNKNOWN_PROJECT ? "" : p.project}
+                >
+                  {p.project === UNKNOWN_PROJECT
+                    ? t("overview.top_projects_unknown")
+                    : p.project}
+                </span>
+                <span className="text-xs text-neutral-300 tabular-nums">
+                  {formatUSD(p.cost_usd)}
+                </span>
+                {parts && (
+                  <span className="text-[10px] text-neutral-600 tabular-nums">
+                    {t(`time.unit_${parts.unit}`, { count: parts.value })}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /// v0.5.1 — inline SVG icons for severity (Gemini 3.1 Pro v0.5.1

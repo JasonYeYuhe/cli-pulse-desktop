@@ -2,6 +2,71 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.2] — 2026-05-05
+
+Closes the Mac-Overview parity sprint: third and final Insights-row
+card, sourcing project-level cost from a part of the database that
+desktop hasn't queried before.
+
+### Added
+- **`top_projects` Rust module + `get_top_projects` Tauri command.**
+  Pre-flight schema dump (Supabase MCP, 2026-05-05) confirmed
+  `daily_usage_metrics` has no `project` column — project
+  attribution only exists on the `sessions` table. v0.5.2 adds a
+  direct PostgREST GET helper (`supabase::get_sessions_since`) that
+  pulls up to 1000 sessions in the last N days, then aggregates
+  client-side by project (sum cost, count sessions, max
+  last_active). Sort by cost desc, top 5. Sessions with NULL
+  `project` (helper-launched, root-on-Linux, etc.) bucket under
+  `<unknown>` rather than getting silently dropped — surfaces
+  the cost we'd otherwise miss. 5 new backend tests pin
+  aggregation behavior including the unknown-bucket tie-break and
+  null-cost-treated-as-zero edge case.
+- **`TopProjectsCard` on Overview.** Third card in the Insights row.
+  Each row: project name (or "(no project)" for unknown bucket) +
+  total cost + last-active relative time (using the v0.5.0 i18n
+  time-unit keys). Per-card error state per Gemini 3.1 Pro v0.5.0
+  review.
+
+### Changed
+- **Overview Insights row** now `md:grid-cols-2 lg:grid-cols-3` so
+  the 3 cards fit side-by-side on wide windows and stack to 2x2 (with
+  the 3rd wrapping under) on medium widths.
+
+### Notes
+- New PostgREST GET path is a first for desktop — earlier code only
+  used `rpc_with_auth` POST against `/rpc/<name>`. The pattern is
+  generic enough to reuse for future direct-table reads (e.g. an
+  Activity Timeline chart over `sessions` would extend the same
+  helper).
+- 234 tests green (180 backend, +5 top_projects; 54 frontend, +0).
+- 12 new i18n keys (4 per language × 3 languages) for the new card.
+  i18n.test.ts critical-labels list pins the 4 keys.
+- Gemini 3.1 Pro v0.5.2 review caught two P1s + one P2 pre-ship,
+  all adopted:
+  - **P1 (truncation bias):** original `last_active_at.desc` order
+    on the PostgREST GET would cause pathological accounts with
+    5 k+ sessions to undercount older expensive projects (the
+    truncation tail would drop high-cost old sessions while
+    keeping fresh cheap ones). Switched to
+    `estimated_cost.desc.nullslast` so truncation always hits the
+    cheapest sessions first. Bumped LIMIT 1000 → 5000 to cover
+    99.9-percentile heavy users without truncation kicking in.
+  - **P1 (stale data on background sync):** Forecast and
+    TopProjects cards originally fetched only on mount, so a
+    background `sync_now` would leave the dashboard fractured
+    until the user navigated away. Added 60 s polling to both
+    cards (matches the underlying daily/sessions refresh
+    cadence; faster polling is wasted server load).
+  - **P2 (HashMap render-order non-determinism):** when two
+    projects tie on cost AND last_active, the rendered order
+    randomly swapped across runs. Added project-name
+    lexicographic third-tier tie-break for deterministic
+    rendering.
+- Out of scope: yield_score card (still gated on git-attribution
+  infra desktop doesn't have); onboarding wizard (v0.5.3 candidate);
+  PDF export, activity timeline, demo mode (deferred per v2 plan).
+
 ## [0.5.1] — 2026-05-05
 
 Pure frontend ship. Surfaces the v0.5.0 cost-forecast backend in the

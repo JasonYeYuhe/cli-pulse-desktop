@@ -112,6 +112,11 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "overview.risk_signals_title",
     "overview.risk_no_signals",
     "overview.risk_more_count",
+    // v0.5.2 — TopProjectsCard. 3rd Insights-row card.
+    "overview.top_projects_title",
+    "overview.top_projects_unknown",
+    "overview.top_projects_empty",
+    "overview.top_projects_failed",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

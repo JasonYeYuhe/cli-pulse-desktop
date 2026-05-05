@@ -61,7 +61,11 @@
     "forecast_no_data": "今月の利用データがまだありません",
     "risk_signals_title": "リスクシグナル",
     "risk_no_signals": "良好です — リスクシグナルなし",
-    "risk_more_count": "他 {{count}} 件"
+    "risk_more_count": "他 {{count}} 件",
+    "top_projects_title": "トッププロジェクト(過去 30 日間)",
+    "top_projects_unknown": "(プロジェクトなし)",
+    "top_projects_empty": "過去 30 日間にアクティビティのあるプロジェクトはありません",
+    "top_projects_failed": "プロジェクトリストを読み込めませんでした"
   },
   "providers": {
     "active_days_other": "{{count, number}} 日間アクティブ",

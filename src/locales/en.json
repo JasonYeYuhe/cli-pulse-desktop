@@ -62,7 +62,11 @@
     "forecast_no_data": "No usage yet this month",
     "risk_signals_title": "Risk signals",
     "risk_no_signals": "Looking good — no risk signals",
-    "risk_more_count": "+{{count}} more"
+    "risk_more_count": "+{{count}} more",
+    "top_projects_title": "Top projects (30 days)",
+    "top_projects_unknown": "(no project)",
+    "top_projects_empty": "No projects with activity in the last 30 days",
+    "top_projects_failed": "Couldn't load top projects"
   },
   "providers": {
     "active_days_one": "{{count, number}} active day",

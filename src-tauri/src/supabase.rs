@@ -425,6 +425,91 @@ pub async fn get_daily_usage(days: u32, user_jwt: &str) -> SupabaseResult<Vec<Da
 }
 
 // ========================================================================
+// sessions table — direct PostgREST GET (v0.5.2)
+// ========================================================================
+//
+// Powers the v0.5.2 TopProjectsCard. Mac sibling reads
+// DashboardSummary.top_projects, which the desktop server-side RPC
+// doesn't return (per pre-flight schema dump 2026-05-05); the
+// `daily_usage_metrics` table also has no `project` column (cost is
+// keyed on provider+model+date). The only place project attribution
+// lives is the `sessions` table, which has `project`,
+// `estimated_cost`, `requests`, and `last_active_at`.
+//
+// Rather than add a new RPC (autonomy contract requires user
+// approval for backend schema changes), we GET the rows directly via
+// PostgREST and aggregate client-side in Rust. Caps the fetch at
+// 1000 rows ordered by `last_active_at` desc — typical user has
+// far fewer 30-day sessions than that, and the cap prevents a
+// pathological account from pulling the whole table.
+
+/// Single row from the `sessions` table needed for TopProjects
+/// aggregation. Uses `Option<>` for fields that the server may
+/// have null (the table allows null `project` for sessions whose
+/// project couldn't be resolved on the device side; null
+/// `estimated_cost` for sessions that haven't reported cost yet).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SessionRow {
+    pub project: Option<String>,
+    pub estimated_cost: Option<f64>,
+    #[serde(default)]
+    pub requests: Option<i64>,
+    pub last_active_at: String,
+    #[serde(default)]
+    pub total_usage: Option<i64>,
+}
+
+/// Fetch `sessions` rows for the given user with `last_active_at >= since`.
+/// Direct PostgREST GET (not via RPC). Server-side filtering on
+/// user_id (RLS-enforced) + last_active_at gte. Returns up to
+/// `LIMIT` rows ordered by `estimated_cost.desc.nullslast` so the
+/// truncation tail (cheap or zero-cost sessions) carries the
+/// least signal for the top-projects aggregate. Per Gemini 3.1 Pro
+/// v0.5.2 review P1: the original `last_active_at.desc` ordering
+/// would bias truncation away from cost, causing pathological
+/// accounts with 5 k+ sessions to undercount older expensive
+/// projects. Aggregation happens in
+/// `top_projects::aggregate_top_projects`.
+pub async fn get_sessions_since(
+    user_id: &str,
+    since: chrono::DateTime<chrono::Utc>,
+    user_jwt: &str,
+) -> SupabaseResult<Vec<SessionRow>> {
+    // 5 000-row cap covers the 99.9-percentile heavy user. Below
+    // that, ordering by cost desc means truncation hits only the
+    // long-tail cheap sessions whose buckets the top-5 view never
+    // surfaces anyway.
+    const LIMIT: u32 = 5000;
+    let url = format!("{}/rest/v1/sessions", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .get(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .query(&[
+            ("user_id", format!("eq.{user_id}")),
+            ("last_active_at", format!("gte.{}", since.to_rfc3339())),
+            (
+                "select",
+                "project,estimated_cost,requests,last_active_at,total_usage".to_string(),
+            ),
+            ("order", "estimated_cost.desc.nullslast".to_string()),
+            ("limit", LIMIT.to_string()),
+        ])
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await?;
+    if !(200..300).contains(&status) {
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
+// ========================================================================
 // helper_heartbeat
 // ========================================================================
 
