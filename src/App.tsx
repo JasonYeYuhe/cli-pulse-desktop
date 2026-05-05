@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -8,6 +8,7 @@ import {
   formatInt,
   formatUSD,
   formatRelativeMinutes,
+  formatRelativeShort,
   isStaleProviderRow,
   rowsToCsv,
 } from "./lib/format";
@@ -741,6 +742,46 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
     };
   }, [paired]);
 
+  // v0.4.22 — auto-refresh provider summary + collector status every
+  // 30 s while the Providers tab is mounted. Without this, the
+  // displayed `updated_at` only changed on mount or after a manual
+  // "Refresh quota now" click — meaning a user idling on the Providers
+  // tab for 5 min saw the same timestamp from the initial fetch even
+  // though the background sync had landed 2 fresh rows in the
+  // meantime. The new "synced X ago" line on each card is meaningless
+  // without this poll. Cadence chosen at 30 s to match the alerts
+  // tab's poll and to be ≤ the 120 s background-sync interval (so
+  // the displayed relative-age never drifts more than ~30 s behind
+  // server reality).
+  useEffect(() => {
+    if (!paired) return;
+    // Mount guard — Gemini v0.4.22 P3 catch: an in-flight Promise.all
+    // resolving after the tab unmounts (or `paired` flips) would
+    // otherwise call set* on a dead component. The clearInterval
+    // alone doesn't cover an already-running tick.
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const [rows, status] = await Promise.all([
+          invoke<ProviderSummaryRow[]>("get_provider_summary"),
+          invoke<CollectorStatus[]>("get_last_collector_status"),
+        ]);
+        if (cancelled) return;
+        setServerRows(rows);
+        setServerError(null);
+        setCollectorStatus(status);
+      } catch (e: any) {
+        if (cancelled) return;
+        setServerError(String(e));
+      }
+    };
+    const id = setInterval(tick, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [paired]);
+
   // v0.4.19 — manual force-refresh. Calls sync_now (re-runs all 6
   // provider collectors + uploads) then re-fetches provider_summary
   // so the freshly-synced data appears without waiting 120s for
@@ -933,6 +974,24 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                       }
                       return null;
                     })()}
+                    {/* v0.4.22 — show last-sync recency next to the
+                        badges. The v0.4.15 stale badge fires only
+                        after 6 min; this fills the gap so users see
+                        sync activity, not just absence-of-error. The
+                        polling effect refreshes serverRows every 30 s
+                        so this naturally re-renders. Hidden when
+                        updated_at is missing (freshly paired user
+                        with no quota row yet). */}
+                    {srv?.updated_at && (
+                      <span
+                        className="text-[10px] text-neutral-500 tabular-nums"
+                        title={t("providers.synced_ago_tooltip")}
+                      >
+                        {t("providers.synced_ago", {
+                          age: formatRelativeShort(srv.updated_at),
+                        })}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-neutral-500">
                     {/* v0.4.8 — when server-only provider has no local
@@ -1984,6 +2043,17 @@ function AboutSection({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
   const [diag, setDiag] = useState<DiagnosticSnapshot | null>(null);
   const [copied, setCopied] = useState(false);
+  // v0.4.22 — Sentry diagnostic emit. The desktop project's lifetime
+  // issue count was 0 since instrumentation went in (2026-04-22), but
+  // that's ambiguous: it could mean "no panics" or "DSN never
+  // reached server." This button collapses the ambiguity — a
+  // verified test event in the dashboard means the chain is live.
+  const [sentryStatus, setSentryStatus] = useState<"idle" | "sending" | "sent">("idle");
+  // Mount tracker for sendSentryTest — guards both the post-await
+  // setSentryStatus("sent") and the 4s setTimeout reset against
+  // unmount-during-flight (Gemini v0.4.22 P3).
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Re-fetch diagnostics whenever the paired state flips. v0.3.2 E2E
   // surfaced that a fresh OTP sign-in left the About panel showing the
@@ -2027,6 +2097,26 @@ function AboutSection({ paired }: { paired: boolean }) {
     }
   }
 
+  async function sendSentryTest() {
+    if (sentryStatus !== "idle") return;
+    setSentryStatus("sending");
+    try {
+      await invoke("emit_test_sentry_event");
+      // Guard against unmount-during-await — Gemini v0.4.22 P3.
+      if (mountedRef.current) {
+        setSentryStatus("sent");
+        // 4s: long enough to read the confirmation, short enough that
+        // repeated clicks (after verifying in dashboard) aren't blocked.
+        setTimeout(() => {
+          if (mountedRef.current) setSentryStatus("idle");
+        }, 4000);
+      }
+    } catch (e) {
+      console.warn("emit_test_sentry_event failed", e);
+      if (mountedRef.current) setSentryStatus("idle");
+    }
+  }
+
   return (
     <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
       <h2 className="text-sm font-semibold text-neutral-300">{t("settings.about_heading")}</h2>
@@ -2045,12 +2135,24 @@ function AboutSection({ paired }: { paired: boolean }) {
             </dd>
           </dl>
           <p className="text-xs text-neutral-500">{t("settings.about_diagnostics_hint")}</p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={copyDiag}
               className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800"
             >
               {copied ? `✓ ${t("settings.about_copied")}` : t("settings.about_copy_diagnostics")}
+            </button>
+            <button
+              onClick={sendSentryTest}
+              disabled={sentryStatus !== "idle"}
+              className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              title={t("settings.about_sentry_test_tooltip")}
+            >
+              {sentryStatus === "sent"
+                ? `✓ ${t("settings.about_sentry_test_sent")}`
+                : sentryStatus === "sending"
+                  ? `… ${t("settings.about_sentry_test_sending")}`
+                  : t("settings.about_sentry_test_button")}
             </button>
             <a
               href="https://github.com/JasonYeYuhe/cli-pulse-desktop"

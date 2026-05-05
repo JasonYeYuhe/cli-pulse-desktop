@@ -85,6 +85,14 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",
+    // v0.4.22 — Sentry diagnostic emit button in Settings → About.
+    "settings.about_sentry_test_button",
+    "settings.about_sentry_test_sending",
+    "settings.about_sentry_test_sent",
+    "settings.about_sentry_test_tooltip",
+    // v0.4.22 — per-provider "synced X ago" line on Providers tab.
+    "providers.synced_ago",
+    "providers.synced_ago_tooltip",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

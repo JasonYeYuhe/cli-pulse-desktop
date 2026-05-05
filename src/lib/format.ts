@@ -98,3 +98,31 @@ export function formatRelativeMinutes(updated_at: string): string {
   const days = Math.floor(hours / 24);
   return `${days} d`;
 }
+
+/**
+ * Render a sub-minute relative-time string suitable for the per-provider
+ * "synced X ago" line on the Providers tab. Where `formatRelativeMinutes`
+ * collapses everything under 1 min to "<1 min" (fine for the stale
+ * tooltip — anything under 6 min is not stale anyway), this helper
+ * keeps second-level resolution because the Providers card updates as
+ * recently as ~2 s after a manual click and "<1 min" reads as
+ * unhelpfully stale-looking right after a fresh sync.
+ *
+ * Output shape: "12 s" / "45 s" / "3 min" / "2 hr" / "5 d". Returns
+ * the raw input verbatim for unparseable timestamps. Negative deltas
+ * (clock skew between client and server, or a provider_summary row
+ * with a future-dated `updated_at`) collapse to "0 s" — defensive,
+ * users see "synced 0 s ago" rather than "-3 s".
+ */
+export function formatRelativeShort(updated_at: string): string {
+  const t = Date.parse(updated_at);
+  if (Number.isNaN(t)) return updated_at;
+  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr`;
+  const days = Math.floor(hours / 24);
+  return `${days} d`;
+}

@@ -3,6 +3,7 @@ import {
   csvEscape,
   formatInt,
   formatRelativeMinutes,
+  formatRelativeShort,
   formatUSD,
   isStaleProviderRow,
   rowsToCsv,
@@ -216,5 +217,53 @@ describe("formatRelativeMinutes", () => {
     // Defensive: the only thing worse than a bad timestamp is a
     // crashed render. Show the bad value so it can be debugged.
     expect(formatRelativeMinutes("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("formatRelativeShort", () => {
+  const NOW = Date.parse("2026-05-04T12:00:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders seconds for 0-59 s", () => {
+    // The reason this helper exists: formatRelativeMinutes collapses
+    // everything under a minute to "<1 min", which reads as
+    // "unhelpfully stale-looking right after a fresh sync."
+    expect(formatRelativeShort(new Date(NOW - 0).toISOString())).toBe("0 s");
+    expect(formatRelativeShort(new Date(NOW - 12_000).toISOString())).toBe("12 s");
+    expect(formatRelativeShort(new Date(NOW - 59_000).toISOString())).toBe("59 s");
+  });
+
+  it("renders minutes for 1-59 min", () => {
+    expect(formatRelativeShort(new Date(NOW - 60_000).toISOString())).toBe("1 min");
+    expect(formatRelativeShort(new Date(NOW - 7 * 60_000).toISOString())).toBe("7 min");
+    expect(formatRelativeShort(new Date(NOW - 59 * 60_000).toISOString())).toBe("59 min");
+  });
+
+  it("renders hours for 1-23 hr", () => {
+    expect(formatRelativeShort(new Date(NOW - 60 * 60_000).toISOString())).toBe("1 hr");
+    expect(formatRelativeShort(new Date(NOW - 23 * 60 * 60_000).toISOString())).toBe("23 hr");
+  });
+
+  it("renders days for 24+ hr", () => {
+    expect(formatRelativeShort(new Date(NOW - 24 * 60 * 60_000).toISOString())).toBe("1 d");
+  });
+
+  it("clamps negative deltas (clock skew) to 0 s", () => {
+    // provider_summary.updated_at can come back future-dated if the
+    // server's clock is ahead. Showing "synced -3 s ago" looks broken;
+    // "synced 0 s ago" is acceptable degraded behavior.
+    expect(formatRelativeShort(new Date(NOW + 5_000).toISOString())).toBe("0 s");
+  });
+
+  it("returns the raw input verbatim for unparseable timestamps", () => {
+    expect(formatRelativeShort("not-a-date")).toBe("not-a-date");
   });
 });

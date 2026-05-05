@@ -187,6 +187,51 @@ fn diagnostic_snapshot(app: tauri::AppHandle) -> Result<DiagnosticSnapshot, Stri
     })
 }
 
+/// v0.4.22 — fire a tagged test event into Sentry for ingestion
+/// verification. Lets the user (or the VM verifier) confirm the
+/// instrumentation chain (init → DSN → network → org-side intake) is
+/// actually live, not just "no events because nothing has panicked."
+///
+/// The lifetime issue count for the `desktop` Sentry project has been
+/// 0 since instrumentation went in (per `reference_sentry.md`). That
+/// could mean either the app is panic-free OR the DSN never reached
+/// the server. Without a deliberate emit path, the two are
+/// indistinguishable. v0.4.22 collapses that ambiguity.
+///
+/// Returns `Ok` on success regardless of whether Sentry is configured
+/// — `capture_message` on a no-DSN client is a documented no-op. The
+/// caller's UI shows a "sent — check the Sentry dashboard" toast and
+/// the user verifies receipt out-of-band. If DSN is missing the
+/// toast still shows but Sentry never receives anything; per the
+/// `before_send` filter, no PII can leak from this fixed-string
+/// path even in worst case.
+#[tauri::command]
+fn emit_test_sentry_event() -> Result<(), String> {
+    sentry::with_scope(
+        |scope| {
+            // Tag the event so Jason can filter to it on the dashboard
+            // (`is:diagnostic-test`) without it polluting real-incident
+            // queries. `release` and `platform` tags are already set
+            // globally in `sentry_init::install`.
+            scope.set_tag("diagnostic_test", "true");
+            scope.set_tag(
+                "emitted_at",
+                chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            );
+        },
+        || {
+            sentry::capture_message(
+                "CLI Pulse desktop diagnostic test event — manual emit, ignore.",
+                sentry::Level::Info,
+            );
+        },
+    );
+    log::info!(
+        "emit_test_sentry_event — fired diagnostic test event (Sentry no-op if no DSN configured)"
+    );
+    Ok(())
+}
+
 /// Compute client-side alerts from the current scan + sessions snapshot.
 /// Frontend uses this to populate the Alerts tab without waiting for the
 /// 2-minute background sync.
@@ -1414,6 +1459,8 @@ pub fn run() {
             set_provider_creds,
             // v0.4.20 — per-provider collect status for UI error badge
             get_last_collector_status,
+            // v0.4.22 — Settings → About diagnostic Sentry-ingestion test
+            emit_test_sentry_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

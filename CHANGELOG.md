@@ -2,6 +2,58 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.4.22] — 2026-05-05
+
+### Added
+- **Settings → About: "Send test event" button.** Fires a tagged Info
+  event into Sentry (`diagnostic_test=true`). Lets the user (or the
+  VM verifier) confirm the crash-reporting chain — DSN config →
+  network egress → org-side intake — is actually live, not just
+  "no events because nothing has panicked." The desktop Sentry
+  project's lifetime issue count was 0 since instrumentation went
+  in 2026-04-22; without a deliberate emit path, "0 events" was
+  ambiguous. New Tauri command `emit_test_sentry_event` is a thin
+  wrapper around `sentry::capture_message` that sets `diagnostic_test`
+  + `emitted_at` tags and Info level. Safe on no-DSN builds — Sentry
+  no-ops the call.
+- **Per-provider "synced X ago" line on Providers cards.** Renders a
+  small subtle text next to the provider's badges showing how long
+  ago the server-side row last updated, with second-level resolution
+  for fresh syncs (formatted via the new `formatRelativeShort`
+  helper: 12 s / 3 min / 2 hr / 5 d). Fills the gap between
+  "everything is fine" (no badge) and the v0.4.15 stale badge that
+  only fires after 6 min — users can now see sync ACTIVITY, not
+  just absence-of-error.
+
+### Changed
+- **Providers tab now polls `provider_summary` + collector status
+  every 30 s while mounted.** Previously the displayed `updated_at`
+  only changed on tab mount or after a manual "Refresh quota now"
+  click, so users idling on the tab saw the same timestamp from the
+  initial fetch even though background sync had landed fresh rows.
+  The v0.4.20 collector-status cache also now stays current — a
+  transient error mid-cycle now surfaces in the badge within ≤ 30 s
+  instead of waiting for the next manual click. Cadence chosen at
+  30 s to match the alerts tab and stay ≤ the 120 s background-sync
+  interval.
+
+### Notes
+- `formatRelativeShort` adds 6 new tests in `format.test.ts`
+  (seconds / minutes / hours / days / clock-skew clamp / unparseable
+  input). i18n.test.ts's critical-labels list now also pins the 6
+  new keys (4 Sentry test event + 2 synced-ago) across all 3
+  languages.
+- 213 tests green (163 backend, +0; 50 frontend, +6).
+- Gemini 3.1 Pro v0.4.22 review caught two unmount-race P3s:
+  the new 30 s polling effect could `setServerRows` on a dead
+  component if the tab unmounted mid-`Promise.all`, and
+  `sendSentryTest`'s 4 s reset timer could fire after navigating
+  away from About. Both fixed with mount-flag guards
+  (`cancelled` boolean for the polling effect, `mountedRef` for
+  the AboutSection state setters). Sentry tagging via
+  `sentry::with_scope` + tag isolation confirmed correct — no
+  PII leakage, no global-scope pollution.
+
 ## [0.4.21] — 2026-05-05
 
 ### Fixed
