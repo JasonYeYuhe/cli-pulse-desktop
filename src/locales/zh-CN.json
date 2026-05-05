@@ -52,7 +52,16 @@
     "tile_today_sessions": "今日会话",
     "tile_active_sessions": "活跃会话",
     "tile_online_devices": "在线设备",
-    "tile_unresolved_alerts": "未解决告警"
+    "tile_unresolved_alerts": "未解决告警",
+    "forecast_title": "本月预计支出",
+    "forecast_bounds": "{{lower}} – {{upper}}(±1σ)",
+    "forecast_based_on": "基于 {{count}} 天数据",
+    "forecast_unreliable": "至少需要 3 天数据才能给出可靠预测",
+    "forecast_failed": "预测不可用 — 无法连接服务器",
+    "forecast_no_data": "本月暂无使用数据",
+    "risk_signals_title": "风险信号",
+    "risk_no_signals": "状态良好 — 无风险信号",
+    "risk_more_count": "另有 {{count}} 条"
   },
   "providers": {
     "active_days_other": "{{count, number}} 天活跃",

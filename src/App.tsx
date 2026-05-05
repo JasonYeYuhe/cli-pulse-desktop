@@ -282,7 +282,7 @@ export default function App() {
             {error}
           </div>
         )}
-        {tab === "overview" && <Overview scan={scan} loading={loading} paired={!!config?.paired} />}
+        {tab === "overview" && <Overview scan={scan} loading={loading} paired={!!config?.paired} alerts={alerts} />}
         {tab === "providers" && <Providers scan={scan} paired={!!config?.paired} />}
         {tab === "sessions" && (
           <Sessions
@@ -338,14 +338,27 @@ type DashboardSummaryRow = {
   today_sessions: number;
 };
 
+type CostForecast = {
+  predicted_month_total: number;
+  lower_bound: number;
+  upper_bound: number;
+  actual_to_date: number;
+  data_point_count: number;
+  current_day_of_month: number;
+  days_in_month: number;
+  is_reliable: boolean;
+};
+
 function Overview({
   scan,
   loading,
   paired,
+  alerts,
 }: {
   scan: ScanResult | null;
   loading: boolean;
   paired: boolean;
+  alerts: Alert[] | null;
 }) {
   const { t } = useTranslation();
   const today = useMemo(() => {
@@ -445,6 +458,23 @@ function Overview({
         </div>
       </section>
 
+      {/* v0.5.1 — Insights row: cost forecast + risk signals.
+          Mac sibling parity (CostForecastEngine + RiskSignalsList in
+          CLI Pulse Bar's OverviewTab.swift). 2-column at md:+ to
+          balance with the trend chart and not steal vertical real
+          estate from the existing tiles. Cards self-render their
+          own loading / error / empty states; a transient backend
+          failure on one card doesn't take down the rest of Overview
+          (Gemini 3.1 Pro v0.5.0 review: per-card error states are
+          a hard requirement). Hidden when not paired — both cards
+          need server data. */}
+      {paired && (
+        <section className="grid md:grid-cols-2 gap-4">
+          <CostForecastCard paired={paired} />
+          <RiskSignalsCard alerts={alerts} />
+        </section>
+      )}
+
       <section>
         <h2 className="text-sm font-semibold text-neutral-400 mb-2">{t("overview.trend_title")}</h2>
         <CostTrendChart scan={scan} />
@@ -457,6 +487,252 @@ function Overview({
         />
       </section>
     </div>
+  );
+}
+
+/// v0.5.1 — month-end cost forecast card. Wraps the v0.5.0
+/// `get_cost_forecast` Tauri command. Shows predicted total + 1-stddev
+/// bound range + reliability hint (or amber "need more data" when the
+/// `is_reliable` flag is false). Per-card error fallback is a
+/// minimal red-bordered hint — keeps the rest of Overview rendering
+/// even if Supabase is unreachable.
+function CostForecastCard({ paired }: { paired: boolean }) {
+  const { t } = useTranslation();
+  const [forecast, setForecast] = useState<CostForecast | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!paired) return;
+    let cancelled = false;
+    invoke<CostForecast | null>("get_cost_forecast")
+      .then((f) => {
+        if (cancelled) return;
+        setForecast(f);
+        setError(null);
+        setLoaded(true);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e));
+        setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [paired]);
+
+  return (
+    <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <h2 className="text-sm font-semibold text-neutral-400 mb-2">
+        {t("overview.forecast_title")}
+      </h2>
+      {!loaded && (
+        <div className="text-sm text-neutral-500">{t("misc.loading")}</div>
+      )}
+      {loaded && error && (
+        <div className="text-xs text-red-400/80">
+          {t("overview.forecast_failed")}
+        </div>
+      )}
+      {loaded && !error && !forecast && (
+        // Backend returned None (not paired or no daily-usage at all).
+        // Card is gated on `paired` already, so this only fires on the
+        // brand-new account / fresh-install case.
+        <div className="text-xs text-neutral-500">
+          {t("overview.forecast_no_data")}
+        </div>
+      )}
+      {loaded && !error && forecast && (
+        <>
+          <div className="text-2xl font-semibold tabular-nums">
+            {formatUSD(forecast.predicted_month_total)}
+          </div>
+          <div className="text-xs text-neutral-500 mt-0.5 tabular-nums">
+            {t("overview.forecast_bounds", {
+              lower: formatUSD(forecast.lower_bound),
+              upper: formatUSD(forecast.upper_bound),
+            })}
+          </div>
+          <div className="text-xs text-neutral-600 mt-1">
+            {forecast.is_reliable
+              ? t("overview.forecast_based_on", {
+                  count: forecast.data_point_count,
+                })
+              : t("overview.forecast_unreliable")}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/// v0.5.1 — risk signals card. Sources from `preview_alerts` (which
+/// the App-level state already fetches every 30 s from the Alerts
+/// tab path) — no new backend Tauri command. Renders top-3
+/// unresolved alerts as severity-iconed labels (Gemini 3.1 Pro
+/// v0.4.20 review's accessibility note: differentiate by ICON not
+/// just color).
+///
+/// Severity icons are Unicode glyphs rather than a new SVG / lucide
+/// dep — avoids ~10 KB of bundle for 3 symbols. Color mirrors Mac
+/// sibling RiskSignalsList styling (red / amber / blue per tier).
+///
+/// Empty state ("looking good") fires when the alerts array is
+/// non-null but length 0. Loading state fires when alerts is null
+/// (the first preview_alerts hasn't completed yet).
+function RiskSignalsCard({ alerts }: { alerts: Alert[] | null }) {
+  const { t } = useTranslation();
+  // v0.5.1 — sort by severity DESC before slicing (Gemini 3.1 Pro
+  // v0.5.1 review P1). Without this, an Info-heavy queue could
+  // bump a Critical alert out of the top 3 and the card would
+  // silently miss the very thing it's there to surface.
+  const ranked = alerts
+    ? [...alerts].sort(
+        (a, b) => severityRank(b.severity) - severityRank(a.severity),
+      )
+    : null;
+  const displayCount = 3;
+  const overflow = ranked ? Math.max(0, ranked.length - displayCount) : 0;
+
+  return (
+    <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <h2 className="text-sm font-semibold text-neutral-400 mb-2">
+        {t("overview.risk_signals_title")}
+      </h2>
+      {ranked === null ? (
+        <div className="text-sm text-neutral-500">{t("misc.loading")}</div>
+      ) : ranked.length === 0 ? (
+        <div className="flex items-center gap-2 text-sm text-emerald-400">
+          <SeverityIcon severity="Info" intent="ok" />
+          <span>{t("overview.risk_no_signals")}</span>
+        </div>
+      ) : (
+        <ul className="space-y-1.5 text-sm">
+          {ranked.slice(0, displayCount).map((a) => (
+            <li key={a.id} className="flex items-start gap-2">
+              <SeverityIcon severity={a.severity} />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate" title={a.title}>
+                  {a.title}
+                </div>
+                {a.related_project_name && (
+                  <div className="text-xs text-neutral-500 truncate">
+                    {a.related_project_name}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+          {overflow > 0 && (
+            <li className="text-xs text-neutral-600 pt-1">
+              {t("overview.risk_more_count", { count: overflow })}
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function severityRank(s: Alert["severity"]): number {
+  if (s === "Critical") return 3;
+  if (s === "Warning") return 2;
+  return 1; // Info
+}
+
+/// v0.5.1 — inline SVG icons for severity (Gemini 3.1 Pro v0.5.1
+/// review P1). Replaces Unicode glyphs (⛔/⚠/ℹ) which render as
+/// system emoji on Win+Linux and IGNORE CSS `color` (forced
+/// multicolor), defeating the accessibility-by-icon-PLUS-color
+/// design. SVG paths from lucide.dev (MIT) — `alert-octagon`,
+/// `alert-triangle`, `info`. No new dep; ~30 lines for 3 icons
+/// is cheaper than pulling the whole `lucide-react` package.
+///
+/// `intent` lets the empty-state ✓-style call site reuse the Info
+/// shape with green styling without conflating "informational
+/// alert" and "all clear."
+function SeverityIcon({
+  severity,
+  intent,
+}: {
+  severity: Alert["severity"];
+  intent?: "ok";
+}) {
+  const baseClass = "shrink-0 w-3.5 h-3.5 mt-0.5";
+  if (intent === "ok") {
+    // Check-circle for "looking good" empty state.
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`${baseClass} text-emerald-400`}
+        role="img"
+        aria-label="all clear"
+      >
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+        <polyline points="22 4 12 14.01 9 11.01" />
+      </svg>
+    );
+  }
+  if (severity === "Critical") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`${baseClass} text-red-400`}
+        role="img"
+        aria-label="critical"
+      >
+        <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    );
+  }
+  if (severity === "Warning") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`${baseClass} text-amber-400`}
+        role="img"
+        aria-label="warning"
+      >
+        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`${baseClass} text-blue-400`}
+      role="img"
+      aria-label="info"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
   );
 }
 

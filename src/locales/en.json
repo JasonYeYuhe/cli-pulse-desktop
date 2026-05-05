@@ -52,7 +52,17 @@
     "tile_today_sessions": "Today's sessions",
     "tile_active_sessions": "Active sessions",
     "tile_online_devices": "Online devices",
-    "tile_unresolved_alerts": "Unresolved alerts"
+    "tile_unresolved_alerts": "Unresolved alerts",
+    "forecast_title": "Predicted month-end cost",
+    "forecast_bounds": "{{lower}} – {{upper}} (±1σ)",
+    "forecast_based_on": "Based on {{count}} day of data",
+    "forecast_based_on_other": "Based on {{count}} days of data",
+    "forecast_unreliable": "Need at least 3 days of usage for a reliable forecast",
+    "forecast_failed": "Forecast unavailable — couldn't reach the server",
+    "forecast_no_data": "No usage yet this month",
+    "risk_signals_title": "Risk signals",
+    "risk_no_signals": "Looking good — no risk signals",
+    "risk_more_count": "+{{count}} more"
   },
   "providers": {
     "active_days_one": "{{count, number}} active day",

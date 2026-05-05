@@ -52,7 +52,16 @@
     "tile_today_sessions": "本日のセッション",
     "tile_active_sessions": "アクティブなセッション",
     "tile_online_devices": "オンラインデバイス",
-    "tile_unresolved_alerts": "未解決のアラート"
+    "tile_unresolved_alerts": "未解決のアラート",
+    "forecast_title": "月末予想費用",
+    "forecast_bounds": "{{lower}} – {{upper}}(±1σ)",
+    "forecast_based_on": "{{count}} 日分のデータに基づく",
+    "forecast_unreliable": "信頼できる予測には少なくとも 3 日分のデータが必要です",
+    "forecast_failed": "予測利用不可 — サーバーに接続できません",
+    "forecast_no_data": "今月の利用データがまだありません",
+    "risk_signals_title": "リスクシグナル",
+    "risk_no_signals": "良好です — リスクシグナルなし",
+    "risk_more_count": "他 {{count}} 件"
   },
   "providers": {
     "active_days_other": "{{count, number}} 日間アクティブ",

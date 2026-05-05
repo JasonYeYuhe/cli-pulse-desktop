@@ -102,6 +102,16 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "time.unit_min",
     "time.unit_hr",
     "time.unit_d",
+    // v0.5.1 — Overview Insights row: Forecast + Risk Signals cards.
+    "overview.forecast_title",
+    "overview.forecast_bounds",
+    "overview.forecast_based_on",
+    "overview.forecast_unreliable",
+    "overview.forecast_failed",
+    "overview.forecast_no_data",
+    "overview.risk_signals_title",
+    "overview.risk_no_signals",
+    "overview.risk_more_count",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

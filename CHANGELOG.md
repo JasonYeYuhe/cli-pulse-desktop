@@ -2,6 +2,67 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.1] — 2026-05-05
+
+Pure frontend ship. Surfaces the v0.5.0 cost-forecast backend in the
+UI and adds a risk-signals card next to it. No backend changes — both
+cards source from existing Tauri commands (`get_cost_forecast` from
+v0.5.0 and the existing `preview_alerts`).
+
+### Added
+- **CostForecastCard on Overview tab.** New 2-column "Insights" row
+  between the device-tiles section and the trend chart. The card
+  shows predicted month-end cost (large number), ±1σ bound range
+  (smaller), and either a "based on N days" hint when reliable OR an
+  amber "need at least 3 days for a reliable forecast" hint when not.
+  Self-renders error/loading/empty states — a Supabase outage on
+  this card doesn't take down the rest of Overview (Gemini 3.1 Pro
+  v0.5.0 review hard requirement).
+- **RiskSignalsCard on Overview tab.** Renders the top-3 unresolved
+  alerts from the existing `preview_alerts` payload (no new backend
+  command). Each row gets a severity-coded Unicode glyph: ⛔ red for
+  Critical, ⚠ amber for Warning, ℹ blue for Info. Per Gemini 3.1
+  Pro v0.4.20 review accessibility note: differentiate by ICON, not
+  just color. Empty state ("Looking good — no risk signals") fires
+  when alerts is `[]`. "+N more" footer when there are more than 3.
+
+### Changed
+- **Overview tab gets a 2-column "Insights" row** at md:+ breakpoint.
+  Single-column collapse below md (840 px main-window minWidth, so
+  small-screen users still see both cards stacked).
+
+### Notes
+- 13 new i18n keys across `overview.forecast_*` and `overview.risk_*`
+  in en / zh-CN / ja. i18n.test.ts critical-labels list pins all 9
+  keys against language drift.
+- Frontend bundle: 325.45 kB → 330.17 kB (+4.7 kB, +1.4 %). All from
+  the new component code; no new deps.
+- 229 tests green (175 backend, +0; 54 frontend, +0). New cards
+  rendered in real UI; component-level testing infrastructure
+  (@testing-library/react) deferred — VM verify covers visual
+  regressions.
+- Severity icons are inline SVG (paths from lucide.dev, MIT) rather
+  than Unicode glyphs OR lucide-react package. Gemini 3.1 Pro v0.5.1
+  review caught that Unicode emoji are forced multi-color on Win+
+  Linux (system emoji) and ignore CSS `color`, defeating the
+  red/amber/blue severity coding. Inline SVG is ~30 lines for 3
+  icons; cheaper than pulling lucide-react and gives full control.
+- Gemini also caught a P1: the original `alerts.slice(0, 3)` could
+  bump a Critical alert out of the visible top-3 if the queue was
+  Info-heavy. v0.5.1 sorts by severity DESC (Critical > Warning >
+  Info) before slicing so the most actionable signals always land
+  in the visible row.
+- Frontend bundle: 325.45 kB → 331.57 kB (+6.1 kB, +1.9 %). Most
+  from inline SVG icons + new component code; no new deps.
+
+### Deferred to v0.5.2
+- **TopProjectsCard.** Pre-flight schema dump confirmed
+  `daily_usage_metrics` has no `project` column — top-projects has
+  to come from the `sessions` table. That requires a new
+  PostgREST GET helper in `supabase.rs` and client-side
+  aggregation. Mixing that backend work into v0.5.1's pure-frontend
+  ship would dilute the split-by-Codex+Gemini-review-recommendation.
+
 ## [0.5.0] — 2026-05-05
 
 First parity sprint with the Mac sibling app. Two contained items;
