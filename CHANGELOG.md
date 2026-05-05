@@ -2,6 +2,106 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.6] — 2026-05-06
+
+Tray menu now shows live mini-metrics (month so far / forecast /
+synced-ago). Third and final ship of the post-parity polish trio.
+The v1 plan had a wrong cross-platform primitive for the live update;
+both Codex and Gemini 3.1 Pro flagged it independently.
+
+### Added
+- **Tray menu mini-metrics.** Right-click the tray icon (or
+  long-press on Linux AppIndicator) to see, between the existing
+  Open / Quit items: `Month so far: $X.XX`, `Forecast: $Y.YY`, and
+  `Synced N ago`. All three rows update live every 120 s without
+  the user having to re-open the menu. Pre-pairing or pre-first-sync
+  states show "Not signed in" / "Not synced yet" / "—" instead of
+  zeros.
+- **`force_tray_menu_refresh` Tauri command.** Frontend invokes this
+  with the freshly-translated tray copy whenever the user changes
+  app language in Settings — tray flips to the new language in the
+  same microtask cycle the visible UI does, instead of waiting up
+  to 120 s for the next refresh tick.
+- **Global `LAST_SUCCESSFUL_SYNC_AT` timestamp.** Updated at the
+  end of `perform_sync` (after BOTH `helper_sync` and
+  `helper_sync_daily_usage` returned ok), read by the tray to
+  compute the "Synced N ago" string. Putting it on the `perform_sync`
+  end-of-success branch (rather than after each sub-step) means we
+  never mark the tray "Synced 5s ago" when the daily-usage upload
+  silently errored.
+
+### Notes
+- **CRITICAL primitive choice (Codex P1 + Gemini P1, both reviewers
+  caught the same bug independently in the v1 plan).** The v1 plan
+  said `tray.set_menu(Some(rebuild()))` every 30 s. That's wrong on
+  both platforms: Tauri's Linux AppIndicator backend cannot
+  remove/replace menus once attached, and Win + Linux both dismiss
+  any open right-click context menu when `set_menu` is called. The
+  correct primitive is `MenuItem::set_text()` on stored handles —
+  which mutates in place without disturbing an open menu. v0.5.6
+  stores all 7 menu-item handles via `app.manage(TrayDynamicHandles)`
+  and the refresh loop calls `set_text` on each.
+- **CRITICAL cadence change (Codex P2): 120 s, not 30 s.** The v1
+  plan's 30 s tray-refresh would race the existing 30 s-TTL
+  `DASHBOARD_CACHE` (`lib.rs:573`). At 120 s, the tray naturally
+  reads cached values that the user-driven UI fetches populate;
+  cache miss == render `—` placeholder rather than triggering a
+  fresh network fetch. Tray NEVER mints a fresh JWT — that would
+  rotate the refresh token every 120 s even when the user isn't
+  using the dashboard.
+- **CRITICAL field choice (Gemini decision): month-so-far +
+  forecast, not today's cost.** "Today: $0.00" reads as broken to
+  individual developers whose per-day spend is fractions of a cent.
+  Month-to-date ($X.XX) + month-end forecast ($Y.YY) gives a real
+  signal-to-noise ratio. Both come from the existing
+  `cost_forecast::forecast_from_daily` helper — no new RPC.
+- **Reviewer P2 baked in: language desync (Gemini).** Without
+  pushing copy on language change, the tray would render in the
+  previous language for up to 120 s while the visible UI flipped
+  immediately. The frontend now invokes `force_tray_menu_refresh`
+  with localized tray copy in the same microtask cycle as
+  `setLang`, AND on initial mount so the detected app language
+  reaches the tray before the first refresh tick.
+- **Scope tightening (autonomy contract):** "Refresh now" tray menu
+  item dropped from v1 plan. Wiring it would need cross-module event
+  plumbing to drive the actual sync; the existing in-app
+  Settings → "Sync now" already covers that use case. Saves diff
+  surface area for the same user-visible utility.
+- **Post-implementation Gemini 3.1 Pro review caught 4 issues
+  pre-commit, all fixed:**
+  - **P1 (refresh loop wasn't stop-responsive):** the original
+    `interval.tick().await` inside the 120 s loop blocks for the
+    full interval without polling `stop`, delaying clean app
+    shutdown by up to 2 min. The 30 s warm-up loop had a 3 s
+    polling latency for the same reason. Fix: race both sleeps
+    against `poll_stop_signal` via `tokio::select!`, matching the
+    v0.4.23 `wait_for_next_tick` invariant — ~100 ms shutdown
+    latency end-to-end.
+  - **P1 (frontend `t` closure trap):** the `LanguageSection`
+    onChange handler called `pushTrayCopyFromI18n(t)` immediately
+    after `await setLang(code)`. But `t` is the closure-captured
+    value from the previous render, bound to the OLD language —
+    so the tray would receive previous-language strings. Fix:
+    move the push into an App-level `useEffect([i18n.language])`
+    that uses `i18n.t` (live translator) and fires AFTER the
+    React re-render commits in the new language.
+  - **P1 (App useEffect dep on `t` re-runs scans on language
+    change):** adding `t` to the main mount-effect's dep array
+    would re-trigger `runScan()` (an expensive filesystem walk)
+    + `refreshSessions()` + `refreshAlerts()` + the silent
+    update check on every language flip. Fix: split tray push
+    into its own `useEffect([i18n.language])` so only the tray
+    update happens, not the whole boot path.
+  - **P2 (dead code `current_copy`):** documented as "Used by the
+    120 s refresh loop" but actually never called — `apply_metrics`
+    locks the copy directly. Fix: removed.
+- 199 backend tests (+6: tray formatter pins for USD format,
+  unpaired states, synced-ago bucketing, repeated-placeholder
+  template, and CJK-template-grammatical-position). Frontend test
+  count unchanged; i18n.test.ts critical-labels list gains 9
+  `tray.*` keys so a translation drift on the destructive flow
+  can't silently send empty strings to Rust.
+
 ## [0.5.5] — 2026-05-06
 
 Activity Timeline chart on the Sessions tab. Second of the post-parity

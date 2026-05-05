@@ -273,5 +273,16 @@
     "unit_min": "{{count}} 分钟",
     "unit_hr": "{{count}} 小时",
     "unit_d": "{{count}} 天"
+  },
+  "tray": {
+    "header_label": "CLI Pulse",
+    "month_so_far_template": "本月累计:{value}",
+    "forecast_template": "预测月末:{value}",
+    "synced_ago_template": "{age}前同步",
+    "synced_never": "尚未同步",
+    "not_paired": "未登录",
+    "no_data": "—",
+    "open_label": "打开 CLI Pulse",
+    "quit_label": "退出"
   }
 }

@@ -40,6 +40,42 @@ const DEVICE_TYPE_WIN: &str = "Windows";
 const DEVICE_TYPE_LINUX: &str = "Linux";
 const DEVICE_TYPE_MAC: &str = "macOS";
 const SYNC_INTERVAL: Duration = Duration::from_secs(120);
+/// v0.5.6 — tray menu mini-metrics refresh cadence. Independent of
+/// `SYNC_INTERVAL` so future tuning to either doesn't accidentally
+/// couple them; both happen to be 120 s today which avoids racing
+/// the existing 30 s-TTL `DASHBOARD_CACHE`. Per Codex pre-
+/// implementation review: tray must NEVER force a fresh fetch — it
+/// reads cached values only, leaving the user-driven UI fetches in
+/// charge of cache population.
+const TRAY_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
+
+/// v0.5.6 — wall-clock timestamp of the most recent successful
+/// `background_tick` (or sync_now). The tray menu's "Synced N ago"
+/// row reads this to compute the relative age. Updated in
+/// `perform_sync` on the success path; never decremented or reset
+/// (a sync can only be more recent than its previous value).
+static LAST_SUCCESSFUL_SYNC_AT: Lazy<std::sync::Mutex<Option<chrono::DateTime<chrono::Utc>>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
+
+fn record_successful_sync() {
+    if let Ok(mut g) = LAST_SUCCESSFUL_SYNC_AT.lock() {
+        *g = Some(chrono::Utc::now());
+    }
+}
+
+fn last_successful_sync_seconds_ago() -> Option<u64> {
+    let g = LAST_SUCCESSFUL_SYNC_AT.lock().ok()?;
+    let ts = (*g)?;
+    let elapsed = chrono::Utc::now().signed_duration_since(ts);
+    let secs = elapsed.num_seconds();
+    if secs < 0 {
+        // Clock skew — shouldn't happen, but if it does treat as
+        // "just synced" rather than panicking.
+        Some(0)
+    } else {
+        Some(secs as u64)
+    }
+}
 
 fn device_type() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -1258,6 +1294,13 @@ async fn perform_sync(app: tauri::AppHandle) -> Result<SyncReport, String> {
         }
     };
 
+    // v0.5.6 — record success timestamp here, AFTER all the sync
+    // sub-steps (helper_sync + helper_sync_daily_usage) returned ok.
+    // Updating from the sub-step success branches would mark the
+    // whole sync "successful" even when one sub-step silently
+    // errored.
+    record_successful_sync();
+
     Ok(SyncReport {
         sessions_synced: hs.sessions_synced,
         alerts_synced: hs.alerts_synced,
@@ -1681,6 +1724,151 @@ async fn background_tick(app: &tauri::AppHandle) -> Result<Option<SyncReport>, S
 }
 
 // ------------------------------------------------------------------------
+// v0.5.6 — Tray mini-metrics refresh.
+//
+// Builds `TrayMetrics` from the existing 30 s-TTL `DASHBOARD_CACHE`
+// (lib.rs:573) plus the in-process `LAST_SUCCESSFUL_SYNC_AT` global.
+// Per Codex pre-implementation review: the tray reads cached values
+// only — never triggers a fresh network fetch. Cache miss == render
+// `None` for that field; the next user-driven UI fetch will populate
+// the cache and the next tray tick (or force-refresh) picks it up.
+// This sidesteps the v0.5.6 P2 cache-race concern entirely: if a
+// real user fetch is mid-flight, the tray waits for the next tick
+// rather than racing for the same data.
+// ------------------------------------------------------------------------
+
+fn collect_tray_metrics() -> tray::TrayMetrics {
+    let cfg = match config::load() {
+        Ok(Some(cfg)) => cfg,
+        _ => {
+            return tray::TrayMetrics {
+                paired: false,
+                ..Default::default()
+            };
+        }
+    };
+
+    // Read cached daily_usage; on miss, all derived fields stay None
+    // and the tray renders the "—" placeholder. Per Codex P2: do NOT
+    // call `with_user_jwt` from the tray path — that would mint a
+    // fresh JWT every 120 s (rotating the refresh token unnecessarily)
+    // even when the user isn't actively viewing the dashboard.
+    let daily = cache_get_daily_usage(&cfg.user_id);
+    let today = chrono::Local::now().date_naive();
+    let (month_so_far, forecast_total) = match daily.as_deref() {
+        Some(rows) => {
+            let forecast = cost_forecast::forecast_from_daily(rows, today);
+            match forecast {
+                Some(f) => (Some(f.actual_to_date), Some(f.predicted_month_total)),
+                None => (None, None),
+            }
+        }
+        None => (None, None),
+    };
+
+    tray::TrayMetrics {
+        month_so_far_usd: month_so_far,
+        forecast_usd: forecast_total,
+        synced_seconds_ago: last_successful_sync_seconds_ago(),
+        paired: true,
+    }
+}
+
+/// Tauri command — re-render the tray menu now, optionally with new
+/// localized copy. The frontend's language-change handler invokes
+/// this with the freshly-translated strings so the tray flips
+/// immediately instead of waiting up to 120 s for the next refresh
+/// loop tick (Gemini 3.1 Pro pre-implementation P2 on language
+/// desync).
+///
+/// Calling without `copy` (e.g. from a manual "tray-refresh-clicked"
+/// handler) just re-applies metrics with the currently-stored copy.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrayCopyPayload {
+    header_label: String,
+    month_so_far_template: String,
+    forecast_template: String,
+    synced_ago_template: String,
+    synced_never: String,
+    not_paired: String,
+    no_data: String,
+    open_label: String,
+    quit_label: String,
+}
+
+impl From<TrayCopyPayload> for tray::TrayCopy {
+    fn from(p: TrayCopyPayload) -> Self {
+        Self {
+            header_label: p.header_label,
+            month_so_far_template: p.month_so_far_template,
+            forecast_template: p.forecast_template,
+            synced_ago_template: p.synced_ago_template,
+            synced_never: p.synced_never,
+            not_paired: p.not_paired,
+            no_data: p.no_data,
+            open_label: p.open_label,
+            quit_label: p.quit_label,
+        }
+    }
+}
+
+#[tauri::command]
+fn force_tray_menu_refresh(
+    app: tauri::AppHandle,
+    copy: Option<TrayCopyPayload>,
+) -> Result<(), String> {
+    if let Some(c) = copy {
+        tray::set_copy(&app, c.into());
+    }
+    tray::apply_metrics(&app, &collect_tray_metrics());
+    Ok(())
+}
+
+/// 120 s loop that re-renders the tray menu's three dynamic rows
+/// from cached data. Stop-responsive — both the 30 s warm-up AND
+/// every 120 s tick race their sleep against `poll_stop_signal`,
+/// so a shutdown raised mid-sleep is observed within ~100 ms
+/// (matches the v0.4.23 `wait_for_next_tick` invariant for the
+/// main sync loop). Per Gemini 3.1 Pro v0.5.6 P1: the original
+/// `interval.tick().await` would block up to 120 s without
+/// observing `stop`, delaying clean app shutdown by up to 2 min.
+fn spawn_tray_refresh_loop(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
+    async_runtime::spawn(async move {
+        log::info!(
+            "Tray refresh loop started — first tick in 30s, then every {}s",
+            TRAY_REFRESH_INTERVAL.as_secs()
+        );
+        // First tick after 30 s — long enough for the initial
+        // `background_tick` (T+20s) to populate the cache so the
+        // first tray render shows real values, not placeholders.
+        // Race the sleep against `poll_stop_signal` so a shutdown
+        // during the warm-up exits within ~100 ms instead of
+        // waiting out the full 30 s.
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+            _ = poll_stop_signal(&stop) => return,
+        }
+
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            tray::apply_metrics(&app, &collect_tray_metrics());
+            // Stop-responsive sleep at the tick cadence. Bare
+            // `tokio::time::interval(...).tick().await` would block
+            // the full 120 s without polling `stop` — race against
+            // the stop poller for the same ~100 ms shutdown
+            // latency the main sync loop guarantees.
+            tokio::select! {
+                _ = tokio::time::sleep(TRAY_REFRESH_INTERVAL) => {}
+                _ = poll_stop_signal(&stop) => return,
+            }
+        }
+    });
+}
+
+// ------------------------------------------------------------------------
 // Tauri entry
 // ------------------------------------------------------------------------
 
@@ -1772,8 +1960,20 @@ pub fn run() {
             // System tray — Windows first-class, Linux works with AppIndicator
             // when libayatana-appindicator3 is installed, otherwise we log and
             // continue window-first.
-            if let Err(e) = tray::install(app.handle()) {
-                log::warn!("tray init failed (continuing without tray): {e}");
+            //
+            // v0.5.6 — tray now shows live mini-metrics (month so far +
+            // forecast + synced-ago). We start the refresh loop only on
+            // successful tray install: a Linux user without
+            // libayatana-appindicator3 sees no tray at all (per the
+            // module-level comment), and there's nothing for the loop
+            // to mutate.
+            match tray::install(app.handle()) {
+                Ok(()) => {
+                    spawn_tray_refresh_loop(app.handle().clone(), stop_bg.clone());
+                }
+                Err(e) => {
+                    log::warn!("tray init failed (continuing without tray): {e}");
+                }
             }
             Ok(())
         })
@@ -1817,6 +2017,8 @@ pub fn run() {
             delete_account_and_unpair,
             // v0.5.5 — Activity Timeline data source (sessions table 24h history)
             get_sessions_history,
+            // v0.5.6 — Tray mini-metrics force-refresh (language change path)
+            force_tray_menu_refresh,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

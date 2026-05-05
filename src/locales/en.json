@@ -277,5 +277,16 @@
     "unit_min": "{{count}} min",
     "unit_hr": "{{count}} hr",
     "unit_d": "{{count}} d"
+  },
+  "tray": {
+    "header_label": "CLI Pulse",
+    "month_so_far_template": "Month so far: {value}",
+    "forecast_template": "Forecast: {value}",
+    "synced_ago_template": "Synced {age} ago",
+    "synced_never": "Not synced yet",
+    "not_paired": "Not signed in",
+    "no_data": "—",
+    "open_label": "Open CLI Pulse",
+    "quit_label": "Quit"
   }
 }

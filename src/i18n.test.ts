@@ -159,6 +159,20 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "sessions.timeline_other_lane",
     "sessions.timeline_x_now",
     "sessions.timeline_x_now_minus",
+    // v0.5.6 — Tray mini-metrics. The frontend pushes these to Rust
+    // via `force_tray_menu_refresh` so the tray menu re-renders in
+    // the user's app language. A missing key would silently send an
+    // empty string to Rust → blank tray menu items at the next
+    // language change. Pin every key.
+    "tray.header_label",
+    "tray.month_so_far_template",
+    "tray.forecast_template",
+    "tray.synced_ago_template",
+    "tray.synced_never",
+    "tray.not_paired",
+    "tray.no_data",
+    "tray.open_label",
+    "tray.quit_label",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

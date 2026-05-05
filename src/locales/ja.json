@@ -273,5 +273,16 @@
     "unit_min": "{{count}} 分",
     "unit_hr": "{{count}} 時間",
     "unit_d": "{{count}} 日"
+  },
+  "tray": {
+    "header_label": "CLI Pulse",
+    "month_so_far_template": "今月累計:{value}",
+    "forecast_template": "月末予測:{value}",
+    "synced_ago_template": "{age}前に同期",
+    "synced_never": "未同期",
+    "not_paired": "未サインイン",
+    "no_data": "—",
+    "open_label": "CLI Pulse を開く",
+    "quit_label": "終了"
   }
 }

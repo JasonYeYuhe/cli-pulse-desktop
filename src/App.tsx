@@ -112,7 +112,7 @@ type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const tabs: { key: TabKey; label: string }[] = [
     { key: "overview", label: t("tab.overview") },
     { key: "providers", label: t("tab.providers") },
@@ -219,6 +219,26 @@ export default function App() {
       }
     })();
   }, [refreshConfig, runScan, refreshSessions, refreshAlerts]);
+
+  // v0.5.6 — push localized tray copy on initial mount AND every
+  // language change. Isolated into its own useEffect (NOT bundled
+  // with the main mount effect above) so changing language doesn't
+  // re-trigger expensive scans / sessions polls / update checks.
+  // Per Gemini 3.1 Pro v0.5.6 P1: adding `t` to the main effect's
+  // deps would cause `runScan()` to fire on every language flip.
+  //
+  // Reads `i18n.t` (the live translator) rather than the closure-
+  // captured `t` from useTranslation, because the closure-captured
+  // value is bound to the language active at the previous render.
+  // After `setLang`, the new render's `t` resolves to the new
+  // language — but we want the push to happen as soon as i18next
+  // has switched resources, even before the React tree re-renders.
+  // Using `i18n.t` directly resolves against the current i18next
+  // language at call time, regardless of which render owns the
+  // useEffect.
+  useEffect(() => {
+    pushTrayCopyFromI18n((key) => i18n.t(key));
+  }, [i18n.language, i18n]);
 
   // v0.5.3 — runs the full check+download+install flow. Idempotent:
   // calling twice while a download is in flight is a no-op (reducer
@@ -3055,9 +3075,51 @@ function AboutSection({ paired }: { paired: boolean }) {
   );
 }
 
+// v0.5.6 — push fully-localized tray copy to the backend so the
+// tray menu re-renders in the user's chosen app language without
+// waiting for the next 120s refresh-loop tick. Called from:
+//   1. The LanguageSection's onChange handler (after setLang)
+//   2. App-level mount, once at startup (so the tray reflects the
+//      detected language even before the user touches the
+//      switcher)
+//
+// Failure is non-fatal: tray.install() may have failed (Linux
+// without libayatana-appindicator3) and there's nothing to update,
+// in which case force_tray_menu_refresh is a no-op on the backend
+// side. Any other error gets swallowed via .catch — a tray
+// out-of-sync isn't worth crashing the UI flow.
+function pushTrayCopyFromI18n(t: (key: string) => string): Promise<void> {
+  return invoke<void>("force_tray_menu_refresh", {
+    copy: {
+      headerLabel: t("tray.header_label"),
+      monthSoFarTemplate: t("tray.month_so_far_template"),
+      forecastTemplate: t("tray.forecast_template"),
+      syncedAgoTemplate: t("tray.synced_ago_template"),
+      syncedNever: t("tray.synced_never"),
+      notPaired: t("tray.not_paired"),
+      noData: t("tray.no_data"),
+      openLabel: t("tray.open_label"),
+      quitLabel: t("tray.quit_label"),
+    },
+  }).catch((e: any) => {
+    // Tray install may have failed on this platform; not fatal.
+    console.debug("force_tray_menu_refresh failed (non-fatal):", e);
+  });
+}
+
 function LanguageSection() {
   const { t, i18n } = useTranslation();
   const current = (i18n.language || "en") as LangCode;
+  // We don't need a per-section tray push here anymore — the
+  // App-level `useEffect([i18n.language])` watches i18next's
+  // language directly and re-pushes whenever it changes, so all
+  // setLang() invocations (this dropdown, future programmatic
+  // calls, etc.) flow through the single effect. Per Gemini
+  // 3.1 Pro v0.5.6 P1: a per-handler push using the closure-
+  // captured `t` would resolve against the OLD language because
+  // React hasn't re-rendered yet at the moment `await setLang`
+  // returns. The useEffect path uses `i18n.t` (live translator)
+  // and fires after the re-render commits, sidestepping the issue.
   return (
     <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
       <h2 className="text-sm font-semibold text-neutral-300 mb-2">{t("settings.language_heading")}</h2>
