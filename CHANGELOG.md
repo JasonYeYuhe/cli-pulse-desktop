@@ -2,6 +2,106 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.5] — 2026-05-06
+
+Activity Timeline chart on the Sessions tab. Second of the post-parity
+polish trio (v0.5.4–v0.5.6). The v1 plan would have shipped a chart
+drawing the wrong dataset — Codex review caught the data-source
+mismatch pre-implementation.
+
+### Added
+- **`ActivityTimelineChart` on Sessions tab.** Horizontal SVG of the
+  last 24 hours of session activity, split across 6 provider lanes
+  (Claude / Codex / Cursor / Copilot / Gemini / OpenRouter) plus a 7th
+  "Other" lane for unrecognized providers. Each row in the `sessions`
+  table renders as a colored bar from `started_at` to
+  `last_active_at`, color-keyed by provider. Hover-tooltip shows
+  project + cost + request count. Clipping at the left edge for
+  sessions that started before the window. Empty / loading / error /
+  stale-data states each render distinct copy — no false-positive
+  silence (v0.5.3 RiskSignalsCard pattern).
+- **`get_sessions_history` Tauri command + `supabase::SessionHistoryRow`
+  + `supabase::get_sessions_history` PostgREST GET.** Fetches up to
+  1 000 sessions for the last N hours (clamped 1..168) from the
+  `sessions` table, RLS-scoped to the authenticated user. New struct
+  carries the timeline-specific fields the v0.5.2 `SessionRow` doesn't
+  expose (`id`, `provider`, `started_at`).
+
+### Fixed
+- **Plan-level: data-source mismatch (Codex P1 caught
+  pre-implementation).** The v1 plan named `list_sessions` (the
+  current-process Tauri command) as the chart's data source. That
+  command returns this device's running CLI processes, truncated to
+  12 most-active (`sessions.rs:282-318`). It is NOT a 24-hour history,
+  not cross-device, and never includes finished sessions. v0.5.5 ships
+  with the corrected data source: a direct PostgREST GET against the
+  cross-device `sessions` table — the same pattern v0.5.2 introduced
+  for TopProjects.
+
+### Notes
+- **Reviewer P2 baked in: memo key (Gemini).** The v1 plan's React
+  memo key was `sessions.length + sessions[0]?.last_active_at`. That
+  triggers recompute only when sessions are added OR when the first
+  (sort-key-top) session updates. Updates to non-first sessions
+  silently miss the recompute, leaving the chart visibly stale during
+  active multi-session use. v0.5.5 uses the full join
+  `sessions.map(s => `${s.id}-${s.last_active_at}`).join(',')` —
+  O(n) per cycle but n ≤ 1 000 (server cap), so free in practice.
+- **Reviewer decision baked in: lane height (Gemini).** The v1 plan
+  was 240px chart split into 40px per lane × 6 lanes. v0.5.5 ships
+  24px per lane × 7 lanes (≈168px total) — fits the desktop's
+  visual density and stops empty lanes from feeling like a layout
+  bug.
+- **Post-implementation Gemini 3.1 Pro review caught 4 issues
+  pre-commit, all fixed:**
+  - **P1 (Date.now() trap in useMemo):** the layout `useMemo` was
+    keyed only on `memoKey` (sessions row IDs + last_active_at). On
+    polling cycles where the row set was unchanged, the memo
+    wouldn't re-run and `Date.now()` would stay frozen at the last
+    row-set update, leaving the bars visibly stationary even
+    though the header read "refreshed N seconds ago". Fix: tie
+    the memo to `state.fetchedAt.getTime()` so layout invalidates
+    once per poll regardless of row contents.
+  - **P1 (SVG Z-order contradicted comment intent):** the
+    `supabase.rs` comment claimed "newest sessions render on top";
+    SVG paint order is first-child-bottom / last-child-top. The
+    PostgREST GET returns `started_at.desc` (newest first), so
+    React mapped them into the DOM first → newest rendered AT THE
+    BOTTOM, hidden behind older overlapping bars. Fix: reverse the
+    iteration order client-side so newest sessions become the last
+    children.
+  - **P2 (keyboard accessibility):** `<rect>` elements don't
+    natively receive keyboard focus, so the hover-only tooltip was
+    unreachable for keyboard-only / screen-reader users. Fix:
+    `tabIndex={0}` + `onFocus` / `onBlur` mirroring
+    `onMouseEnter` / `onMouseLeave`, plus `role="button"` and an
+    `aria-label` on each bar so screen readers announce the
+    tooltip content directly.
+  - **P2 (tooltip dangling-newline):** template-string
+    concatenation of optional cost / requests fields produced
+    `"Claude · my-project\n · 5 req"` (with a blank cost line) when
+    cost was null but requests wasn't. Fix: build the detail array
+    of present segments and `.join(' · ')` only when non-empty,
+    so a missing field is genuinely missing instead of leaving a
+    formatting hole.
+- **Polling cadence: 30 s.** Independent from the parent Sessions
+  tab's 10 s local-process snapshot poll — the chart's data source
+  is server-side and only changes when each device's
+  `helper_sync` fires (every 2 min), so 30 s is plenty fresh.
+  Stale-data hint surfaces if the poll fails on top of
+  previously-fetched data (v0.5.3 RiskSignalsCard pattern).
+- **Chart layout is pure CSS-friendly SVG, no chart library.**
+  Bundle stays at 105 KB gzip (was 103 KB pre-v0.5.5) — no new
+  dependencies. Per Codex review of v0.5.5: SVG-vs-Canvas wasn't
+  the real concern; data-source mismatch was. SVG fine for n ≤
+  1 000 bars, which the LIMIT enforces.
+- 189 backend tests (+2 SessionHistoryRow round-trip incl.
+  null-project / null-cost edge cases). Frontend test count
+  unchanged (timeline visual rendering is covered by VM verify,
+  not unit-mocked); 14 new keys added to `i18n.test.ts`
+  critical-labels list (provider lane labels + every
+  timeline_* state copy).
+
 ## [0.5.4] — 2026-05-06
 
 Settings → Danger Zone: clear local caches + delete cloud account.

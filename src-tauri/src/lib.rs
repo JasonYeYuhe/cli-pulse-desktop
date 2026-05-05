@@ -810,6 +810,38 @@ async fn get_server_alerts() -> Result<Vec<supabase::ServerAlert>, String> {
     .await
 }
 
+/// v0.5.5 — Activity Timeline data source. Returns session rows from
+/// the `sessions` table (cross-device historical view, RLS-scoped to
+/// this user) for the last `hours` hours, capped at 1 000 rows.
+///
+/// Why not `list_sessions`: that command is a current-process snapshot
+/// of THIS device's running CLI processes (sessions.rs:282-318),
+/// truncated to 12 most-active. The Activity Timeline needs the
+/// cross-device 24h history view, which lives only in the database.
+/// Codex pre-implementation review caught this — the v1 plan would
+/// have shipped a chart drawing the wrong dataset.
+///
+/// Returns `Ok(vec![])` for unpaired users (matches v0.5.2 / v0.5.3
+/// convention — the chart hides on the no-paired state). Network /
+/// auth errors propagate as `Err` so the chart can render a distinct
+/// failure state.
+#[tauri::command]
+async fn get_sessions_history(
+    hours: Option<u32>,
+) -> Result<Vec<supabase::SessionHistoryRow>, String> {
+    let hours = hours.unwrap_or(24).clamp(1, 168); // 1h..1w
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    let user_id = cfg.user_id.clone();
+    let since = chrono::Utc::now() - chrono::Duration::hours(hours as i64);
+    with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::get_sessions_history(&user_id, since, &jwt).await }
+    })
+    .await
+}
+
 /// v0.5.2 — top-projects aggregation. See `top_projects.rs` for
 /// the algorithm; this command pulls the underlying `sessions`
 /// rows for the past `days` days and returns the top-N rolled-up
@@ -1783,6 +1815,8 @@ pub fn run() {
             // v0.5.4 — Settings → Danger Zone (clear caches + delete account)
             clear_local_caches,
             delete_account_and_unpair,
+            // v0.5.5 — Activity Timeline data source (sessions table 24h history)
+            get_sessions_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

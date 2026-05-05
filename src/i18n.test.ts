@@ -138,6 +138,27 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.danger.delete_account_processing",
     "settings.danger.delete_phrase",
     "settings.danger.action_failed",
+    // v0.5.5 — Activity Timeline chart on Sessions tab. Provider
+    // labels are pinned (an empty string would render as a blank
+    // lane label that looks like a layout bug); empty / failed /
+    // stale states share the v0.5.3 RiskSignalsCard pattern of
+    // "every distinct state must have its own copy" so the user
+    // never wonders whether a blank chart means "no activity" or
+    // "fetch failed".
+    "providers.claude_label",
+    "providers.codex_label",
+    "providers.cursor_label",
+    "providers.copilot_label",
+    "providers.gemini_label",
+    "providers.openrouter_label",
+    "sessions.timeline_title",
+    "sessions.timeline_loading",
+    "sessions.timeline_empty",
+    "sessions.timeline_failed",
+    "sessions.timeline_stale",
+    "sessions.timeline_other_lane",
+    "sessions.timeline_x_now",
+    "sessions.timeline_x_now_minus",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

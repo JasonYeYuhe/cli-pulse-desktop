@@ -71,6 +71,12 @@
     "top_projects_failed": "Couldn't load top projects"
   },
   "providers": {
+    "claude_label": "Claude",
+    "codex_label": "Codex",
+    "cursor_label": "Cursor",
+    "copilot_label": "Copilot",
+    "gemini_label": "Gemini",
+    "openrouter_label": "OpenRouter",
     "active_days_one": "{{count, number}} active day",
     "active_days_other": "{{count, number}} active days",
     "messages_one": "{{count, number}} msg",
@@ -109,7 +115,17 @@
     "col_confidence": "Confidence",
     "confidence_high": "high",
     "confidence_medium": "medium",
-    "confidence_low": "low"
+    "confidence_low": "low",
+    "timeline_title": "Last 24 hours — across all your devices",
+    "timeline_aria": "24-hour activity timeline by provider lane",
+    "timeline_loading": "Loading timeline…",
+    "timeline_empty": "No sessions in the last 24 hours.",
+    "timeline_failed": "Couldn't load timeline: {{error}}",
+    "timeline_stale": "↻ Showing previous data — last refresh failed: {{error}}",
+    "timeline_last_refresh": "refreshed {{time}}",
+    "timeline_other_lane": "Other",
+    "timeline_x_now": "now",
+    "timeline_x_now_minus": "−{{hours}}h"
   },
   "alerts": {
     "nothing": "Nothing pressing — no active alerts.",

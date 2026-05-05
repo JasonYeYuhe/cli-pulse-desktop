@@ -70,6 +70,12 @@
     "top_projects_failed": "无法加载项目列表"
   },
   "providers": {
+    "claude_label": "Claude",
+    "codex_label": "Codex",
+    "cursor_label": "Cursor",
+    "copilot_label": "Copilot",
+    "gemini_label": "Gemini",
+    "openrouter_label": "OpenRouter",
     "active_days_other": "{{count, number}} 天活跃",
     "messages_other": "{{count, number}} 条消息",
     "models_other": "{{count}} 个模型",
@@ -105,7 +111,17 @@
     "col_confidence": "置信度",
     "confidence_high": "高",
     "confidence_medium": "中",
-    "confidence_low": "低"
+    "confidence_low": "低",
+    "timeline_title": "近 24 小时 — 跨所有设备",
+    "timeline_aria": "按服务商泳道分布的 24 小时活动时间轴",
+    "timeline_loading": "加载时间轴中…",
+    "timeline_empty": "近 24 小时无会话记录。",
+    "timeline_failed": "无法加载时间轴:{{error}}",
+    "timeline_stale": "↻ 显示之前的数据 — 上次刷新失败:{{error}}",
+    "timeline_last_refresh": "刷新于 {{time}}",
+    "timeline_other_lane": "其他",
+    "timeline_x_now": "现在",
+    "timeline_x_now_minus": "−{{hours}}小时"
   },
   "alerts": {
     "nothing": "没什么紧急的 —— 无活跃通知。",

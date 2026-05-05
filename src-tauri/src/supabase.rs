@@ -510,6 +510,94 @@ pub async fn get_sessions_since(
 }
 
 // ========================================================================
+// sessions history (v0.5.5) — direct PostgREST GET for the Activity
+// Timeline chart on the Sessions tab.
+// ========================================================================
+//
+// The v1 plan got the data source wrong: `list_sessions` (the Tauri
+// command at lib.rs:115) is a current-process snapshot of THIS device,
+// truncated to 12 most-active processes (sessions.rs:311). It is NOT a
+// 24h history. The Codex pre-implementation review caught this — the
+// Activity Timeline needs the cross-device historical view, which lives
+// only in the `sessions` table.
+//
+// `SessionRow` (used by the v0.5.2 TopProjects card) selects only the
+// fields needed for cost aggregation: project, estimated_cost,
+// requests, last_active_at, total_usage. The chart needs ALSO:
+// `started_at` (for the bar's left edge), `provider` (for the lane),
+// and `id` (for the React memo key — using id+last_active_at avoids
+// the v1 plan's leaky `sessions.length + sessions[0]?.last_active_at`
+// memo key that misses non-first session updates, per Gemini P2).
+//
+// This is a separate struct rather than extending `SessionRow` because
+// the TopProjects path already ships and doesn't need these extra
+// fields — keeping the wire shapes minimal helps the 5 000-row
+// PostgREST limit cover more sessions.
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SessionHistoryRow {
+    pub id: String,
+    pub provider: String,
+    pub project: Option<String>,
+    pub started_at: String,
+    pub last_active_at: String,
+    #[serde(default)]
+    pub estimated_cost: Option<f64>,
+    #[serde(default)]
+    pub total_usage: Option<i64>,
+    #[serde(default)]
+    pub requests: Option<i64>,
+}
+
+/// Fetch session rows for the Activity Timeline. RLS-filtered to this
+/// user, server-side filter `last_active_at >= since`. Ordered by
+/// `started_at.desc` so the most-recent sessions render on top of
+/// older bars when stacking inside a provider lane (Z-order = recency
+/// — usually the most useful for a quick scan).
+///
+/// LIMIT 1000 covers a 24h window for any realistic user — the
+/// pathological case is one session per minute = 1 440 sessions per
+/// day, which is well above what any real CLI workflow produces. If
+/// the limit kicks in, the chart still renders; it just clips the
+/// oldest bars (the user sees `+N more` overflow indicator at the
+/// left edge).
+pub async fn get_sessions_history(
+    user_id: &str,
+    since: chrono::DateTime<chrono::Utc>,
+    user_jwt: &str,
+) -> SupabaseResult<Vec<SessionHistoryRow>> {
+    const LIMIT: u32 = 1000;
+    let url = format!("{}/rest/v1/sessions", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .get(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .query(&[
+            ("user_id", format!("eq.{user_id}")),
+            ("last_active_at", format!("gte.{}", since.to_rfc3339())),
+            (
+                "select",
+                "id,provider,project,started_at,last_active_at,estimated_cost,total_usage,requests"
+                    .to_string(),
+            ),
+            ("order", "started_at.desc".to_string()),
+            ("limit", LIMIT.to_string()),
+        ])
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await?;
+    if !(200..300).contains(&status) {
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
+// ========================================================================
 // alerts table — direct PostgREST GET (v0.5.3)
 // ========================================================================
 //
@@ -690,5 +778,58 @@ mod tests {
             }
             _ => panic!("expected SupabaseError::Rpc"),
         }
+    }
+
+    // v0.5.5 — SessionHistoryRow deserialization. The PostgREST GET
+    // response is a JSON array of session rows; we pin the parse
+    // contract for the timeline-specific fields. Drift in the
+    // server-side `sessions` table column types (e.g. `started_at`
+    // becoming a non-string ISO format) would silently break the
+    // chart rendering — this test catches it at unit-time, not VM-
+    // verify-time.
+
+    #[test]
+    fn session_history_row_round_trips() {
+        let body = json!([{
+            "id": "proc-12345",
+            "provider": "claude",
+            "project": "my-project",
+            "started_at": "2026-05-06T00:00:00+00:00",
+            "last_active_at": "2026-05-06T00:30:00+00:00",
+            "estimated_cost": 0.42,
+            "total_usage": 12345,
+            "requests": 7
+        }]);
+        let rows: Vec<SessionHistoryRow> = serde_json::from_value(body).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "proc-12345");
+        assert_eq!(rows[0].provider, "claude");
+        assert_eq!(rows[0].project.as_deref(), Some("my-project"));
+        assert_eq!(rows[0].estimated_cost, Some(0.42));
+    }
+
+    #[test]
+    fn session_history_row_handles_null_project_and_cost() {
+        // Sessions can have null project (helper-launched, root on
+        // Linux) and null estimated_cost (cost not yet rolled up by
+        // the server). Both must deserialize cleanly — the chart's
+        // tooltip handles the null values explicitly. v0.5.2 hit
+        // this same edge case for TopProjects; pin it here too so
+        // a future column rename doesn't silently break.
+        let body = json!([{
+            "id": "proc-67890",
+            "provider": "openrouter",
+            "project": null,
+            "started_at": "2026-05-06T00:00:00+00:00",
+            "last_active_at": "2026-05-06T00:05:00+00:00",
+            "estimated_cost": null,
+            "total_usage": null,
+            "requests": null
+        }]);
+        let rows: Vec<SessionHistoryRow> = serde_json::from_value(body).unwrap();
+        assert_eq!(rows[0].project, None);
+        assert_eq!(rows[0].estimated_cost, None);
+        assert_eq!(rows[0].total_usage, None);
+        assert_eq!(rows[0].requests, None);
     }
 }

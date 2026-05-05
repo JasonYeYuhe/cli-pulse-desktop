@@ -3276,6 +3276,368 @@ function UpdaterPanel({
   }
 }
 
+// v0.5.5 — Activity Timeline chart. Renders a 24h horizontal bar
+// chart of session activity by provider lane, sourced from the
+// `sessions` table via `get_sessions_history`. Cross-device view
+// (NOT the local-process snapshot the row table below shows).
+//
+// Plan/review highlights baked in:
+//   - DATA SOURCE FIX (Codex P1): use `sessions` table, NOT
+//     `list_sessions`. The latter is a current-process snapshot of
+//     this device, capped at 12 most-active processes; would render
+//     a chart that looks plausible but draws the wrong dataset.
+//   - LANE HEIGHT (Gemini decision): 24px per lane × 6 providers
+//     ≈ 144px total. The v1 plan's 240px / 40px-per-lane was too
+//     chunky for desktop and made empty lanes feel like "broken
+//     layout" to the user.
+//   - MEMO KEY (Gemini P2): use the full join of
+//     `${id}-${last_active_at}` across all sessions, NOT the v1
+//     plan's `length + sessions[0]?.last_active_at`. The latter
+//     only catches additions and updates to the FIRST session;
+//     non-first session edits would silently miss the recompute.
+//
+// The 6 lane order (top-to-bottom) is: Claude / Codex / Cursor /
+// Copilot / Gemini / OpenRouter. Sessions whose `provider` doesn't
+// match any known lane fall into a 7th "Other" lane at the bottom.
+type SessionHistoryRow = {
+  id: string;
+  provider: string;
+  project: string | null;
+  started_at: string;
+  last_active_at: string;
+  estimated_cost: number | null;
+  total_usage: number | null;
+  requests: number | null;
+};
+
+const TIMELINE_LANES = [
+  { provider: "claude", labelKey: "providers.claude_label", color: "#d97706" }, // amber
+  { provider: "codex", labelKey: "providers.codex_label", color: "#10b981" }, // emerald
+  { provider: "cursor", labelKey: "providers.cursor_label", color: "#06b6d4" }, // cyan
+  { provider: "copilot", labelKey: "providers.copilot_label", color: "#8b5cf6" }, // violet
+  { provider: "gemini", labelKey: "providers.gemini_label", color: "#3b82f6" }, // blue
+  {
+    provider: "openrouter",
+    labelKey: "providers.openrouter_label",
+    color: "#ec4899",
+  }, // pink
+] as const;
+
+const TIMELINE_OTHER_COLOR = "#737373"; // neutral-500
+const TIMELINE_LANE_HEIGHT = 24;
+const TIMELINE_LABEL_WIDTH = 80;
+const TIMELINE_TICK_HEIGHT = 16;
+const TIMELINE_HOURS = 24;
+const TIMELINE_POLL_MS = 30_000;
+
+type TimelineState =
+  | { kind: "loading" }
+  | { kind: "loaded"; rows: SessionHistoryRow[]; fetchedAt: Date }
+  | { kind: "stale"; rows: SessionHistoryRow[]; fetchedAt: Date; error: string }
+  | { kind: "empty" }
+  | { kind: "error"; error: string };
+
+function ActivityTimelineChart() {
+  const { t } = useTranslation();
+  const [state, setState] = useState<TimelineState>({ kind: "loading" });
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const rows = await invoke<SessionHistoryRow[]>("get_sessions_history", {
+        hours: TIMELINE_HOURS,
+      });
+      if (rows.length === 0) {
+        setState({ kind: "empty" });
+      } else {
+        setState({ kind: "loaded", rows, fetchedAt: new Date() });
+      }
+    } catch (e: any) {
+      const msg = String(e);
+      // Stale-data hint: if a previous fetch succeeded and this one
+      // failed, keep showing the old data with a banner. Per the
+      // v0.5.3 RiskSignalsCard pattern: fully clearing to error wipes
+      // useful context the user already had.
+      setState((cur) => {
+        if (cur.kind === "loaded" || cur.kind === "stale") {
+          return {
+            kind: "stale",
+            rows: cur.rows,
+            fetchedAt: cur.fetchedAt,
+            error: msg,
+          };
+        }
+        return { kind: "error", error: msg };
+      });
+    }
+  }, []);
+
+  // Initial fetch + 30s poll while mounted. The poll cadence is
+  // separate from the parent's 10s local-process snapshot — this
+  // chart's data source is server-side and only changes on each
+  // device's helper_sync (every 2 min), so 30s is plenty fresh.
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, TIMELINE_POLL_MS);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  // Stable rows reference for the memo key. v0.5.5 reviewer P2 fix:
+  // using `length + first.last_active_at` misses non-first updates;
+  // using the full join is O(n) per cycle but n ≤ 1000 (server cap)
+  // so it's free in practice.
+  const rows = state.kind === "loaded" || state.kind === "stale" ? state.rows : [];
+  const memoKey = useMemo(
+    () => rows.map((r) => `${r.id}-${r.last_active_at}`).join(","),
+    [rows]
+  );
+
+  // Time anchor for the chart's "now" — must change every poll cycle
+  // even when the row set is unchanged, otherwise the bars freeze in
+  // place and stop sliding left as time advances. Per Gemini 3.1 Pro
+  // v0.5.5 P1: `Date.now()` inside `useMemo` keyed only on `memoKey`
+  // would trap the time evaluation from the last row-set update; an
+  // idle stretch with no new sessions would make the chart visibly
+  // stale even though the header reads "refreshed 30 s ago." Tying
+  // the memo to fetchedAt invalidates it once per poll regardless of
+  // row contents.
+  const fetchedAtMs =
+    state.kind === "loaded" || state.kind === "stale"
+      ? state.fetchedAt.getTime()
+      : 0;
+
+  // Compute layout once per (memoKey, fetchedAt). Each row becomes a
+  // horizontal bar in its provider's lane; x position from started_at,
+  // width from (last_active_at - started_at). Sessions older than the
+  // window are clipped at the left edge; sessions whose started_at
+  // falls before the window but last_active_at is inside (the user
+  // had a session running across the window boundary) get rendered
+  // from the left edge to last_active_at.
+  //
+  // Z-order intent: SVG paints in document order (first child is
+  // bottom, last child is top). The PostgREST GET returns
+  // `started_at.desc` (newest first); we reverse here so newest bars
+  // render LAST → end up on top of overlapping older bars when
+  // multiple sessions share a lane during the same minute. Per Gemini
+  // 3.1 Pro v0.5.5 P1: without the reverse, newest bars would be
+  // hidden behind older ones (the comment in supabase.rs claimed
+  // intent was already met but the SVG paint order contradicted it).
+  const layout = useMemo(() => {
+    const now = fetchedAtMs > 0 ? fetchedAtMs : Date.now();
+    const windowStart = now - TIMELINE_HOURS * 3600 * 1000;
+    const allLanes = [
+      ...TIMELINE_LANES.map((l) => l.provider as string),
+      "other",
+    ];
+    const bars: Array<{
+      row: SessionHistoryRow;
+      laneIndex: number;
+      laneLabel: string;
+      x: number;
+      width: number;
+      color: string;
+      clippedAtStart: boolean;
+    }> = [];
+    // Iterate oldest-first so the array's tail (newest) renders on
+    // top in SVG paint order — fixes the v0.5.5 P1 Z-order intent.
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      const startedMs = Date.parse(row.started_at);
+      const lastMs = Date.parse(row.last_active_at);
+      if (Number.isNaN(startedMs) || Number.isNaN(lastMs)) continue;
+      if (lastMs < windowStart) continue; // entirely before the window
+      const laneIdx = TIMELINE_LANES.findIndex(
+        (l) => l.provider === row.provider.toLowerCase()
+      );
+      const laneIndex = laneIdx === -1 ? TIMELINE_LANES.length : laneIdx;
+      const color =
+        laneIdx === -1 ? TIMELINE_OTHER_COLOR : TIMELINE_LANES[laneIdx].color;
+      const effectiveStart = Math.max(startedMs, windowStart);
+      const xRatio = (effectiveStart - windowStart) / (TIMELINE_HOURS * 3600 * 1000);
+      const widthRatio =
+        Math.max(lastMs - effectiveStart, 60_000) / (TIMELINE_HOURS * 3600 * 1000);
+      bars.push({
+        row,
+        laneIndex,
+        laneLabel: allLanes[laneIndex],
+        x: xRatio,
+        width: widthRatio,
+        color,
+        clippedAtStart: startedMs < windowStart,
+      });
+    }
+    return bars;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memoKey, fetchedAtMs]);
+
+  const totalLanes = TIMELINE_LANES.length + 1; // +1 for "other"
+  const chartHeight = totalLanes * TIMELINE_LANE_HEIGHT + TIMELINE_TICK_HEIGHT;
+
+  return (
+    <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-neutral-300">
+          {t("sessions.timeline_title")}
+        </h3>
+        {(state.kind === "loaded" || state.kind === "stale") && (
+          <span className="text-xs text-neutral-500">
+            {t("sessions.timeline_last_refresh", {
+              time: state.fetchedAt.toLocaleTimeString(),
+            })}
+          </span>
+        )}
+      </div>
+      {state.kind === "stale" && (
+        <div className="text-xs text-amber-400">
+          {t("sessions.timeline_stale", { error: state.error })}
+        </div>
+      )}
+      {state.kind === "loading" && (
+        <div className="text-xs text-neutral-500 italic">
+          {t("sessions.timeline_loading")}
+        </div>
+      )}
+      {state.kind === "empty" && (
+        <div className="text-xs text-neutral-500 italic py-4 text-center">
+          {t("sessions.timeline_empty")}
+        </div>
+      )}
+      {state.kind === "error" && (
+        <div className="text-xs text-red-400">
+          {t("sessions.timeline_failed", { error: state.error })}
+        </div>
+      )}
+      {(state.kind === "loaded" || state.kind === "stale") && (
+        <div className="relative">
+          <svg
+            viewBox={`0 0 1000 ${chartHeight}`}
+            preserveAspectRatio="none"
+            className="w-full"
+            style={{ height: chartHeight, display: "block" }}
+            role="img"
+            aria-label={t("sessions.timeline_aria")}
+          >
+            {/* Provider-lane backgrounds + labels */}
+            {[...TIMELINE_LANES, null].map((lane, i) => (
+              <g key={i}>
+                <rect
+                  x={TIMELINE_LABEL_WIDTH}
+                  y={i * TIMELINE_LANE_HEIGHT}
+                  width={1000 - TIMELINE_LABEL_WIDTH}
+                  height={TIMELINE_LANE_HEIGHT}
+                  fill={i % 2 === 0 ? "#0a0a0a" : "#171717"}
+                />
+                <text
+                  x={TIMELINE_LABEL_WIDTH - 6}
+                  y={i * TIMELINE_LANE_HEIGHT + TIMELINE_LANE_HEIGHT / 2 + 4}
+                  fill="#a3a3a3"
+                  fontSize="10"
+                  textAnchor="end"
+                  fontFamily="ui-sans-serif, system-ui, sans-serif"
+                >
+                  {lane
+                    ? t(lane.labelKey, { defaultValue: lane.provider })
+                    : t("sessions.timeline_other_lane")}
+                </text>
+              </g>
+            ))}
+            {/* Hour ticks every 4h */}
+            {[0, 4, 8, 12, 16, 20, 24].map((h) => {
+              const x = TIMELINE_LABEL_WIDTH + ((1000 - TIMELINE_LABEL_WIDTH) * h) / 24;
+              const tickY = totalLanes * TIMELINE_LANE_HEIGHT;
+              return (
+                <g key={h}>
+                  <line
+                    x1={x}
+                    y1={0}
+                    x2={x}
+                    y2={tickY}
+                    stroke="#262626"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={x}
+                    y={tickY + 12}
+                    fill="#737373"
+                    fontSize="9"
+                    textAnchor="middle"
+                    fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  >
+                    {h === 0
+                      ? t("sessions.timeline_x_now_minus", { hours: 24 })
+                      : h === 24
+                        ? t("sessions.timeline_x_now")
+                        : t("sessions.timeline_x_now_minus", { hours: 24 - h })}
+                  </text>
+                </g>
+              );
+            })}
+            {/* Session bars. v0.5.5 reviewer P2 fixes:
+                - tabIndex + onFocus/onBlur for keyboard / screen-reader
+                  accessibility. <rect> doesn't natively receive focus,
+                  so a keyboard-only user can't trigger the tooltip
+                  without these (Gemini 3.1 Pro P2).
+                - Tooltip text built from filtered segments instead of
+                  template-string concatenation. Avoids the dangling
+                  newline + bullet when one of the optional fields is
+                  null but a later one isn't (Gemini P2 — would render
+                  e.g. "Claude · my-project\n · 5 req" with the empty
+                  cost line preserved). */}
+            {layout.map((bar, i) => {
+              const x =
+                TIMELINE_LABEL_WIDTH + (1000 - TIMELINE_LABEL_WIDTH) * bar.x;
+              const w = Math.max(
+                3,
+                (1000 - TIMELINE_LABEL_WIDTH) * bar.width
+              );
+              const y = bar.laneIndex * TIMELINE_LANE_HEIGHT + 4;
+              const h = TIMELINE_LANE_HEIGHT - 8;
+              const hovered = hoveredId === bar.row.id;
+              const projectLabel =
+                bar.row.project ?? t("overview.top_projects_unknown");
+              const detailParts: string[] = [];
+              if (bar.row.estimated_cost != null) {
+                detailParts.push(`cost: $${bar.row.estimated_cost.toFixed(4)}`);
+              }
+              if (bar.row.requests != null) {
+                detailParts.push(`${bar.row.requests} req`);
+              }
+              const tooltip =
+                detailParts.length > 0
+                  ? `${bar.row.provider} · ${projectLabel}\n${detailParts.join(" · ")}`
+                  : `${bar.row.provider} · ${projectLabel}`;
+              return (
+                <rect
+                  key={`${bar.row.id}-${i}`}
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={h}
+                  rx={2}
+                  fill={bar.color}
+                  fillOpacity={hovered ? 1 : 0.75}
+                  stroke={hovered ? "#fff" : "transparent"}
+                  strokeWidth={hovered ? 1 : 0}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={tooltip}
+                  onMouseEnter={() => setHoveredId(bar.row.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onFocus={() => setHoveredId(bar.row.id)}
+                  onBlur={() => setHoveredId(null)}
+                  style={{ cursor: "pointer", outline: "none" }}
+                >
+                  <title>{tooltip}</title>
+                </rect>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Sessions({
   snapshot,
   loading,
@@ -3311,6 +3673,13 @@ function Sessions({
           {loading ? t("action.refreshing") : t("action.refresh_now")}
         </button>
       </div>
+
+      {/* v0.5.5 — Activity Timeline. Cross-device 24h history view from
+          the `sessions` table (NOT the local-process snapshot above,
+          which is this device's currently-running processes only —
+          see lib.rs::get_sessions_history). Self-managing polling at
+          30s cadence; renders its own loading/error/empty states. */}
+      <ActivityTimelineChart />
 
       {sessions.length === 0 ? (
         <div className="text-sm text-neutral-500 italic py-10 text-center">

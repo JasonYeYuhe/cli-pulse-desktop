@@ -70,6 +70,12 @@
     "top_projects_failed": "プロジェクトリストを読み込めませんでした"
   },
   "providers": {
+    "claude_label": "Claude",
+    "codex_label": "Codex",
+    "cursor_label": "Cursor",
+    "copilot_label": "Copilot",
+    "gemini_label": "Gemini",
+    "openrouter_label": "OpenRouter",
     "active_days_other": "{{count, number}} 日間アクティブ",
     "messages_other": "{{count, number}} メッセージ",
     "models_other": "{{count}} モデル",
@@ -105,7 +111,17 @@
     "col_confidence": "信頼度",
     "confidence_high": "高",
     "confidence_medium": "中",
-    "confidence_low": "低"
+    "confidence_low": "低",
+    "timeline_title": "過去 24 時間 — すべてのデバイス",
+    "timeline_aria": "プロバイダー別レーンによる 24 時間アクティビティ タイムライン",
+    "timeline_loading": "タイムラインを読み込み中…",
+    "timeline_empty": "過去 24 時間のセッション記録はありません。",
+    "timeline_failed": "タイムラインを読み込めませんでした:{{error}}",
+    "timeline_stale": "↻ 以前のデータを表示しています — 直近の更新失敗:{{error}}",
+    "timeline_last_refresh": "更新 {{time}}",
+    "timeline_other_lane": "その他",
+    "timeline_x_now": "現在",
+    "timeline_x_now_minus": "−{{hours}}時間"
   },
   "alerts": {
     "nothing": "特に問題ありません — アクティブな通知はありません。",
