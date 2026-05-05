@@ -2,6 +2,67 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.0] — 2026-05-05
+
+First parity sprint with the Mac sibling app. Two contained items;
+the Overview UI restructure that uses these will land in v0.5.1.
+
+### Added
+- **Cost forecast backend.** New `cost_forecast` Rust module ports
+  Mac's `CostForecastEngine.swift` (v1.12.0 / iter21). Linear
+  regression on per-day cost summed across providers/models, with
+  blended simple-average projection (regression weight scales
+  `n/14` capped at 0.8). Returns predicted month-end total, 1-stddev
+  bound range, actual-to-date, and an `is_reliable` flag (true when
+  `data_point_count >= 3 AND actual_to_date > 0`). New Tauri
+  command `get_cost_forecast`. Frontend integration deferred to
+  v0.5.1 alongside the Overview restructure. Preserves Mac's
+  iter21 last-day-of-month hotfix (Sentry 7450581409): on day N of
+  N-day month, the regression-extrapolation path is skipped so
+  empty `(day+1)..=days` ranges don't fall through. 9 new backend
+  tests pin algorithm parity against fixture inputs (uniform days,
+  growing trend, last-day, lower-bound clamp, two-point unreliable,
+  zero-data-unreliable, multi-provider aggregation).
+
+### Fixed
+- **zh-CN / ja synced-ago line: localized time units.**
+  v0.4.22 hardcoded English `"s" / "min" / "hr" / "d"` into the
+  rendered string, so the per-provider "synced X ago" line read as
+  `"6 s前同步"` in Chinese — the trailing English `s` directly
+  before CJK characters reads as visually empty. v0.4.23 VM verify
+  flagged this. v0.5.0 splits `formatRelativeShort` into
+  `formatRelativeShortParts(updated_at): {value, unit} | null` and
+  has the Providers card compose via i18n: `time.unit_s` / `_min` /
+  `_hr` / `_d` keys at the top level of each locale. zh-CN now
+  renders 秒 / 分钟 / 小时 / 天; ja renders 秒 / 分 / 時間 / 日;
+  en stays s / min / hr / d. The legacy `formatRelativeShort` is
+  kept as the English-only debug helper for tests and unparseable-
+  passthrough behavior.
+
+### Notes
+- Local-only changes — no backend schema changes, no new RPCs.
+  Pre-flight inspection of `dashboard_summary` via Supabase MCP
+  (project `gkjwsxotmwrgqsvfijzs`) confirmed it returns ONLY
+  `today_usage / today_cost / active_sessions / online_devices /
+  unresolved_alerts / today_sessions` — no `risk_signals`,
+  `top_projects`, or `yield_score`. v0.5.1 will source those from
+  the existing `sessions` and `alerts` tables client-side.
+- 229 tests green (175 backend, +8 forecast; 54 frontend, +4
+  formatRelativeShortParts).
+- Gemini 3.1 Pro v0.5.0 review gave a clean bill of health on
+  algorithm fidelity (blend weighting `n/14` capped at 0.8,
+  Bessel-corrected std-dev, iter21 last-day guard, lower-bound
+  clamp at actual_to_date) and on the formatRelativeShortParts
+  null-return semantic. One refactor suggestion adopted: extracted
+  shared `ensure_daily_usage(user_id, days)` helper from
+  `get_daily_usage` + `get_cost_forecast` — closes a small race
+  window if both Tauri commands fire simultaneously and both
+  miss cache.
+- Out of scope this sprint (deferred): yield-score card (depends on
+  git-attribution infrastructure that desktop doesn't have); PDF
+  export; activity timeline; demo mode. See
+  `PROJECT_DEV_PLAN_2026-05-05_desktop_mac_parity_v2.md`.
+
 ## [0.4.23] — 2026-05-05
 
 ### Fixed

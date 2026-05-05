@@ -219,5 +219,11 @@
     "none": "—",
     "loading": "Loading…",
     "scanning_hint": "Scanning ~/.claude and ~/.codex for the past 30 days…"
+  },
+  "time": {
+    "unit_s": "{{count}} s",
+    "unit_min": "{{count}} min",
+    "unit_hr": "{{count}} hr",
+    "unit_d": "{{count}} d"
   }
 }

@@ -8,6 +8,7 @@ pub mod alerts;
 pub mod auth;
 pub mod cache;
 pub mod config;
+pub mod cost_forecast;
 pub mod creds;
 pub mod keychain;
 pub mod notify;
@@ -748,6 +749,26 @@ async fn get_provider_summary() -> Result<Vec<supabase::ProviderSummaryRow>, Str
     Ok(v)
 }
 
+/// v0.5.0 — shared cache-aware fetch for `daily_usage`. Both
+/// `get_daily_usage` (the Tauri command, called by Overview's
+/// trend chart) and `get_cost_forecast` (the v0.5.0 forecast
+/// Tauri command) share this path. Per Gemini 3.1 Pro v0.5.0
+/// review: extracting avoids a small race window where two
+/// Tauri commands firing simultaneously both miss cache and
+/// fetch in parallel. With the helper, the second caller still
+/// races but reads its own value into cache idempotently.
+async fn ensure_daily_usage(
+    user_id: &str,
+    days: u32,
+) -> Result<Vec<supabase::DailyUsageRow>, String> {
+    if let Some(cached) = cache_get_daily_usage(user_id) {
+        return Ok(cached);
+    }
+    let v = with_user_jwt(|jwt| async move { supabase::get_daily_usage(days, &jwt).await }).await?;
+    cache_put_daily_usage(user_id, v.clone());
+    Ok(v)
+}
+
 #[tauri::command]
 async fn get_daily_usage(days: Option<u32>) -> Result<Vec<supabase::DailyUsageRow>, String> {
     let days = days.unwrap_or(30).clamp(1, 90);
@@ -757,12 +778,28 @@ async fn get_daily_usage(days: Option<u32>) -> Result<Vec<supabase::DailyUsageRo
     // Cache scoped per (user, days) — for v0.3.4 we only call with days=30
     // from the UI, so keying on user_id alone is sufficient. If we add
     // multiple windows later, extend the cache key.
-    if let Some(cached) = cache_get_daily_usage(&cfg.user_id) {
-        return Ok(cached);
-    }
-    let v = with_user_jwt(|jwt| async move { supabase::get_daily_usage(days, &jwt).await }).await?;
-    cache_put_daily_usage(&cfg.user_id, v.clone());
-    Ok(v)
+    ensure_daily_usage(&cfg.user_id, days).await
+}
+
+/// v0.5.0 — month-end cost forecast (Mac sibling parity port of
+/// `CostForecastEngine.swift`). Reads the same `daily_usage` rows
+/// that power Overview's trend chart, runs linear regression on
+/// per-day cost summed across providers/models, and returns a
+/// predicted month-end total with 1-stddev bounds.
+///
+/// Returns `Ok(None)` only when the user isn't paired (no JWT, no
+/// daily-usage data to forecast from). When paired but with zero
+/// usage, returns `Ok(Some(forecast))` with `is_reliable: false` and
+/// zero values — UI shows an "not enough data yet" hint rather than
+/// a blank card.
+#[tauri::command]
+async fn get_cost_forecast() -> Result<Option<cost_forecast::CostForecast>, String> {
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let daily = ensure_daily_usage(&cfg.user_id, 30).await?;
+    let today = chrono::Local::now().date_naive();
+    Ok(cost_forecast::forecast_from_daily(&daily, today))
 }
 
 // v0.4.6 — Settings UI for provider credentials. Backend lives in
@@ -1581,6 +1618,8 @@ pub fn run() {
             get_last_collector_status,
             // v0.4.22 — Settings → About diagnostic Sentry-ingestion test
             emit_test_sentry_event,
+            // v0.5.0 — month-end cost forecast (Mac sibling parity)
+            get_cost_forecast,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

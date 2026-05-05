@@ -100,29 +100,57 @@ export function formatRelativeMinutes(updated_at: string): string {
 }
 
 /**
- * Render a sub-minute relative-time string suitable for the per-provider
- * "synced X ago" line on the Providers tab. Where `formatRelativeMinutes`
- * collapses everything under 1 min to "<1 min" (fine for the stale
- * tooltip — anything under 6 min is not stale anyway), this helper
- * keeps second-level resolution because the Providers card updates as
- * recently as ~2 s after a manual click and "<1 min" reads as
- * unhelpfully stale-looking right after a fresh sync.
+ * Sub-minute relative-time short unit returned by
+ * `formatRelativeShortParts`. Callers translate via i18n keys
+ * `time.unit_s` / `time.unit_min` / `time.unit_hr` / `time.unit_d`
+ * so zh-CN renders 秒 / 分钟 / 小时 / 天 (per v0.4.23 VM L10n
+ * finding) and ja renders 秒 / 分 / 時間 / 日.
+ */
+export type RelativeUnit = "s" | "min" | "hr" | "d";
+
+/**
+ * Decompose `updated_at` into a `{value, unit}` pair for i18n
+ * composition. Sub-minute resolution (the "synced X ago" line on
+ * the Providers tab updates as recently as ~2 s after a manual
+ * click; collapsing to "<1 min" reads as unhelpfully stale-looking
+ * right after a fresh sync — that's why the v0.4.22 line uses a
+ * separate helper from `formatRelativeMinutes`).
  *
- * Output shape: "12 s" / "45 s" / "3 min" / "2 hr" / "5 d". Returns
- * the raw input verbatim for unparseable timestamps. Negative deltas
- * (clock skew between client and server, or a provider_summary row
- * with a future-dated `updated_at`) collapse to "0 s" — defensive,
- * users see "synced 0 s ago" rather than "-3 s".
+ * Returns `null` for unparseable timestamps. Callers should hide
+ * the relative-time line entirely on null (vs. rendering a
+ * "synced [bad-string] ago" leaked-data look).
+ *
+ * Negative deltas (server clock skew or a future-dated row) clamp
+ * to `value: 0, unit: "s"` so users see "synced 0 s ago" rather
+ * than "-3 s".
+ */
+export function formatRelativeShortParts(
+  updated_at: string,
+): { value: number; unit: RelativeUnit } | null {
+  const t = Date.parse(updated_at);
+  if (Number.isNaN(t)) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (seconds < 60) return { value: seconds, unit: "s" };
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return { value: minutes, unit: "min" };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { value: hours, unit: "hr" };
+  return { value: Math.floor(hours / 24), unit: "d" };
+}
+
+/**
+ * English-only short relative-time string. Kept for the
+ * unparseable-passthrough behavior that pre-existed
+ * `formatRelativeShortParts`, plus tests / debug helpers that
+ * don't have an i18n context. UI code should use
+ * `formatRelativeShortParts` + `t("time.unit_<unit>", {count})`
+ * instead.
+ *
+ * Output shape: "12 s" / "45 s" / "3 min" / "2 hr" / "5 d".
+ * Returns the raw input verbatim for unparseable timestamps.
  */
 export function formatRelativeShort(updated_at: string): string {
-  const t = Date.parse(updated_at);
-  if (Number.isNaN(t)) return updated_at;
-  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (seconds < 60) return `${seconds} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr`;
-  const days = Math.floor(hours / 24);
-  return `${days} d`;
+  const parts = formatRelativeShortParts(updated_at);
+  if (!parts) return updated_at;
+  return `${parts.value} ${parts.unit}`;
 }

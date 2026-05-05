@@ -93,6 +93,15 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // v0.4.22 — per-provider "synced X ago" line on Providers tab.
     "providers.synced_ago",
     "providers.synced_ago_tooltip",
+    // v0.5.0 — localized time-unit short forms used by the
+    // synced-ago line. Replaces the v0.4.22 hardcoded English
+    // "s/min/hr/d" that VM caught reading as visually-empty in
+    // zh-CN before CJK characters. Top-level so other features
+    // (cost forecast last-updated, sessions list etc.) can reuse.
+    "time.unit_s",
+    "time.unit_min",
+    "time.unit_hr",
+    "time.unit_d",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

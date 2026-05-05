@@ -216,5 +216,11 @@
     "none": "—",
     "loading": "読み込み中…",
     "scanning_hint": "~/.claude と ~/.codex の直近 30 日間をスキャン中…"
+  },
+  "time": {
+    "unit_s": "{{count}} 秒",
+    "unit_min": "{{count}} 分",
+    "unit_hr": "{{count}} 時間",
+    "unit_d": "{{count}} 日"
   }
 }

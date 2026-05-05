@@ -4,6 +4,7 @@ import {
   formatInt,
   formatRelativeMinutes,
   formatRelativeShort,
+  formatRelativeShortParts,
   formatUSD,
   isStaleProviderRow,
   rowsToCsv,
@@ -265,5 +266,66 @@ describe("formatRelativeShort", () => {
 
   it("returns the raw input verbatim for unparseable timestamps", () => {
     expect(formatRelativeShort("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("formatRelativeShortParts", () => {
+  // v0.5.0 — split decomposition that lets the React caller
+  // localize the unit via i18n (`time.unit_<u>` keys). Replaces
+  // direct use of `formatRelativeShort` in App.tsx, which baked
+  // the English unit into the displayed string and read as
+  // visually empty in zh-CN — flagged by v0.4.23 VM verify.
+  const NOW = Date.parse("2026-05-04T12:00:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns seconds for 0-59 s", () => {
+    expect(formatRelativeShortParts(new Date(NOW - 0).toISOString())).toEqual({
+      value: 0,
+      unit: "s",
+    });
+    expect(formatRelativeShortParts(new Date(NOW - 12_000).toISOString())).toEqual({
+      value: 12,
+      unit: "s",
+    });
+    expect(formatRelativeShortParts(new Date(NOW - 59_000).toISOString())).toEqual({
+      value: 59,
+      unit: "s",
+    });
+  });
+
+  it("returns minutes / hours / days at the right boundaries", () => {
+    expect(formatRelativeShortParts(new Date(NOW - 60_000).toISOString())).toEqual({
+      value: 1,
+      unit: "min",
+    });
+    expect(formatRelativeShortParts(new Date(NOW - 60 * 60_000).toISOString())).toEqual({
+      value: 1,
+      unit: "hr",
+    });
+    expect(
+      formatRelativeShortParts(new Date(NOW - 24 * 60 * 60_000).toISOString()),
+    ).toEqual({ value: 1, unit: "d" });
+  });
+
+  it("clamps negative deltas (clock skew) to {value: 0, unit: 's'}", () => {
+    expect(formatRelativeShortParts(new Date(NOW + 5_000).toISOString())).toEqual({
+      value: 0,
+      unit: "s",
+    });
+  });
+
+  it("returns null for unparseable timestamps", () => {
+    // Caller hides the relative-time line on null rather than
+    // displaying "synced bad-string ago".
+    expect(formatRelativeShortParts("not-a-date")).toBeNull();
+    expect(formatRelativeShortParts("")).toBeNull();
   });
 });

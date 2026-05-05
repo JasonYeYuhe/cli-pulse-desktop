@@ -216,5 +216,11 @@
     "none": "—",
     "loading": "加载中…",
     "scanning_hint": "正在扫描 ~/.claude 和 ~/.codex 近 30 天数据…"
+  },
+  "time": {
+    "unit_s": "{{count}} 秒",
+    "unit_min": "{{count}} 分钟",
+    "unit_hr": "{{count}} 小时",
+    "unit_d": "{{count}} 天"
   }
 }

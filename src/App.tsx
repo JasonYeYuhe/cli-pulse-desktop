@@ -8,7 +8,7 @@ import {
   formatInt,
   formatUSD,
   formatRelativeMinutes,
-  formatRelativeShort,
+  formatRelativeShortParts,
   isStaleProviderRow,
   rowsToCsv,
 } from "./lib/format";
@@ -980,18 +980,29 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                         sync activity, not just absence-of-error. The
                         polling effect refreshes serverRows every 30 s
                         so this naturally re-renders. Hidden when
-                        updated_at is missing (freshly paired user
-                        with no quota row yet). */}
-                    {srv?.updated_at && (
-                      <span
-                        className="text-[10px] text-neutral-500 tabular-nums"
-                        title={t("providers.synced_ago_tooltip")}
-                      >
-                        {t("providers.synced_ago", {
-                          age: formatRelativeShort(srv.updated_at),
-                        })}
-                      </span>
-                    )}
+                        updated_at is missing or unparseable.
+                        v0.5.0 — unit localized via `time.unit_<u>`
+                        keys (was hardcoded English "s/min/hr/d";
+                        v0.4.23 VM caught zh-CN reading the bare "s"
+                        as visually empty before CJK chars). */}
+                    {(() => {
+                      const parts = srv?.updated_at
+                        ? formatRelativeShortParts(srv.updated_at)
+                        : null;
+                      if (!parts) return null;
+                      return (
+                        <span
+                          className="text-[10px] text-neutral-500 tabular-nums"
+                          title={t("providers.synced_ago_tooltip")}
+                        >
+                          {t("providers.synced_ago", {
+                            age: t(`time.unit_${parts.unit}`, {
+                              count: parts.value,
+                            }),
+                          })}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="text-xs text-neutral-500">
                     {/* v0.4.8 — when server-only provider has no local
