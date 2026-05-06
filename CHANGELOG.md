@@ -2,6 +2,140 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.6.0] — 2026-05-06
+
+**New feature.** First Windows-side participation in the Remote
+Approvals / Remote Sessions feature the macOS team shipped on
+2026-04-29 (v1.11.0/44 — Phase 1) and 2026-05-03 (Phase 2 iter1).
+Backend (Supabase) is fully live: 5 `remote_*` tables, 6 app RPCs,
+server-side gate at `user_settings.remote_control_enabled`. The
+macOS team explicitly stubbed `helper/transports/conpty.py` waiting
+for "the cli-pulse-desktop track"; v0.6.0 starts filling that in
+with the **app-side view + decide** slice. Hook emission, ConPTY
+managed-session host, and Send / Stop / Interrupt commands ship in
+later slices (v0.6.1, v0.7.0, v0.8.0 — see
+`PROJECT_DEV_PLAN_2026-05-06_v0.6.0_remote_approvals_view.md`).
+
+### Added
+- **Settings → Privacy section** with a Remote Control toggle.
+  Default OFF (matches Mac). First-enable shows a consent dialog
+  with three privacy-posture bullets (server-side gate, no
+  transcript / token / path uploads, high-risk fail-closed). Match
+  Mac's full-consent UX — feature whose purpose IS privacy must
+  use a deliberate confirmation surface, not a one-click switch
+  (Gemini 3.1 Pro v0.6.0 review Q3).
+- **Header pending-approvals badge.** Renders only when Remote
+  Control is on AND there's at least one pending request from any
+  of the user's paired devices. Click opens the approvals sheet.
+- **`RemoteApprovalsSheet` component.** Modal overlay listing
+  pending requests across all paired devices (Mac, future Windows-
+  helper, etc). Each row shows device name, provider, tool name,
+  summary, age, and a risk pill. **High-risk Approve is disabled
+  in the UI AND in the backend** — the `decide_remote_approval`
+  Tauri command re-fetches the pending list and refuses if
+  `risk === "high"` (defense-in-depth, Gemini v0.6.0 review P1).
+  Risk colors: neutral grey for low, amber for medium, red for
+  high (NOT green for low — Gemini Q4: green reads as "approved"
+  rather than "low risk").
+- **Sessions tab → "Active managed sessions" read-only preview.**
+  Cross-device view of pending+running managed sessions sourced
+  from `remote_app_list_sessions` (Phase 2 iter1 RPC). v0.6.0 is
+  read-only with a clear "Read-only preview" label so users don't
+  expect Send/Stop yet — those ship in v0.6.1.
+- **5 new Tauri commands** wrapping the existing live app RPCs:
+  `get_remote_pending_approvals` / `decide_remote_approval` /
+  `list_remote_sessions` / `get_remote_control_setting` /
+  `set_remote_control_setting`. All unpaired-state-safe (return
+  `Ok(empty)` / `Ok(false)` when not paired). Decide passes
+  `decided_by_device_id = cfg.device_id` for the audit log.
+
+### Notes
+- **Reviewer P0 baked in: optimistic UI revert on toggle PATCH
+  failure (Gemini v0.6.0).** A privacy-critical feature must
+  never lie about its server state. The toggle flips optimistically
+  on click but the App-level `onSetRemoteControlEnabled` reverts
+  the local state on PATCH error and surfaces the failure inside
+  the section's own toast — preventing a false "ON" while the
+  server holds "OFF".
+- **Adaptive polling cadence (Gemini v0.6.0 P1).** The
+  `refreshRemoteState` interval is 30 s while pending != 0; backs
+  off to 60 s after 3 consecutive quiet polls, then 120 s after 6.
+  Keeps response time tight when there's something to act on AND
+  bounds steady-state DB load on idle accounts.
+- **Cross-device decide race (Gemini v0.6.0 Q6).** When another
+  device decides the same request between our list-pending and the
+  user's click, the Tauri command surfaces a typed
+  `"ALREADY_DECIDED"` error string. The sheet matches it specifically
+  to render "Already decided on another device — refreshing list",
+  reverts the optimistic-hide, and triggers an immediate refresh
+  to reconcile state.
+- **Wire-format compatibility with Mac.** Rust structs use
+  `#[serde(default)] Option<>` on every Mac-side `Optional<>` field
+  (`device_name`, `session_id`, `cwd_hmac`, `client_label`,
+  `last_event_at`). Server-side schema additions (e.g. v0.32 added
+  `device_name` to the join) decode cleanly without breaking older
+  desktop clients. Risk and status are typed `String` not `enum`
+  so future server-side classes don't crash decode (frontend
+  renders unknown values as neutral pill — Gemini v0.6.0 P2).
+- **i18n in 3 languages** (en / zh-CN / ja, ~25 new keys). Consent
+  dialog body bullets are pinned in `i18n.test.ts` critical-labels
+  list because mistranslating any of them would mislead users
+  about the privacy posture they're enabling.
+- 200 backend tests (+5 wire-shape pins:
+  `RemotePermissionRequest` full / missing-optional /
+  unknown-risk-class; `RemoteSession` full / missing-optional).
+  Frontend test count unchanged.
+- **Post-implementation Gemini 3.1 Pro review caught 5 issues
+  pre-commit, all fixed:**
+  - **P0 (DDoS-shaped infinite fetch loop in adaptive polling):**
+    `useEffect` had `remoteQuietPollCount` (state) in its deps; the
+    counter updated inside `refreshRemoteState`, which triggered the
+    effect to re-run, which fired another sync fetch — looping at
+    fetch latency (~1 RPS per client). Fix: switch the counter to a
+    `useRef` so it doesn't trigger re-renders, and replace
+    `setInterval` with a self-rescheduling `setTimeout` chain that
+    reads the count from the ref and computes the next ms inline.
+  - **P1 (set_remote_control_setting silently fails for new users):**
+    PostgREST PATCH on a non-existent row returns HTTP 2xx with 0
+    rows affected. New users (no `user_settings` row yet) would see
+    the toggle flip ON optimistically, then silently revert to OFF
+    on the next poll. Fix: switch to UPSERT via POST with
+    `Prefer: resolution=merge-duplicates` against the user_id
+    primary key. The Mac sibling has the same latent bug (uses PATCH
+    too), but their flow may have a row-creating trigger we don't
+    rely on.
+  - **P2 (pendingDecision state collision):** Single-object loading
+    state meant clicking Approve on row B while A's RPC was in
+    flight overwrote A's state, prematurely re-enabling A's buttons
+    and clearing B's loading on A's `finally`. Fix: track in-flight
+    decisions as `Map<string, "approve" | "deny">`, keyed by request
+    id.
+  - **P2 (hardcoded English status in RemoteSessionsSection):** raw
+    `s.status` ("pending" / "running" / etc.) was rendered to the
+    screen, bypassing i18n. Fix: route through `t()` with a fallback
+    to the raw value for unknown classes the server may emit later.
+    Added `remote.session_status_*` keys × 3 languages.
+  - **P2 (modal Escape key + a11y):** `RemoteApprovalsSheet` and
+    consent dialog had no Escape handler — keyboard-only users had
+    no quick-close path. Fix: add `keydown` listeners scoped to the
+    open state. Full focus trap deferred to v0.6.1+ (Tab cycling
+    within the modal is bigger scope).
+
+### What v0.6.0 explicitly does NOT do
+- Hook emission from Windows (Slice 3, future v0.7.0). Windows-side
+  Claude Code can't yet trigger pending approvals — those still
+  must originate from a paired Mac. The desktop CAN approve them
+  remotely.
+- Send / Stop / Interrupt managed sessions (Slice 2, future
+  v0.6.1). Sessions tab section is read-only this release.
+- ConPTY local-spawn host for managed sessions (Slice 4, future
+  v0.8.0). The Mac helper has it via PyInstaller-bundled
+  `helper/remote_agent.py`; the Windows port via `portable-pty`
+  is a major undertaking we'll size separately.
+- Codex / shell hook adapters. Mac has them as stubs in Phase 1
+  too; both are deferred until either Codex's hook spec
+  stabilizes or shell-launch security model is signed off.
+
 ## [0.5.7] — 2026-05-06
 
 Same-day hotfix. VM verify on v0.5.6 (clipulse-win-test, 2026-05-06)

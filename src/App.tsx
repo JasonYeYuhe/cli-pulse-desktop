@@ -107,6 +107,38 @@ type AlertThresholds = {
   cpu_spike_pct: number;
 };
 
+// v0.6.0 — Remote Approvals wire-shape (mirrors Rust supabase.rs +
+// macOS Swift Models.swift:867-1005). All Optional<> on Mac → optional
+// here so server-side schema additions don't break decode.
+type RemotePermissionRequest = {
+  id: string;
+  session_id: string | null;
+  device_id: string;
+  device_name: string | null;
+  provider: string;
+  tool_name: string;
+  summary: string;
+  /** "low" / "medium" / "high" — unknown values render as neutral pill. */
+  risk: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+};
+
+type RemoteSession = {
+  id: string;
+  device_id: string;
+  device_name: string | null;
+  provider: string;
+  cwd_basename: string;
+  cwd_hmac: string | null;
+  /** "pending" / "running" / "stopped" / "errored" — unknown renders muted. */
+  status: string;
+  client_label: string | null;
+  created_at: string;
+  last_event_at: string | null;
+};
+
 type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
 
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
@@ -136,6 +168,57 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<{ at: Date; report: SyncReport } | null>(null);
+
+  // v0.6.0 — Remote Approvals state. App-level so the header badge
+  // and the sheet share a single source of truth (Codex-pattern
+  // matching what we did for the v0.5.3 updater state). Toggle is
+  // optimistically updated on user click but MUST revert on PATCH
+  // failure (Gemini 3.1 Pro v0.6.0 review P0 — privacy-critical
+  // feature must not lie about its server-side state).
+  const [remoteControlEnabled, setRemoteControlEnabled] = useState<boolean | null>(null);
+  const [remoteControlSaving, setRemoteControlSaving] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState<RemotePermissionRequest[]>([]);
+  const [remoteSessions, setRemoteSessions] = useState<RemoteSession[]>([]);
+  const [remoteRefreshedAt, setRemoteRefreshedAt] = useState<Date | null>(null);
+  const [showApprovalsSheet, setShowApprovalsSheet] = useState(false);
+  // Adaptive polling counter as a REF, not state — avoids triggering
+  // effect re-runs when the count updates. Without this, the polling
+  // effect's deps include the count → setRemoteQuietPollCount inside
+  // refreshRemoteState would invalidate the effect on every fetch
+  // and cause a re-fire-immediately loop (Gemini 3.1 Pro v0.6.0
+  // post-implementation review P0 — DDoS-shaped infinite fetch loop
+  // at fetch latency, ~1 RPS per client).
+  const remoteQuietPollCountRef = useRef(0);
+
+  const refreshRemoteState = useCallback(async () => {
+    try {
+      // First fetch the gate setting; bail if disabled.
+      const enabled = await invoke<boolean>("get_remote_control_setting");
+      setRemoteControlEnabled(enabled);
+      setRemoteRefreshedAt(new Date());
+      if (!enabled) {
+        // Toggle off → empty arrays so badge / sheet / sessions
+        // section all hide cleanly. Do not surface "no approvals"
+        // empty state when the user explicitly disabled.
+        setPendingApprovals([]);
+        setRemoteSessions([]);
+        remoteQuietPollCountRef.current = 0;
+        return;
+      }
+      const [pending, sessions] = await Promise.all([
+        invoke<RemotePermissionRequest[]>("get_remote_pending_approvals"),
+        invoke<RemoteSession[]>("list_remote_sessions"),
+      ]);
+      setPendingApprovals(pending);
+      setRemoteSessions(sessions);
+      remoteQuietPollCountRef.current =
+        pending.length === 0 ? remoteQuietPollCountRef.current + 1 : 0;
+    } catch (e) {
+      // Non-fatal: leave previous state in place. Don't surface as a
+      // hard error — the user might just be offline transiently.
+      console.warn("refreshRemoteState failed (non-fatal):", e);
+    }
+  }, []);
 
   const refreshConfig = useCallback(async () => {
     try {
@@ -300,6 +383,42 @@ export default function App() {
     return () => clearInterval(id);
   }, [tab, refreshSessions]);
 
+  // v0.6.0 — Remote Approvals adaptive polling. Cadence:
+  //   • 30s while there's anything pending (responsive Approve/Deny)
+  //   • 60s after 3 consecutive quiet polls (no pending seen)
+  //   • 120s after 6 consecutive quiet polls
+  // Per Gemini 3.1 Pro v0.6.0 review P1: fixed 30s across every
+  // desktop generates unnecessary DB load on otherwise-idle accounts.
+  // Adaptive backoff caps the steady-state cost while keeping the
+  // response time tight when there IS something to act on.
+  //
+  // Implementation: self-rescheduling setTimeout chain instead of
+  // setInterval, because (a) the interval ms changes per tick based
+  // on the quiet-poll count, and (b) using setInterval with the count
+  // in the effect deps caused a DDoS-shaped re-fire loop (Gemini
+  // post-impl review P0). Each tick computes the next ms from the
+  // ref-tracked count AFTER refreshRemoteState resolves, so the
+  // schedule reflects the just-observed pending state. `cancelled`
+  // guards both pre- and post-await against unmount races.
+  useEffect(() => {
+    if (!config?.paired) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      if (cancelled) return;
+      await refreshRemoteState();
+      if (cancelled) return;
+      const count = remoteQuietPollCountRef.current;
+      const nextMs = count >= 6 ? 120_000 : count >= 3 ? 60_000 : 30_000;
+      timer = window.setTimeout(tick, nextMs);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [config?.paired, refreshRemoteState]);
+
   // Alerts tab refreshes every 30s while visible
   useEffect(() => {
     if (tab !== "alerts") return;
@@ -378,6 +497,19 @@ export default function App() {
               </button>
             );
           })()}
+          {/* v0.6.0 — Remote Approvals pending badge. Renders only
+              when Remote Control is on (toggle in Settings → Privacy)
+              AND there's at least one pending request from any of
+              the user's paired devices. Click opens the sheet. */}
+          {remoteControlEnabled && pendingApprovals.length > 0 && (
+            <button
+              onClick={() => setShowApprovalsSheet(true)}
+              className="px-2.5 py-1 text-xs rounded-md bg-amber-950/60 border border-amber-700 text-amber-200 hover:bg-amber-900/60"
+              title={t("remote.badge_tooltip")}
+            >
+              🔔 {t("remote.badge_pending_count", { count: pendingApprovals.length })}
+            </button>
+          )}
           <PairBadge paired={!!config?.paired} />
           <button
             onClick={runScan}
@@ -388,6 +520,25 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* v0.6.0 — Remote Approvals sheet (modal overlay, mounts only
+          when toggled open). State + decide handlers live here at App
+          level so the badge click + sheet decisions share the same
+          `pendingApprovals` array — Codex pattern carrying over from
+          the v0.5.3 updater state lift. */}
+      {showApprovalsSheet && (
+        <RemoteApprovalsSheet
+          enabled={remoteControlEnabled === true}
+          pending={pendingApprovals}
+          onClose={() => setShowApprovalsSheet(false)}
+          onDecided={async () => {
+            // Optimistic-removal happens inside the sheet; this
+            // refetches from the server to reconcile after the
+            // (potentially racy) decide RPC.
+            await refreshRemoteState();
+          }}
+        />
+      )}
 
       <nav className="border-b border-neutral-800 px-6 flex gap-1">
         {tabs.map((tabItem) => (
@@ -418,6 +569,8 @@ export default function App() {
             snapshot={sessions}
             loading={sessionsLoading}
             onRefresh={refreshSessions}
+            remoteSessions={remoteSessions}
+            remoteControlEnabled={remoteControlEnabled === true}
           />
         )}
         {tab === "alerts" && (
@@ -429,6 +582,31 @@ export default function App() {
             scan={scan}
             lastSync={lastSync}
             updater={updater}
+            remoteControlEnabled={remoteControlEnabled}
+            remoteControlSaving={remoteControlSaving}
+            remoteRefreshedAt={remoteRefreshedAt}
+            onSetRemoteControlEnabled={async (enabled) => {
+              // Optimistic flip + revert-on-failure (Gemini v0.6.0
+              // P0). Privacy posture must never lie about its state
+              // server-side, so we MUST revert if the PATCH errors.
+              const previous = remoteControlEnabled;
+              setRemoteControlSaving(true);
+              setRemoteControlEnabled(enabled);
+              try {
+                await invoke("set_remote_control_setting", { enabled });
+                // Refresh from server after PATCH commits — picks up
+                // any cross-device toggle and verifies our write
+                // landed.
+                await refreshRemoteState();
+              } catch (e: any) {
+                // Revert + surface error. The Settings section's
+                // internal toast handles the user-visible part.
+                setRemoteControlEnabled(previous);
+                throw e;
+              } finally {
+                setRemoteControlSaving(false);
+              }
+            }}
             onCheckUpdate={doCheckUpdate}
             onRelaunchAfterUpdate={doRelaunchAfterUpdate}
             onPaired={async () => {
@@ -1872,6 +2050,10 @@ function Settings({
   scan,
   lastSync,
   updater,
+  remoteControlEnabled,
+  remoteControlSaving,
+  remoteRefreshedAt,
+  onSetRemoteControlEnabled,
   onCheckUpdate,
   onRelaunchAfterUpdate,
   onPaired,
@@ -1884,6 +2066,13 @@ function Settings({
   // v0.5.3 — updater state lifted to App-level. Settings is now a
   // pure presentation consumer; no local useState. Codex P1+P2.
   updater: UpdaterState;
+  // v0.6.0 — Remote Approvals state lifted to App-level (same
+  // pattern). The Privacy section receives current state + a
+  // single setter that handles optimistic-flip + revert-on-error.
+  remoteControlEnabled: boolean | null;
+  remoteControlSaving: boolean;
+  remoteRefreshedAt: Date | null;
+  onSetRemoteControlEnabled: (enabled: boolean) => Promise<void>;
   onCheckUpdate: () => Promise<void>;
   onRelaunchAfterUpdate: () => Promise<void>;
   onPaired: () => Promise<void>;
@@ -2293,6 +2482,19 @@ function Settings({
           the discrepancy). Kept this position so the section visually
           reads as "advanced / opt-in" tail of the Settings tab. */}
       <IntegrationsSection />
+
+      {/* v0.6.0 — Privacy & Remote Control toggle. Sits ABOVE Danger
+          Zone because (a) it's not destructive (toggle off is fully
+          reversible), and (b) Danger Zone should remain the visually
+          last block since it owns the most-irreversible actions. */}
+      {paired && (
+        <RemotePrivacySection
+          enabled={remoteControlEnabled}
+          saving={remoteControlSaving}
+          refreshedAt={remoteRefreshedAt}
+          onSetEnabled={onSetRemoteControlEnabled}
+        />
+      )}
 
       {/* v0.5.4 — Danger Zone at the absolute bottom of Settings.
           Visual distance + red-tinted border + last-position is the
@@ -2925,6 +3127,481 @@ function DangerZoneSection({
         <div className="px-3 py-2 rounded-md bg-red-950/60 border border-red-900 text-red-200 text-xs">
           {t("settings.danger.action_failed", { err: state.error })}
         </div>
+      )}
+    </section>
+  );
+}
+
+// v0.6.0 — Remote Approvals UI components (Slice 1: view + decide).
+//
+// Three components:
+//   - RemoteApprovalsSheet — modal overlay listing pending approvals
+//   - RemotePrivacySection — Settings card with the toggle + consent
+//   - RemoteSessionsSection — Sessions-tab read-only managed list
+//
+// All three share App-level state lifted up via props (Codex-pattern
+// matching v0.5.3 updater state lift). The sheet mounts only when
+// `showApprovalsSheet === true`; the section renders only when
+// `paired && remoteControlEnabled`.
+
+function RemoteApprovalsSheet({
+  enabled,
+  pending,
+  onClose,
+  onDecided,
+}: {
+  enabled: boolean;
+  pending: RemotePermissionRequest[];
+  onClose: () => void;
+  /** Called after a decide RPC succeeds OR fails (so the parent can
+   *  reconcile via refreshRemoteState — handles the cross-device race
+   *  where another device decided the same request first). */
+  onDecided: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  // Local optimistic-removal: when user clicks Approve/Deny, we hide
+  // the row immediately so the UI feels responsive even before the
+  // RPC returns. If the RPC fails, we surface the error and trigger
+  // a parent refresh which puts the row back if it really IS still
+  // pending (Gemini v0.6.0 P1 / Q6).
+  //
+  // pendingDecisions is a Map<request_id, kind> (per Gemini post-impl
+  // P2.1) so multiple Approve/Deny clicks across different rows
+  // don't overwrite each other's loading state. The original
+  // single-object `pendingDecision` would let user click Approve on
+  // row B while row A's RPC was still in flight, and the `finally`
+  // block would clear A's loading state prematurely.
+  const [pendingDecisions, setPendingDecisions] = useState<
+    Map<string, "approve" | "deny">
+  >(new Map());
+  const [error, setError] = useState<string | null>(null);
+  // Locally hidden ids — flipped on Approve/Deny click; reset on
+  // sheet remount or after error reconciliation.
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+
+  // Escape-key closes the sheet (Gemini post-impl P2.3 — accessibility).
+  // Pure keyboard users had no way out other than tab-cycling to the
+  // Cancel button.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const visible = pending.filter((r) => !hiddenIds.has(r.id));
+
+  const decide = async (req: RemotePermissionRequest, kind: "approve" | "deny") => {
+    setPendingDecisions((m) => {
+      const next = new Map(m);
+      next.set(req.id, kind);
+      return next;
+    });
+    setError(null);
+    setHiddenIds((s) => new Set(s).add(req.id));
+    try {
+      await invoke("decide_remote_approval", {
+        requestId: req.id,
+        decision: kind,
+        scope: "once",
+      });
+      // Trigger parent refetch so the optimistic state reconciles
+      // against the server.
+      await onDecided();
+    } catch (e: any) {
+      const msg = String(e);
+      // Gemini v0.6.0 Q6: cross-device race where another device
+      // already decided this request. Surface a specific copy
+      // ("already decided on another device") AND revert the
+      // optimistic hide so the user sees the list refresh.
+      if (msg.includes("ALREADY_DECIDED")) {
+        setError(t("remote.error_already_decided"));
+      } else {
+        setError(t("remote.action_failed", { err: msg }));
+      }
+      // Revert hidden — let the parent refresh repopulate. If the
+      // request really IS gone (race), it won't come back; if it's
+      // still pending (RPC failed for another reason), the user
+      // can retry.
+      setHiddenIds((s) => {
+        const next = new Set(s);
+        next.delete(req.id);
+        return next;
+      });
+      await onDecided();
+    } finally {
+      setPendingDecisions((m) => {
+        const next = new Map(m);
+        next.delete(req.id);
+        return next;
+      });
+    }
+  };
+
+  const ageOf = (createdAt: string) => {
+    const seconds = Math.max(
+      0,
+      Math.floor((Date.now() - Date.parse(createdAt)) / 1000)
+    );
+    if (seconds < 60) return t("time.unit_s", { count: seconds });
+    if (seconds < 3600) return t("time.unit_min", { count: Math.floor(seconds / 60) });
+    if (seconds < 86_400) return t("time.unit_hr", { count: Math.floor(seconds / 3600) });
+    return t("time.unit_d", { count: Math.floor(seconds / 86_400) });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-xl max-h-[80vh] flex flex-col rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remote-approvals-title"
+      >
+        <header className="flex items-center justify-between p-4 border-b border-neutral-800">
+          <h2 id="remote-approvals-title" className="text-sm font-semibold text-neutral-200">
+            {t("remote.title")}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-2 py-1 text-xs rounded border border-neutral-700 hover:bg-neutral-800"
+          >
+            {t("action.cancel")}
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {error && (
+            <div className="px-3 py-2 rounded bg-red-950/60 border border-red-900 text-red-200 text-xs">
+              {error}
+            </div>
+          )}
+          {!enabled ? (
+            <div className="text-xs text-neutral-500 italic py-6 text-center">
+              {t("remote.disabled_hint")}
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="text-xs text-neutral-500 italic py-6 text-center">
+              {t("remote.empty_pending")}
+            </div>
+          ) : (
+            visible.map((req) => (
+              <RemoteApprovalRow
+                key={req.id}
+                req={req}
+                age={ageOf(req.created_at)}
+                decisionInFlight={pendingDecisions.get(req.id) ?? null}
+                onApprove={() => decide(req, "approve")}
+                onDeny={() => decide(req, "deny")}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RemoteApprovalRow({
+  req,
+  age,
+  decisionInFlight,
+  onApprove,
+  onDeny,
+}: {
+  req: RemotePermissionRequest;
+  age: string;
+  decisionInFlight: "approve" | "deny" | null;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  const { t } = useTranslation();
+  const isHigh = req.risk === "high";
+  const riskClass =
+    req.risk === "high"
+      ? "bg-red-950/60 text-red-300 border-red-900"
+      : req.risk === "medium"
+        ? "bg-amber-950/60 text-amber-300 border-amber-900"
+        : // Per Gemini v0.6.0 Q4: low / unknown render neutral, NOT
+          // green — green reads as "approved" rather than "low risk".
+          "bg-neutral-800 text-neutral-400 border-neutral-700";
+  const riskLabel =
+    req.risk === "high"
+      ? t("remote.risk_high")
+      : req.risk === "medium"
+        ? t("remote.risk_medium")
+        : req.risk === "low"
+          ? t("remote.risk_low")
+          : req.risk; // unknown class → render verbatim
+  return (
+    <div className="rounded-md border border-neutral-800 bg-neutral-950/40 p-3 space-y-2">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-neutral-400">
+          {req.device_name ?? t("remote.row_unknown_device")} · {req.provider}
+        </span>
+        <span className={`px-1.5 py-0.5 rounded border text-[10px] ${riskClass}`}>
+          {riskLabel}
+        </span>
+      </div>
+      <div className="font-mono text-xs text-neutral-200">{req.tool_name}</div>
+      <div className="text-xs text-neutral-400">{req.summary}</div>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <span className="text-[10px] text-neutral-600">
+          {t("remote.age_ago", { age })}
+        </span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={isHigh || decisionInFlight !== null}
+            title={isHigh ? t("remote.high_risk_blocked_tooltip") : undefined}
+            className="px-3 py-1 text-xs rounded bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-900 text-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {decisionInFlight === "approve"
+              ? t("remote.approve_processing")
+              : t("remote.approve_button")}
+          </button>
+          <button
+            type="button"
+            onClick={onDeny}
+            disabled={decisionInFlight !== null}
+            className="px-3 py-1 text-xs rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 disabled:opacity-40"
+          >
+            {decisionInFlight === "deny"
+              ? t("remote.deny_processing")
+              : t("remote.deny_button")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RemotePrivacySection({
+  enabled,
+  saving,
+  refreshedAt,
+  onSetEnabled,
+}: {
+  enabled: boolean | null;
+  saving: boolean;
+  refreshedAt: Date | null;
+  onSetEnabled: (enabled: boolean) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  // Two-stage interaction (Gemini v0.6.0 Q3: match Mac's full consent
+  // dialog on first-enable). Click toggle when off → show consent
+  // dialog; click "Enable Remote Control" inside dialog → fire the
+  // PATCH. Click toggle when on → fire PATCH directly (no dialog
+  // needed for turning OFF; that strictly tightens privacy).
+  const [showConsent, setShowConsent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Escape closes the consent dialog (Gemini post-impl P2.3 — modal
+  // a11y). Only registers while the dialog is open so it doesn't
+  // intercept Esc on other surfaces.
+  useEffect(() => {
+    if (!showConsent) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowConsent(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showConsent]);
+
+  const handleToggleClick = async () => {
+    if (enabled === false || enabled === null) {
+      setShowConsent(true);
+      return;
+    }
+    setError(null);
+    try {
+      await onSetEnabled(false);
+    } catch (e: any) {
+      setError(t("remote.action_failed", { err: String(e) }));
+    }
+  };
+
+  const confirmEnable = async () => {
+    setError(null);
+    setShowConsent(false);
+    try {
+      await onSetEnabled(true);
+    } catch (e: any) {
+      setError(t("remote.action_failed", { err: String(e) }));
+    }
+  };
+
+  const ageOf = (date: Date | null) => {
+    if (!date) return null;
+    const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+    if (seconds < 60) return t("time.unit_s", { count: seconds });
+    if (seconds < 3600) return t("time.unit_min", { count: Math.floor(seconds / 60) });
+    return t("time.unit_hr", { count: Math.floor(seconds / 3600) });
+  };
+
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-neutral-300 mb-1">
+          {t("settings.privacy_heading")}
+        </h2>
+        <p className="text-xs text-neutral-500">{t("settings.privacy_body")}</p>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-neutral-200">
+          {t("settings.privacy_toggle_label")}
+        </span>
+        <button
+          type="button"
+          onClick={handleToggleClick}
+          disabled={saving || enabled === null}
+          className={`relative w-11 h-6 rounded-full transition-colors ${
+            enabled === true
+              ? "bg-emerald-700"
+              : "bg-neutral-700"
+          } disabled:opacity-50`}
+          role="switch"
+          aria-checked={enabled === true}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+              enabled === true ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      <div className="text-xs text-neutral-600">
+        {enabled === true
+          ? t("settings.privacy_status_on")
+          : enabled === false
+            ? t("settings.privacy_status_off")
+            : t("misc.loading")}
+        {refreshedAt && (
+          <>
+            {" "}
+            {t("settings.privacy_status_refreshed", {
+              age: ageOf(refreshedAt),
+            })}
+          </>
+        )}
+      </div>
+      {error && (
+        <div className="px-3 py-2 rounded bg-red-950/60 border border-red-900 text-red-200 text-xs">
+          {error}
+        </div>
+      )}
+      {showConsent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowConsent(false)}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-md rounded-lg border border-neutral-800 bg-neutral-900 p-5 space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h3 className="text-sm font-semibold text-neutral-200">
+              {t("settings.privacy_consent_title")}
+            </h3>
+            <ul className="space-y-1.5 text-xs text-neutral-400">
+              <li>• {t("settings.privacy_consent_body_b1")}</li>
+              <li>• {t("settings.privacy_consent_body_b2")}</li>
+              <li>• {t("settings.privacy_consent_body_b3")}</li>
+            </ul>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConsent(false)}
+                className="px-3 py-1.5 text-xs rounded border border-neutral-700 hover:bg-neutral-800"
+              >
+                {t("action.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={confirmEnable}
+                className="px-3 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+              >
+                {t("settings.privacy_consent_enable_button")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RemoteSessionsSection({
+  sessions,
+  enabled,
+}: {
+  sessions: RemoteSession[];
+  enabled: boolean;
+}) {
+  const { t } = useTranslation();
+  // Hidden when Remote Control is off (Gemini v0.6.0 Q2: read-only
+  // section needs explicit context — better to omit when feature is
+  // off than to render an empty card).
+  if (!enabled) return null;
+  // Status label routed through i18n (Gemini post-impl P2.2 — raw
+  // English status was rendered to zh-CN/ja users). Falls back to
+  // the raw value for unknown classes the server may emit later.
+  const statusLabel = (status: string): string => {
+    const key = `remote.session_status_${status}`;
+    const translated = t(key);
+    return translated === key ? status : translated;
+  };
+  return (
+    <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-neutral-300">
+          {t("remote.sessions_heading")}
+        </h3>
+        {/* Gemini v0.6.0 Q2: read-only for v0.6.0 needs explicit
+            "preview" label so users don't expect Send/Stop. */}
+        <span className="text-[10px] uppercase tracking-wide text-neutral-500 px-1.5 py-0.5 rounded border border-neutral-700">
+          {t("remote.sessions_readonly_badge")}
+        </span>
+      </div>
+      {sessions.length === 0 ? (
+        <div className="text-xs text-neutral-500 italic py-2">
+          {t("remote.sessions_empty")}
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {sessions.map((s) => (
+            <li
+              key={s.id}
+              className="text-xs text-neutral-300 px-2 py-1.5 rounded bg-neutral-950/40 border border-neutral-800"
+            >
+              <div className="flex items-center justify-between">
+                <span>
+                  {s.device_name ?? t("remote.row_unknown_device")} · {s.provider} ·{" "}
+                  <span className="font-mono">{s.cwd_basename}</span>
+                </span>
+                <span
+                  className={
+                    s.status === "running"
+                      ? "text-emerald-400 text-[10px]"
+                      : s.status === "pending"
+                        ? "text-amber-400 text-[10px]"
+                        : "text-neutral-500 text-[10px]"
+                  }
+                >
+                  {statusLabel(s.status)}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -3704,10 +4381,17 @@ function Sessions({
   snapshot,
   loading,
   onRefresh,
+  remoteSessions,
+  remoteControlEnabled,
 }: {
   snapshot: SessionsSnapshot | null;
   loading: boolean;
   onRefresh: () => void;
+  // v0.6.0 — cross-device managed sessions surfaced above the
+  // local-process snapshot. Read-only in v0.6.0 (Slice 1); Send /
+  // Stop / Interrupt come in v0.6.1 (Slice 2).
+  remoteSessions: RemoteSession[];
+  remoteControlEnabled: boolean;
 }) {
   const { t } = useTranslation();
   if (!snapshot && loading) {
@@ -3719,6 +4403,11 @@ function Sessions({
 
   return (
     <div className="space-y-4">
+      <RemoteSessionsSection
+        sessions={remoteSessions}
+        enabled={remoteControlEnabled}
+      />
+
       <div className="flex items-center justify-between">
         <div className="text-xs text-neutral-500">
           {t("sessions.header", {

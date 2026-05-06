@@ -966,6 +966,151 @@ async fn get_top_projects(days: Option<u32>) -> Result<Vec<top_projects::TopProj
 }
 
 // ------------------------------------------------------------------------
+// v0.6.0 — Remote Approvals (Slice 1: app-side view + decide).
+//
+// Wraps the existing live `remote_app_*` RPCs that the macOS team
+// shipped on 2026-04-29 (Phase 1) and 2026-05-03 (Phase 2 iter1). The
+// backend is fully present in Supabase; this slice adds the WINDOWS
+// CLIENT for it. Hook emission, ConPTY managed-session host, and
+// Send/Stop/Interrupt commands ship in later slices (v0.6.1, v0.7.0,
+// v0.8.0 — see PROJECT_DEV_PLAN_2026-05-06_v0.6.0_remote_approvals_view.md).
+//
+// All 5 commands are unpaired-state-safe: return Ok(empty) / Ok(false)
+// when `config::load()` returns None, matching the v0.5.2 / v0.5.3
+// convention so the UI can distinguish "no data" from "actual error".
+// ------------------------------------------------------------------------
+
+#[tauri::command]
+async fn get_remote_pending_approvals() -> Result<Vec<supabase::RemotePermissionRequest>, String> {
+    let Some(_cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    with_user_jwt(|jwt| async move { supabase::remote_list_pending_approvals(&jwt).await }).await
+}
+
+/// Approve or deny a remote permission request.
+///
+/// **Defense-in-depth on high-risk approvals (Gemini 3.1 Pro v0.6.0
+/// review P1):** before calling `remote_app_decide_permission` with
+/// `decision="approve"`, re-fetch the live pending list and verify the
+/// request's `risk` is NOT "high". This is layer 2 of 3 — layer 1 is
+/// the helper-side risk classifier (which fail-closes before even
+/// creating the row, so high-risk SHOULD never appear in the list);
+/// layer 3 is the frontend disabling the Approve button. Both upstream
+/// layers can fail (helper bypass, JS state desync). The Tauri command
+/// is the last gate on a privacy-critical operation, so it pays for the
+/// extra round-trip on Approve to ensure we never round-trip a
+/// high-risk decision.
+///
+/// Deny is unconditional — refusing a request is always safe.
+#[tauri::command]
+async fn decide_remote_approval(
+    request_id: String,
+    decision: String,
+    scope: String,
+) -> Result<(), String> {
+    let cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Sign in required to decide remote approvals.".to_string())?;
+    if decision != "approve" && decision != "deny" {
+        return Err(format!(
+            "Invalid decision `{decision}` — must be `approve` or `deny`."
+        ));
+    }
+    if scope != "once" && scope != "alwaysSession" {
+        return Err(format!(
+            "Invalid scope `{scope}` — must be `once` or `alwaysSession`."
+        ));
+    }
+
+    if decision == "approve" {
+        // Re-fetch and verify risk ≠ "high" before approving. Adds one
+        // RPC round-trip to the Approve path; Approve is user-initiated
+        // and rare, so the cost is negligible vs. the security gain.
+        let pending =
+            with_user_jwt(|jwt| async move { supabase::remote_list_pending_approvals(&jwt).await })
+                .await?;
+        match pending.iter().find(|r| r.id == request_id) {
+            Some(req) if req.risk == "high" => {
+                return Err(
+                    "High-risk requests can only be approved on the originating device — \
+                     never from the desktop app."
+                        .to_string(),
+                );
+            }
+            None => {
+                // Request no longer pending — likely decided on another
+                // device, expired, or already approved. Return a typed
+                // error string the frontend can match on to surface a
+                // toast and refresh (Gemini 3.1 Pro v0.6.0 review Q6).
+                return Err("ALREADY_DECIDED".to_string());
+            }
+            Some(_) => {} // proceed
+        }
+    }
+
+    let device_id = cfg.device_id.clone();
+    with_user_jwt(move |jwt| {
+        let device_id = device_id.clone();
+        let request_id = request_id.clone();
+        let decision = decision.clone();
+        let scope = scope.clone();
+        async move {
+            supabase::remote_decide_permission(
+                &request_id,
+                &decision,
+                &scope,
+                Some(&device_id),
+                &jwt,
+            )
+            .await
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_remote_sessions() -> Result<Vec<supabase::RemoteSession>, String> {
+    let Some(_cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    with_user_jwt(|jwt| async move { supabase::remote_list_sessions(&jwt).await }).await
+}
+
+#[tauri::command]
+async fn get_remote_control_setting() -> Result<bool, String> {
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(false);
+    };
+    let user_id = cfg.user_id.clone();
+    with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::get_remote_control_setting(&user_id, &jwt).await }
+    })
+    .await
+}
+
+/// Toggle the user's `remote_control_enabled` server-side setting.
+///
+/// Per Gemini 3.1 Pro v0.6.0 review P0: caller MUST revert any
+/// optimistic UI when this returns Err. Showing "Remote Control: ON"
+/// while the server holds "OFF" misleads the user about their privacy
+/// posture — a feature whose purpose IS privacy must never lie about
+/// its state.
+#[tauri::command]
+async fn set_remote_control_setting(enabled: bool) -> Result<(), String> {
+    let cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Sign in required to change Remote Control.".to_string())?;
+    let user_id = cfg.user_id.clone();
+    with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::set_remote_control_setting(&user_id, enabled, &jwt).await }
+    })
+    .await
+}
+
+// ------------------------------------------------------------------------
 // v0.5.4 — Settings → Danger Zone. Two destructive actions:
 //   - clear_local_caches: wipes in-memory dashboard cache + on-disk scan
 //     cache (cost-usage). User stays signed in; next sync re-fetches
@@ -2103,6 +2248,12 @@ pub fn run() {
             get_sessions_history,
             // v0.5.6 — Tray mini-metrics force-refresh (language change path)
             force_tray_menu_refresh,
+            // v0.6.0 — Remote Approvals (app-side view + decide)
+            get_remote_pending_approvals,
+            decide_remote_approval,
+            list_remote_sessions,
+            get_remote_control_setting,
+            set_remote_control_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

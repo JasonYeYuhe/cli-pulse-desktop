@@ -173,6 +173,35 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "tray.no_data",
     "tray.open_label",
     "tray.quit_label",
+    // v0.6.0 — Remote Approvals (privacy-critical feature). The
+    // consent dialog body bullets and the high-risk-blocked tooltip
+    // are pinned because mistranslating them would either (a)
+    // mislead users about the privacy posture they're enabling, or
+    // (b) leave them confused why Approve is disabled on a row.
+    "remote.title",
+    "remote.empty_pending",
+    "remote.disabled_hint",
+    "remote.risk_low",
+    "remote.risk_medium",
+    "remote.risk_high",
+    "remote.high_risk_blocked_tooltip",
+    "remote.approve_button",
+    "remote.deny_button",
+    "remote.action_failed",
+    "remote.error_already_decided",
+    "remote.sessions_heading",
+    "remote.sessions_readonly_badge",
+    "remote.sessions_empty",
+    "settings.privacy_heading",
+    "settings.privacy_body",
+    "settings.privacy_toggle_label",
+    "settings.privacy_status_on",
+    "settings.privacy_status_off",
+    "settings.privacy_consent_title",
+    "settings.privacy_consent_body_b1",
+    "settings.privacy_consent_body_b2",
+    "settings.privacy_consent_body_b3",
+    "settings.privacy_consent_enable_button",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

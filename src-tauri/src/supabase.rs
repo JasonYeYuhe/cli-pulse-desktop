@@ -682,6 +682,224 @@ pub async fn get_unresolved_alerts(
 }
 
 // ========================================================================
+// Remote Approvals + Sessions (v0.6.0) — app-side wrappers around the
+// existing live remote_app_* RPCs.
+// ========================================================================
+//
+// The macOS team (cli-pulse repo) shipped Phase 1 (Remote Approvals,
+// v1.11.0/44 on 2026-04-29) and Phase 2 iter1 (Sessions Input,
+// 2026-05-03). The backend is fully live in Supabase as of those
+// dates: 5 remote_* tables, 6 app RPCs, server-side gate at
+// `user_settings.remote_control_enabled` (default OFF).
+//
+// v0.6.0 ports the APP-SIDE READ + DECIDE surface to Windows. Hook
+// emission, ConPTY managed-session host, and Send / Stop / Interrupt
+// commands ship in later slices (v0.6.1, v0.7.0, v0.8.0 — see the
+// dev plan).
+//
+// Wire shapes mirror Swift `Models.swift:867-1005` exactly. Optional
+// fields use `#[serde(default)]` so server-side schema drift (new
+// fields appearing) doesn't break decode for older desktop clients.
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemotePermissionRequest {
+    pub id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub device_id: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    pub provider: String,
+    pub tool_name: String,
+    pub summary: String,
+    /// "low" / "medium" / "high". Frontend renders unknown values as
+    /// neutral (Gemini 3.1 Pro v0.6.0 review P2) — server may emit
+    /// new risk classes in future versions.
+    pub risk: String,
+    /// "pending" / "approved" / "denied" / "expired". Same drift
+    /// posture as `risk`.
+    pub status: String,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemoteSession {
+    pub id: String,
+    pub device_id: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    pub provider: String,
+    pub cwd_basename: String,
+    #[serde(default)]
+    pub cwd_hmac: Option<String>,
+    /// "pending" / "running" / "stopped" / "errored"
+    pub status: String,
+    #[serde(default)]
+    pub client_label: Option<String>,
+    pub created_at: String,
+    #[serde(default)]
+    pub last_event_at: Option<String>,
+}
+
+/// Wraps `remote_app_list_pending_approvals()` — RLS-scoped to the
+/// authenticated user, so this surfaces approvals from EVERY paired
+/// device the user owns (Mac, future Windows-helper, etc). Server
+/// gates on `user_settings.remote_control_enabled = true`; returns
+/// `[]` when the toggle is off.
+pub async fn remote_list_pending_approvals(
+    user_jwt: &str,
+) -> SupabaseResult<Vec<RemotePermissionRequest>> {
+    let v = rpc_with_auth(
+        "remote_app_list_pending_approvals",
+        &serde_json::json!({}),
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    // RPC returns a JSON array directly.
+    Ok(serde_json::from_value(v)?)
+}
+
+/// Wraps `remote_app_decide_permission`. `decision` is "approve" or
+/// "deny" (validated server-side); `scope` is "once" or "alwaysSession"
+/// (silently downgraded to "once" for Codex).
+///
+/// `decided_by_device_id` lets the server attribute the decision to
+/// THIS Windows device in the audit log — Mac sibling does the same
+/// via `cfg.device_id`. Optional because the iOS app calls without it
+/// (no helper credentials on iOS).
+pub async fn remote_decide_permission(
+    request_id: &str,
+    decision: &str,
+    scope: &str,
+    decided_by_device_id: Option<&str>,
+    user_jwt: &str,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_request_id: &'a str,
+        p_decision: &'a str,
+        p_scope: &'a str,
+        p_decided_by_device_id: Option<&'a str>,
+    }
+    let v = rpc_with_auth(
+        "remote_app_decide_permission",
+        &Params {
+            p_request_id: request_id,
+            p_decision: decision,
+            p_scope: scope,
+            p_decided_by_device_id: decided_by_device_id,
+        },
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+/// Wraps `remote_app_list_sessions()` — Phase 2 iter1 RPC. Returns
+/// pending+running managed sessions across the user's devices, with
+/// `device_name` joined for display. Returns `[]` when Remote Control
+/// is disabled.
+pub async fn remote_list_sessions(user_jwt: &str) -> SupabaseResult<Vec<RemoteSession>> {
+    let v = rpc_with_auth(
+        "remote_app_list_sessions",
+        &serde_json::json!({}),
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+/// Read `user_settings.remote_control_enabled` for the authenticated
+/// user. Direct PostgREST GET — same pattern as v0.5.2 sessions read
+/// and v0.5.3 alerts read. Returns `false` when no row exists yet
+/// (brand-new account never opened Settings → Privacy on any device).
+pub async fn get_remote_control_setting(user_id: &str, user_jwt: &str) -> SupabaseResult<bool> {
+    let url = format!("{}/rest/v1/user_settings", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .get(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .query(&[
+            ("user_id", format!("eq.{user_id}")),
+            ("select", "remote_control_enabled".to_string()),
+            ("limit", "1".to_string()),
+        ])
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await?;
+    if !(200..300).contains(&status) {
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    if text.is_empty() {
+        return Ok(false);
+    }
+    #[derive(Deserialize)]
+    struct Row {
+        #[serde(default)]
+        remote_control_enabled: Option<bool>,
+    }
+    let rows: Vec<Row> = serde_json::from_str(&text)?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .and_then(|r| r.remote_control_enabled)
+        .unwrap_or(false))
+}
+
+/// Write `user_settings.remote_control_enabled` for the authenticated
+/// user. UPSERT via POST with `Prefer: resolution=merge-duplicates` —
+/// covers the brand-new-user case where `user_settings` has no row
+/// yet. The Mac sibling uses PATCH only, but PostgREST PATCH on a
+/// non-existent row returns HTTP 2xx with 0 rows affected — the
+/// frontend would interpret that as success while the server-side
+/// state stays `false`, then the next poll would silently flip the
+/// toggle back to OFF (Gemini 3.1 Pro v0.6.0 post-implementation
+/// review P1). The Mac may have the same latent bug; UPSERT here
+/// fixes it for the desktop track regardless.
+///
+/// `user_settings.user_id` is the table's PRIMARY KEY (verified via
+/// information_schema.constraint definitions); merge-duplicates uses
+/// it as the conflict target.
+///
+/// Per Gemini 3.1 Pro v0.6.0 review P0: caller MUST revert any
+/// optimistic UI on this function returning Err — showing "ON" while
+/// the server holds "OFF" is a privacy violation.
+pub async fn set_remote_control_setting(
+    user_id: &str,
+    enabled: bool,
+    user_jwt: &str,
+) -> SupabaseResult<()> {
+    let url = format!("{}/rest/v1/user_settings", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .post(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .header("Content-Type", "application/json")
+        // resolution=merge-duplicates → UPSERT against the primary
+        // key (user_id). return=minimal saves bandwidth.
+        .header("Prefer", "resolution=merge-duplicates,return=minimal")
+        .json(&serde_json::json!({
+            "user_id": user_id,
+            "remote_control_enabled": enabled,
+        }))
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        let text = resp.text().await?;
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    Ok(())
+}
+
+// ========================================================================
 // delete_user_account (v0.5.4) — server-side account deletion. RPC takes
 // no args; server reads `auth.uid()` from the user JWT and cascades the
 // delete through `auth.users`, removing rows in `sessions`,
@@ -806,6 +1024,114 @@ mod tests {
         assert_eq!(rows[0].provider, "claude");
         assert_eq!(rows[0].project.as_deref(), Some("my-project"));
         assert_eq!(rows[0].estimated_cost, Some(0.42));
+    }
+
+    // v0.6.0 — Remote Approvals wire-shape pins. Mirrors Swift
+    // Models.swift:867-1005. These tests catch server-side schema drift
+    // (new fields appearing OR existing fields' types changing) at unit
+    // time, before VM verify.
+
+    #[test]
+    fn remote_permission_request_round_trips_full_shape() {
+        let body = json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "session_id": "22222222-2222-2222-2222-222222222222",
+            "device_id": "33333333-3333-3333-3333-333333333333",
+            "device_name": "Jason's MBP",
+            "provider": "claude",
+            "tool_name": "Bash",
+            "summary": "rm test/fixture.json",
+            "risk": "low",
+            "status": "pending",
+            "created_at": "2026-05-06T12:00:00+00:00",
+            "expires_at": "2026-05-06T12:00:10+00:00"
+        });
+        let req: RemotePermissionRequest = serde_json::from_value(body).unwrap();
+        assert_eq!(req.id, "11111111-1111-1111-1111-111111111111");
+        assert_eq!(req.device_name.as_deref(), Some("Jason's MBP"));
+        assert_eq!(req.risk, "low");
+    }
+
+    #[test]
+    fn remote_permission_request_handles_missing_optional_fields() {
+        // device_name was added in v0.32 (Mac iter); session_id is
+        // optional for hand-Terminal flows. Older / leaner server
+        // responses must still decode cleanly.
+        let body = json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "device_id": "33333333-3333-3333-3333-333333333333",
+            "provider": "claude",
+            "tool_name": "Bash",
+            "summary": "...",
+            "risk": "high",
+            "status": "pending",
+            "created_at": "2026-05-06T12:00:00+00:00",
+            "expires_at": "2026-05-06T12:00:10+00:00"
+        });
+        let req: RemotePermissionRequest = serde_json::from_value(body).unwrap();
+        assert_eq!(req.session_id, None);
+        assert_eq!(req.device_name, None);
+    }
+
+    #[test]
+    fn remote_permission_request_handles_unknown_risk_class() {
+        // Per Gemini 3.1 Pro v0.6.0 review P2: server may emit risk
+        // values beyond low/medium/high in future versions; we use
+        // String not enum so they decode without error and the frontend
+        // renders an unknown class as neutral.
+        let body = json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "device_id": "33333333-3333-3333-3333-333333333333",
+            "provider": "claude",
+            "tool_name": "Bash",
+            "summary": "...",
+            "risk": "future-class-not-yet-existing",
+            "status": "pending",
+            "created_at": "2026-05-06T12:00:00+00:00",
+            "expires_at": "2026-05-06T12:00:10+00:00"
+        });
+        let req: RemotePermissionRequest = serde_json::from_value(body).unwrap();
+        assert_eq!(req.risk, "future-class-not-yet-existing");
+    }
+
+    #[test]
+    fn remote_session_round_trips_full_shape() {
+        let body = json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "device_id": "33333333-3333-3333-3333-333333333333",
+            "device_name": "Jason's MBP",
+            "provider": "claude",
+            "cwd_basename": "my-project",
+            "cwd_hmac": "deadbeef",
+            "status": "running",
+            "client_label": "Mac · my-project",
+            "created_at": "2026-05-06T12:00:00+00:00",
+            "last_event_at": "2026-05-06T12:05:00+00:00"
+        });
+        let s: RemoteSession = serde_json::from_value(body).unwrap();
+        assert_eq!(s.device_name.as_deref(), Some("Jason's MBP"));
+        assert_eq!(s.status, "running");
+        assert_eq!(
+            s.last_event_at.as_deref(),
+            Some("2026-05-06T12:05:00+00:00")
+        );
+    }
+
+    #[test]
+    fn remote_session_handles_missing_optional_fields() {
+        let body = json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "device_id": "33333333-3333-3333-3333-333333333333",
+            "provider": "claude",
+            "cwd_basename": "my-project",
+            "status": "pending",
+            "created_at": "2026-05-06T12:00:00+00:00"
+        });
+        let s: RemoteSession = serde_json::from_value(body).unwrap();
+        assert_eq!(s.device_name, None);
+        assert_eq!(s.cwd_hmac, None);
+        assert_eq!(s.client_label, None);
+        assert_eq!(s.last_event_at, None);
     }
 
     #[test]
