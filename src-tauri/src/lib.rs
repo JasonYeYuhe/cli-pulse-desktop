@@ -57,6 +57,68 @@ const TRAY_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 static LAST_SUCCESSFUL_SYNC_AT: Lazy<std::sync::Mutex<Option<chrono::DateTime<chrono::Utc>>>> =
     Lazy::new(|| std::sync::Mutex::new(None));
 
+/// v0.5.7 — local-scan-derived (month_so_far_usd, predicted_month_total_usd)
+/// snapshot. Computed at the end of every successful `perform_sync` from
+/// THIS device's scanner output, then read by the tray refresh loop as
+/// the primary data source.
+///
+/// Why this exists: the v0.5.6 tray read `cache_get_daily_usage`
+/// (DASHBOARD_CACHE.daily_usage, 30 s TTL) which is only populated by
+/// the Overview tab's `CostForecastCard` polling at 60 s. When the user
+/// minimizes to use the tray (the natural workflow!), the Overview
+/// component unmounts, polling stops, the cache expires, and every
+/// subsequent 120 s tray tick reads None → renders "—" forever. VM
+/// verify on 2026-05-06 caught this as a P2: tray's "Synced N ago"
+/// updated correctly while Month / Forecast lines stayed at em-dash.
+///
+/// The fix is to derive the values from local scanner data — which the
+/// background tick refreshes every 120 s anyway. This is "this device's
+/// month-to-date" which equals the cross-device sum for single-device
+/// users, and is a meaningful subset for multi-device users. Trade-off
+/// adopted: tray accuracy never reaches "—" for paired users with any
+/// local activity, at the cost of slight under-counting for multi-
+/// device users (whose dashboard view still shows the full sum).
+static LAST_LOCAL_TRAY_VALUES: Lazy<std::sync::Mutex<Option<(f64, f64)>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
+
+/// Compute and stash (month_so_far, predicted_total) from local scan
+/// entries. Called from `perform_sync`'s success path so the tray
+/// always has fresh local-derived numbers after T+~20 s (first
+/// background_tick) and every 120 s thereafter.
+fn record_local_tray_snapshot(scan: &scanner::ScanResult) {
+    // Re-shape scanner DailyEntries into the DailyUsageRow shape the
+    // forecast helper expects. Drops the synthetic CLAUDE_MSG_BUCKET
+    // model rows — `forecast_from_daily` only cares about cost, but
+    // including the bucket would double-count Claude messages against
+    // their cost contribution (the bucket has cost=None / 0.0 in
+    // practice, but explicit filtering keeps the contract clear).
+    let local_daily: Vec<supabase::DailyUsageRow> = scan
+        .entries
+        .iter()
+        .filter(|e| e.model != scanner::CLAUDE_MSG_BUCKET_MODEL)
+        .map(|e| supabase::DailyUsageRow {
+            metric_date: e.date.clone(),
+            provider: e.provider.clone(),
+            model: e.model.clone(),
+            input_tokens: e.input_tokens,
+            cached_tokens: e.cached_tokens,
+            output_tokens: e.output_tokens,
+            cost: e.cost_usd.unwrap_or(0.0),
+        })
+        .collect();
+    let today = chrono::Local::now().date_naive();
+    if let Some(forecast) = cost_forecast::forecast_from_daily(&local_daily, today) {
+        if let Ok(mut g) = LAST_LOCAL_TRAY_VALUES.lock() {
+            *g = Some((forecast.actual_to_date, forecast.predicted_month_total));
+        }
+    }
+}
+
+fn last_local_tray_values() -> Option<(f64, f64)> {
+    let g = LAST_LOCAL_TRAY_VALUES.lock().ok()?;
+    *g
+}
+
 fn record_successful_sync() {
     if let Ok(mut g) = LAST_SUCCESSFUL_SYNC_AT.lock() {
         *g = Some(chrono::Utc::now());
@@ -1301,6 +1363,15 @@ async fn perform_sync(app: tauri::AppHandle) -> Result<SyncReport, String> {
     // errored.
     record_successful_sync();
 
+    // v0.5.7 — stash local-scan-derived (month_so_far, forecast) for
+    // the tray menu. See `LAST_LOCAL_TRAY_VALUES` doc comment for the
+    // VM-verify-2026-05-06 P2 finding this addresses. Computation is
+    // ~O(scan.entries.len()) + the forecast linear regression; both
+    // are negligible relative to the sync we just finished. Wrapped
+    // in `record_local_tray_snapshot` to keep `perform_sync`'s body
+    // focused on the sync orchestration.
+    record_local_tray_snapshot(&scan);
+
     Ok(SyncReport {
         sessions_synced: hs.sessions_synced,
         alerts_synced: hs.alerts_synced,
@@ -1748,22 +1819,35 @@ fn collect_tray_metrics() -> tray::TrayMetrics {
         }
     };
 
-    // Read cached daily_usage; on miss, all derived fields stay None
-    // and the tray renders the "—" placeholder. Per Codex P2: do NOT
-    // call `with_user_jwt` from the tray path — that would mint a
-    // fresh JWT every 120 s (rotating the refresh token unnecessarily)
-    // even when the user isn't actively viewing the dashboard.
-    let daily = cache_get_daily_usage(&cfg.user_id);
-    let today = chrono::Local::now().date_naive();
-    let (month_so_far, forecast_total) = match daily.as_deref() {
-        Some(rows) => {
-            let forecast = cost_forecast::forecast_from_daily(rows, today);
-            match forecast {
-                Some(f) => (Some(f.actual_to_date), Some(f.predicted_month_total)),
+    // v0.5.7 hotfix — primary data source is the local-scan-derived
+    // snapshot stashed by `record_local_tray_snapshot` at the end of
+    // every successful `perform_sync` (T+~20 s after launch, then
+    // every 120 s). Always fresh while the device is paired; never
+    // depends on which tab the user has open. VM verify 2026-05-06
+    // caught the v0.5.6 bug where the tray read DASHBOARD_CACHE
+    // (only populated by Overview's CostForecastCard polling) and
+    // therefore showed "—" forever for users who minimized to tray.
+    //
+    // Fall back to DASHBOARD_CACHE.daily_usage on the brand-new
+    // launch path before any sync has run (perform_sync hasn't
+    // populated LAST_LOCAL_TRAY_VALUES yet, but Overview might have
+    // been opened and populated the dashboard cache). This window is
+    // narrow and the fallback rarely fires in practice.
+    let (month_so_far, forecast_total) = match last_local_tray_values() {
+        Some((month, forecast)) => (Some(month), Some(forecast)),
+        None => {
+            // Pre-first-sync fallback. Per Codex P2: still NEVER mint
+            // a fresh JWT from the tray path — read the cache only.
+            let daily = cache_get_daily_usage(&cfg.user_id);
+            let today = chrono::Local::now().date_naive();
+            match daily.as_deref() {
+                Some(rows) => match cost_forecast::forecast_from_daily(rows, today) {
+                    Some(f) => (Some(f.actual_to_date), Some(f.predicted_month_total)),
+                    None => (None, None),
+                },
                 None => (None, None),
             }
         }
-        None => (None, None),
     };
 
     tray::TrayMetrics {
@@ -2319,5 +2403,124 @@ mod tests {
         assert!(!looks_like_transient_5xx(
             "background sync ok — 12 sessions, 0 alerts"
         ));
+    }
+
+    /// v0.5.7 hotfix — `record_local_tray_snapshot` derives
+    /// (month_so_far, predicted_total) from a `ScanResult` and stashes
+    /// in `LAST_LOCAL_TRAY_VALUES`. Pin the round-trip:
+    ///   - paired user with non-empty scan → values populated
+    ///   - synthetic CLAUDE_MSG_BUCKET_MODEL rows are filtered (would
+    ///     otherwise inflate the row count without contributing cost,
+    ///     skewing the forecast's regression weight)
+    ///
+    /// VM verify 2026-05-06 caught the v0.5.6 regression where the
+    /// tray read DASHBOARD_CACHE.daily_usage (only populated by
+    /// Overview's poll). This unit test pins the contract that
+    /// `record_local_tray_snapshot` writes the global the tray reads,
+    /// so a future refactor can't silently break the wiring again.
+    #[test]
+    fn record_local_tray_snapshot_populates_global() {
+        // Reset state so this test is order-independent (other tests
+        // may run before us and leave stale values).
+        if let Ok(mut g) = LAST_LOCAL_TRAY_VALUES.lock() {
+            *g = None;
+        }
+
+        let today = chrono::Local::now().date_naive();
+        // Synthesize a scan with one entry today + one synthetic
+        // CLAUDE_MSG_BUCKET_MODEL row that should be filtered out.
+        let today_key = today.format("%Y-%m-%d").to_string();
+        let scan = scanner::ScanResult {
+            entries: vec![
+                scanner::DailyEntry {
+                    date: today_key.clone(),
+                    provider: "claude".to_string(),
+                    model: "sonnet-4.6".to_string(),
+                    input_tokens: 1000,
+                    cached_tokens: 500,
+                    output_tokens: 200,
+                    cost_usd: Some(0.42),
+                    message_count: 3,
+                },
+                scanner::DailyEntry {
+                    date: today_key.clone(),
+                    provider: "claude".to_string(),
+                    model: scanner::CLAUDE_MSG_BUCKET_MODEL.to_string(),
+                    input_tokens: 0,
+                    cached_tokens: 0,
+                    output_tokens: 0,
+                    cost_usd: None,
+                    message_count: 7,
+                },
+            ],
+            total_cost_usd: 0.42,
+            total_tokens: 1700,
+            today_key: today_key.clone(),
+            days_scanned: 30,
+            files_scanned: 1,
+            files_cached: 0,
+        };
+        record_local_tray_snapshot(&scan);
+
+        let stashed = last_local_tray_values()
+            .expect("LAST_LOCAL_TRAY_VALUES must be Some after a successful snapshot");
+        // month_so_far should equal the cost of all non-bucket rows
+        // for the current month (today only, in this fixture).
+        assert!(
+            (stashed.0 - 0.42).abs() < f64::EPSILON,
+            "month_so_far expected ~0.42, got {}",
+            stashed.0
+        );
+        // predicted_total is the forecast — must be at least
+        // actual_to_date (forecast helper clamps lower-bound at the
+        // already-realized cost).
+        assert!(
+            stashed.1 >= stashed.0,
+            "predicted_total must be >= month_so_far, got {} vs {}",
+            stashed.1,
+            stashed.0
+        );
+    }
+
+    /// v0.5.7 hotfix — empty scan (brand-new account, no usage yet)
+    /// must still produce a stash; it's the FIRST sync that populates
+    /// the value, and the user's tray would otherwise be stuck at "—"
+    /// until they hit nonzero usage. The forecast helper handles
+    /// zero-usage gracefully (returns is_reliable=false, all-zero
+    /// values), and the tray formatter renders $0.00 for the zero
+    /// case — meaningful and accurate.
+    #[test]
+    fn record_local_tray_snapshot_handles_empty_scan() {
+        if let Ok(mut g) = LAST_LOCAL_TRAY_VALUES.lock() {
+            *g = None;
+        }
+
+        let today_key = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let scan = scanner::ScanResult {
+            entries: vec![],
+            total_cost_usd: 0.0,
+            total_tokens: 0,
+            today_key,
+            days_scanned: 30,
+            files_scanned: 0,
+            files_cached: 0,
+        };
+        record_local_tray_snapshot(&scan);
+
+        let stashed = last_local_tray_values();
+        // Empty scan still produces a stash (forecast helper returns
+        // Some(CostForecast { ..zeros }) for empty input — see
+        // cost_forecast.rs:80-159, the only None path is invalid
+        // reference_date which chrono can't produce).
+        assert!(
+            stashed.is_some(),
+            "empty scan must still populate the stash"
+        );
+        let (month, forecast) = stashed.unwrap();
+        assert_eq!(month, 0.0);
+        assert_eq!(forecast, 0.0);
     }
 }

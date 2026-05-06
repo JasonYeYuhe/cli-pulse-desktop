@@ -2,6 +2,51 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.5.7] — 2026-05-06
+
+Same-day hotfix. VM verify on v0.5.6 (clipulse-win-test, 2026-05-06)
+caught a real P2: the tray's Month so far / Forecast values stayed at
+"—" indefinitely even though the tray refresh loop WAS running and
+"Synced N s ago" updated correctly across ticks.
+
+### Fixed
+- **Tray Month so far / Forecast no longer stuck at "—".** Root cause:
+  v0.5.6's `collect_tray_metrics` read `cache_get_daily_usage`
+  (DASHBOARD_CACHE.daily_usage, 30 s TTL), which is only populated by
+  the Overview tab's `CostForecastCard` polling at 60 s. When the user
+  minimizes to use the tray (the natural workflow!), the Overview
+  component unmounts, polling stops, the cache expires, and every
+  120 s tray tick reads `None` → renders the em-dash placeholder
+  forever. Fix: derive the values from local-scan data, which the
+  background sync already refreshes every 120 s anyway. Stash
+  `(month_so_far, predicted_total)` into a new `LAST_LOCAL_TRAY_VALUES`
+  global at the end of every successful `perform_sync`; tray reads from
+  it as the primary data source. Always fresh after T+~20 s (first
+  background tick) regardless of which tab the user has open.
+
+### Notes
+- **Trade-off in scope:** the tray now shows "this device's
+  month-to-date" rather than "all paired devices' month-to-date".
+  Identical for single-device users (the vast majority of the install
+  base today). Subset for multi-device users — but the dashboard
+  Overview view still shows the cross-device sum, so users who care
+  about the full picture have it; users who want a quick glance at the
+  tray get accurate-for-this-device numbers instead of em-dashes.
+- **The DASHBOARD_CACHE fallback path is preserved** for the narrow
+  brand-new launch window before the first `perform_sync` has stashed
+  anything. Rare in practice; first background_tick fires at T+20 s.
+- **VM verify also flagged a separate P1: v0.5.3's auto-updater fails
+  with "os error 3" on per-user installs.** That's a Tauri-2 NSIS path
+  resolution issue, not a v0.5.4-6 regression — separate scope. v0.5.7
+  ships partly to give the VM a Latest target it can attempt to update
+  to from v0.5.6, validating whether v0.5.6's updater has the same
+  problem. Tracked as a known issue in `reference_desktop_repo.md`;
+  fix planned for a future release once the path-resolution failure
+  mode is reproduced + understood.
+- 195 backend tests (+2 `record_local_tray_snapshot` round-trip incl.
+  empty-scan edge case where forecast helper returns zero forecast).
+  Frontend test count unchanged.
+
 ## [0.5.6] — 2026-05-06
 
 Tray menu now shows live mini-metrics (month so far / forecast /
