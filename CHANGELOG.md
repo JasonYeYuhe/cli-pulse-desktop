@@ -2,6 +2,52 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.6.1] — 2026-05-07
+
+Same-day hotfix to v0.6.0. VM verify on clipulse-win-test
+(2026-05-07) found the Privacy & Remote Control consent dialog
+didn't close on Esc — even after Tab-cycling focus into the modal.
+Same likely-affected pattern in the `RemoteApprovalsSheet`. v0.6.0
+used `window.addEventListener("keydown", ...)` alone; that path
+isn't reliable in Tauri's Webview2 when no descendant of the modal
+has focus.
+
+### Fixed
+- **Esc closes consent dialog and approvals sheet.** Belt-and-
+  braces approach with three independent dismissal paths so at
+  least one fires regardless of focus state or event-routing
+  quirks:
+  1. `window` keydown listener (the v0.6.0 attempt; kept as
+     backup)
+  2. `onKeyDown` on the modal wrapper div — catches Esc
+     bubbled from any focused descendant
+  3. `autoFocus` on the close / Cancel button — gives the modal
+     a real focus target on first render so the bubble path
+     exists immediately, instead of focus staying behind the
+     modal on the toggle button that opened it
+  Plus `tabIndex={-1}` + `aria-labelledby` on the inner dialog
+  for screen-reader correctness while we're in here.
+
+### Notes
+- **The v0.6.0 VM verify itself was strong:** Phase 1 banner-click
+  upgrade v0.5.7 → v0.6.0 PASS (no `os error 3` — the v0.5.3
+  auto-updater bug is version-specific, not a Tauri-2 platform
+  issue). Block A: A.1/A.2/A.3 PASS, A.5 P0 (PATCH-failure-revert)
+  PASS — the privacy posture doesn't lie even on network drop.
+  Block B.1: no RPS regression (CPU 0.5%, Supabase conns 14→14
+  stable at 30s — confirms the v0.6.0 P0 adaptive-polling fix).
+  Block C/D/E all PASS in three languages. Esc-on-modal was the
+  single P2 flag.
+- **B.2-B.7 (live decide flow) skipped on this VM run** — those
+  need a Mac trigger to populate `remote_permission_requests`.
+  The decide RPC defense-in-depth + cross-device race handling
+  ship live in v0.6.1; their VM verification is gated on a
+  Mac-side trigger which can happen any time without a release.
+- 200 backend tests unchanged; frontend test count unchanged
+  (interaction tests for modal Esc would require a Testing Library
+  setup that's out of scope for a same-day hotfix — the change is
+  small enough that the next VM verify is the practical signal).
+
 ## [0.6.0] — 2026-05-06
 
 **New feature.** First Windows-side participation in the Remote

@@ -3179,9 +3179,14 @@ function RemoteApprovalsSheet({
   // sheet remount or after error reconciliation.
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 
-  // Escape-key closes the sheet (Gemini post-impl P2.3 — accessibility).
-  // Pure keyboard users had no way out other than tab-cycling to the
-  // Cancel button.
+  // Escape-key closes the sheet. v0.6.0 used `window.addEventListener`
+  // alone; VM verify 2026-05-07 (clipulse-win-test) found that didn't
+  // work in Tauri's Webview2 for the consent dialog (same pattern).
+  // v0.6.1 hotfix: belt-and-braces — keep the window listener AND
+  // add `onKeyDown` on the dialog wrapper (next, in JSX) AND
+  // autoFocus the close button so the modal has a real focus
+  // target. At least one path catches Esc regardless of focus
+  // state or event-routing quirks.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -3254,6 +3259,17 @@ function RemoteApprovalsSheet({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={onClose}
+      // v0.6.1 hotfix layer 2: onKeyDown on the WRAPPER catches Esc
+      // bubbled from any descendant. autoFocus on the Cancel button
+      // (below) makes sure the bubble path exists immediately on
+      // open. See useEffect comment above for the full multi-layer
+      // rationale.
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
       role="presentation"
     >
       <div
@@ -3262,6 +3278,7 @@ function RemoteApprovalsSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby="remote-approvals-title"
+        tabIndex={-1}
       >
         <header className="flex items-center justify-between p-4 border-b border-neutral-800">
           <h2 id="remote-approvals-title" className="text-sm font-semibold text-neutral-200">
@@ -3271,6 +3288,12 @@ function RemoteApprovalsSheet({
             type="button"
             onClick={onClose}
             className="px-2 py-1 text-xs rounded border border-neutral-700 hover:bg-neutral-800"
+            // v0.6.1 hotfix layer 3: autoFocus gives the modal a real
+            // focus target on first render so Esc has a sane bubble
+            // path (otherwise focus stays on whatever opened the
+            // sheet, behind the modal, and Tauri's Webview2 doesn't
+            // route Esc through React's window listener reliably).
+            autoFocus
           >
             {t("action.cancel")}
           </button>
@@ -3402,9 +3425,18 @@ function RemotePrivacySection({
   const [showConsent, setShowConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Escape closes the consent dialog (Gemini post-impl P2.3 — modal
-  // a11y). Only registers while the dialog is open so it doesn't
-  // intercept Esc on other surfaces.
+  // v0.6.0 Esc handler used `window.addEventListener` only. VM verify
+  // 2026-05-07 (clipulse-win-test) found this didn't actually close
+  // the dialog in Tauri's Webview2 — even after Tab-cycling focus
+  // INTO the dialog, Esc was eaten somewhere upstream. v0.6.1 hotfix:
+  // belt-and-braces with THREE Esc dismissal paths so at least one
+  // works regardless of focus state or event-routing quirks:
+  //   1. window listener (this one — was alone in v0.6.0)
+  //   2. onKeyDown on the dialog wrapper (next, in JSX) — fires on
+  //      bubble from any focused element inside the modal
+  //   3. autoFocus on the Cancel button (also next, in JSX) — gives
+  //      something inside the modal a real focus target so Esc has
+  //      a sane bubble path
   useEffect(() => {
     if (!showConsent) return;
     const onKey = (e: KeyboardEvent) => {
@@ -3500,6 +3532,17 @@ function RemotePrivacySection({
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => setShowConsent(false)}
+          // v0.6.1 hotfix layer 2: onKeyDown on the WRAPPER catches
+          // Esc bubbled from any descendant. The autoFocus on the
+          // Cancel button (below) ensures the modal has a focused
+          // element, so the bubble path is sane even immediately
+          // after the dialog opens.
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setShowConsent(false);
+            }
+          }}
           role="presentation"
         >
           <div
@@ -3507,8 +3550,13 @@ function RemotePrivacySection({
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
+            aria-labelledby="privacy-consent-title"
+            tabIndex={-1}
           >
-            <h3 className="text-sm font-semibold text-neutral-200">
+            <h3
+              id="privacy-consent-title"
+              className="text-sm font-semibold text-neutral-200"
+            >
               {t("settings.privacy_consent_title")}
             </h3>
             <ul className="space-y-1.5 text-xs text-neutral-400">
@@ -3521,6 +3569,13 @@ function RemotePrivacySection({
                 type="button"
                 onClick={() => setShowConsent(false)}
                 className="px-3 py-1.5 text-xs rounded border border-neutral-700 hover:bg-neutral-800"
+                // v0.6.1 hotfix layer 3: autoFocus gives the modal a
+                // real focus target on first render. Without this,
+                // Tauri's Webview2 may leave focus on the toggle
+                // button BEHIND the modal — Esc keypresses then
+                // never bubble through a path the dialog wrapper
+                // can intercept.
+                autoFocus
               >
                 {t("action.cancel")}
               </button>
