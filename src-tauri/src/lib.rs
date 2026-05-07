@@ -10,12 +10,16 @@ pub mod cache;
 pub mod config;
 pub mod cost_forecast;
 pub mod creds;
+pub mod cwd_hmac;
+pub mod install_hook;
 pub mod keychain;
 pub mod notify;
 pub mod paths;
 pub mod pricing;
 pub mod provider_creds;
 pub mod quota;
+pub mod redaction;
+pub mod risk;
 pub mod scanner;
 pub mod sentry_init;
 pub mod sessions;
@@ -1075,6 +1079,30 @@ async fn list_remote_sessions() -> Result<Vec<supabase::RemoteSession>, String> 
         return Ok(vec![]);
     };
     with_user_jwt(|jwt| async move { supabase::remote_list_sessions(&jwt).await }).await
+}
+
+/// v0.7.0 — One-click install of the CLI Pulse remote-approval hook
+/// into Claude Code's `~/.claude/settings.json`. Wraps
+/// `install_hook::install` with the currently-running binary's
+/// absolute path.
+///
+/// Returns the structured result (Installed / AlreadyUpToDate /
+/// Updated) so the frontend can render appropriate copy. Errors
+/// surface as user-displayable strings (parse errors on existing
+/// settings.json, write failures, etc.).
+#[tauri::command]
+fn install_claude_hook() -> Result<install_hook::InstallResult, String> {
+    let bin = install_hook::current_binary_path();
+    install_hook::install(&bin).map_err(|e| e.to_string())
+}
+
+/// v0.7.0 — Detect whether the hook is currently installed in
+/// settings.json AND points to the running binary. Frontend uses
+/// this to decide whether to render "Install" or "Installed" copy
+/// in the Privacy section.
+#[tauri::command]
+fn get_claude_hook_status() -> Result<install_hook::HookStatus, String> {
+    install_hook::current_status().ok_or_else(|| "could not resolve home directory".to_string())
 }
 
 /// v0.6.2 — send a command (prompt / stop / interrupt) to a managed
@@ -2296,6 +2324,9 @@ pub fn run() {
             set_remote_control_setting,
             // v0.6.2 — Send / Stop / Interrupt managed sessions
             send_remote_session_command,
+            // v0.7.0 — Install Claude hook + check current status
+            install_claude_hook,
+            get_claude_hook_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3529,6 +3529,10 @@ function RemotePrivacySection({
           {error}
         </div>
       )}
+      {/* v0.7.0 — Claude hook installer. Renders only when Remote
+          Control is ON, because installing the hook makes no sense
+          unless the user has opted in. Hidden when null/false. */}
+      {enabled === true && <ClaudeHookInstaller />}
       {showConsent && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -3592,6 +3596,136 @@ function RemotePrivacySection({
         </div>
       )}
     </section>
+  );
+}
+
+// v0.7.0 — Claude hook installer. Reads current install status on
+// mount and on every successful Install click. Three states:
+//   * not_installed → button "Install Claude hook"
+//   * installed_matches_binary → "✓ Hook installed" (disabled-looking)
+//     + secondary "Reinstall" button
+//   * installed_stale_binary → "⚠ Hook points to old install" + button
+//     "Update path"
+//
+// The Tauri command does atomic settings.json edits. Idempotent. The
+// install path is derived from std::env::current_exe() so users who
+// move the install (e.g. uninstall + reinstall to a different dir)
+// can re-run to update.
+type HookStatus = "not_installed" | "installed_matches_binary" | "installed_stale_binary";
+
+type InstallResult =
+  | { kind: "installed"; settings_path: string }
+  | { kind: "already_up_to_date"; settings_path: string }
+  | { kind: "updated"; settings_path: string; previous: string };
+
+function ClaudeHookInstaller() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<HookStatus | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [lastResult, setLastResult] = useState<InstallResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const s = await invoke<HookStatus>("get_claude_hook_status");
+      setStatus(s);
+    } catch (e: any) {
+      // Resolution failures (no home dir etc.) are rare; surface
+      // but don't block the rest of the Privacy section.
+      setError(t("settings.hook_install_status_failed", { err: String(e) }));
+    }
+  }, [t]);
+
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
+  const doInstall = async () => {
+    setInstalling(true);
+    setError(null);
+    try {
+      const result = await invoke<InstallResult>("install_claude_hook");
+      setLastResult(result);
+      await refreshStatus();
+    } catch (e: any) {
+      setError(t("settings.hook_install_failed", { err: String(e) }));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const isInstalled = status === "installed_matches_binary";
+  const isStale = status === "installed_stale_binary";
+
+  return (
+    <div className="border-t border-neutral-800 pt-3 space-y-2">
+      <div>
+        <h3 className="text-xs font-semibold text-neutral-300">
+          {t("settings.hook_install_heading")}
+        </h3>
+        <p className="text-xs text-neutral-500 mt-0.5">
+          {t("settings.hook_install_body")}
+        </p>
+      </div>
+      {/* Status pill — visible at all times so the user can see
+          install state at a glance */}
+      <div className="text-xs">
+        {status === null ? (
+          <span className="text-neutral-500">{t("misc.loading")}</span>
+        ) : isInstalled ? (
+          <span className="text-emerald-400">
+            ✓ {t("settings.hook_install_status_ok")}
+          </span>
+        ) : isStale ? (
+          <span className="text-amber-400">
+            ⚠ {t("settings.hook_install_status_stale")}
+          </span>
+        ) : (
+          <span className="text-neutral-500">
+            {t("settings.hook_install_status_missing")}
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={doInstall}
+          disabled={installing}
+          className={`px-3 py-1.5 text-xs rounded ${
+            isInstalled
+              ? "border border-neutral-700 hover:bg-neutral-800 text-neutral-300"
+              : "bg-emerald-700 hover:bg-emerald-600 text-white"
+          } disabled:opacity-50`}
+        >
+          {installing
+            ? t("settings.hook_install_installing")
+            : isInstalled
+              ? t("settings.hook_install_reinstall_button")
+              : isStale
+                ? t("settings.hook_install_update_button")
+                : t("settings.hook_install_install_button")}
+        </button>
+      </div>
+      {lastResult && !error && (
+        <div className="px-3 py-2 rounded bg-emerald-950/40 border border-emerald-900 text-emerald-200 text-xs space-y-0.5">
+          <div>
+            {lastResult.kind === "installed"
+              ? t("settings.hook_install_done_installed")
+              : lastResult.kind === "already_up_to_date"
+                ? t("settings.hook_install_done_unchanged")
+                : t("settings.hook_install_done_updated")}
+          </div>
+          <div className="font-mono text-[10px] text-emerald-200/60 break-all">
+            {lastResult.settings_path}
+          </div>
+        </div>
+      )}
+      {error && (
+        <div className="px-3 py-2 rounded bg-red-950/60 border border-red-900 text-red-200 text-xs">
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

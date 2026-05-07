@@ -2,6 +2,145 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.7.0] — 2026-05-07
+
+**Slice 3 of the Remote Sessions track — Windows-side hook
+emission.** Closes the loop: Claude PermissionRequests on this
+Windows machine can now reach Remote Approvals on the user's other
+devices (Mac, iOS, future Windows). Before v0.7.0 the desktop could
+view + decide approvals but couldn't ORIGINATE them.
+
+### Added
+- **`cli-pulse-desktop --remote-approval-hook --provider claude`
+  CLI mode.** Standalone Rust binary entry point invoked by Claude
+  Code per PermissionRequest. Reads JSON from stdin, classifies
+  risk, redacts secrets, calls
+  `remote_helper_create_permission_request`, polls
+  `remote_helper_poll_permission_decision` for up to 9.5 s, and
+  writes Claude's decision JSON to stdout. Exits 0 in every case
+  including crashes — emits a hardcoded fallback deny+message so
+  Claude never hangs.
+- **One-click hook installer in Settings → Privacy.** When Remote
+  Control is on, a "Claude permission hook" sub-section appears
+  with status (✓ installed / ⚠ stale path / not installed) and
+  Install / Reinstall / Update path button. The
+  `install_claude_hook` Tauri command edits
+  `~/.claude/settings.json` atomically (tempfile + rename),
+  preserving any existing hooks. Idempotent re-runs return
+  AlreadyUpToDate.
+- **Risk classifier** (`src/risk.rs`) — port of Mac's
+  `helper/provider_adapters/claude.py::_classify_risk`. Read-only
+  tools (Read / Glob / Grep / WebFetch / WebSearch / TodoRead /
+  ListMcpResources) are LOW. Bash with high-risk tokens (`rm -rf`,
+  `sudo `, `mkfs`, `dd if=`, fork bomb, `shutdown`, `reboot`,
+  `killall`, `chmod 777 /`, `curl `, `wget `, `ssh `, `scp `,
+  `rsync `, `history -c`, `kextload`, `csrutil `) is HIGH —
+  fail-closes locally, never round-trips.
+- **Secret redaction** (`src/redaction.rs`) — port of Mac's
+  `helper/redaction.py`. Two-pass: line/key (HTTP auth headers,
+  camel/snake credential keys, ALL_CAPS env keys) preserves the
+  key visible while redacting the value; token-shape (`sk-ant-…`,
+  `sk-…`, `AIza…`, `ghp_…`, `github_pat_…`, `AKIA…`, `Bearer …`,
+  `eyJ.eyJ.eyJ` JWTs, long hex) catches bare credentials with no
+  key context. Idempotent + dependency-free regex.
+- **HMAC-SHA256 of full cwd path** (`src/cwd_hmac.rs`). Per-user
+  secret stored in OS keychain at `<service=dev.clipulse.desktop,
+  account=cwd-hmac-secret>`. Server-side index uses the HMAC for
+  "same project" matching across devices without ever seeing the
+  path. Mac sibling has the same shape.
+- **2 new helper RPC wrappers** in `supabase.rs`:
+  `remote_helper_create_permission_request` (10 params per the
+  Mac v0.26 schema) and `remote_helper_poll_permission_decision`.
+  Both authenticate with `(device_id, helper_secret)` — the
+  desktop's existing pairing credentials.
+- **`hmac` + `sha2` crates added.** RustCrypto, audited, ~50 KB
+  bundle increase. Required for HMAC-SHA256 of cwd; using existing
+  primitive crates beats hand-rolling SHA-256.
+
+### Notes
+- **Hook protocol exact-match with Mac.** Output shape:
+  `{hookSpecificOutput: {hookEventName: "PermissionRequest",
+  decision: {behavior: "allow" | "deny", message?: string}}}`.
+  PermissionRequest does NOT support `ask` — fail-closed path
+  is `behavior: "deny"` with a message directing the user to
+  retry locally. Verified against
+  https://code.claude.com/docs/en/hooks (per Mac's
+  PROJECT_DEV_PLAN_2026-04-29).
+- **High-risk shortcut: never round-trips.** `rm -rf` /
+  `sudo` / `curl` / etc. emit deny + "must approve locally"
+  immediately, before any network call. Three-layer defense
+  (helper-side classifier here is layer 1; Tauri command
+  decide-RPC re-check is layer 2 from v0.6.0; UI Approve disabled
+  on high-risk is layer 3).
+- **Cross-device project matching is per-secret-pair.** Mac and
+  Windows have DIFFERENT `cwd-hmac-secret` values, so HMACs of
+  the same path differ across devices. v0.7.0 ships this
+  intentionally; cross-device project coalescing requires
+  syncing the secret via the device-creds channel which the Mac
+  team punted to a future iteration.
+- **Codex / shell hook adapters: stubbed.** Provider mismatch
+  emits a local fallback. Mac sibling stubs them too in Phase 1
+  — Codex's hook spec isn't stable yet.
+- **Sensitive filename blocklist** (.env / id_rsa / *.pem /
+  credentials.json) deferred — Mac's PROJECT_DEV_PLAN P3
+  carryover. Tracked for v0.7.x once Mac ships its version.
+- 249 backend tests (was 200 in v0.6.2, +49 new):
+  redaction (20 tests — adds Stripe / Slack / NPM / PyPI shapes +
+  idempotency + false-positive bounds), risk (15 covering each
+  risk class + edge cases + whitespace-tolerant matching), cwd_hmac
+  (8 covering hex roundtrip / determinism / keying), install_hook
+  (4 covering command shape + JSON walking). Frontend test count
+  unchanged; install-wizard UX is best verified end-to-end via VM
+  with a real `~/.claude/` directory.
+- **Post-implementation Gemini 3.1 Pro review caught 4 P1 + 2 P2,
+  all fixed:**
+  - **P1 (secret redaction gaps):** Pass 2 missed Stripe
+    (`sk_live_*` / `pk_live_*` / `rk_live_*`), Slack (`xox*-`),
+    NPM (`npm_*`), and PyPI (`pypi-*`) credential shapes.
+    Bare instances (printed without a recognized key prefix)
+    would have bypassed both passes and uploaded. Fixed by
+    adding 4 new regexes to `TOKEN_PATTERNS`. Mac sibling has
+    the same gap; this hardening can copy back via
+    `helper/redaction.py` if the Mac team wants.
+  - **P1 (subprocess hang on stalled poll):** the original
+    `remote_helper_poll_permission_decision().await` had no
+    per-call timeout — a stalled TCP connection could exceed
+    Claude's 12s hook budget before the loop's elapsed-check
+    fired. Fixed: each poll wrapped in
+    `tokio::time::timeout(2.5s)`. A timed-out poll yields to
+    the next interval; the total budget is preserved.
+  - **P1 (whitespace-tolerant high-risk matching):** the v0.7.0
+    initial implementation used naive substring `command.contains("rm -rf")`,
+    bypassable via `rm  -rf` (double space), `rm\t-rf` (tab),
+    `rm -r -f /tmp` (split flags). Mac has the same gap (same
+    token list). Fixed: token-level matching after
+    `split_whitespace()`, plus pair-level `rm` + flag-tokens-
+    containing-r-and-f matching. Single-token danger keywords
+    (`sudo`, `curl`, `wget`, `ssh`, etc.) match exact token
+    only — avoids false-positive on `sudoer-config-tool`.
+  - **P2 (panic hook):** if the Rust binary panics before our
+    error wrapper runs, stdout would be empty and Claude would
+    hang. Fixed: `std::panic::set_hook` in `main` writes the
+    raw deny-fallback to stdout and flushes before unwinding.
+  - **P2 (HMAC entropy):** original impl concatenated two
+    `uuid::v4()`s, losing 12 bits of entropy across the fixed
+    version/variant bits. Fixed: `getrandom::getrandom(&mut [0; 32])`
+    for full uniform 256-bit entropy. Adds the `getrandom` crate
+    explicitly (already in build graph as transitive).
+- Schema: zero new SQL. Mac's v0.26 schema covers the helper-
+  side surface completely. No autonomy-contract approval needed.
+
+### What v0.7.0 explicitly does NOT do
+- ConPTY managed-session local host (Slice 4, future v0.8.0).
+  Windows app cannot yet SPAWN Claude sessions per remote
+  command. Other devices' commands targeting Windows-hosted
+  sessions still need the macOS-team's
+  helper/transports/conpty.py implementation Mac has stubbed for
+  us — that's the v0.8.0 scope (~1500 LOC + portable-pty crate).
+- Codex / shell adapters. Out of scope until Mac ships theirs.
+- Push notifications on Windows. iOS-only on Mac side; Windows
+  has no equivalent native push channel that's worth a release.
+
 ## [0.6.2] — 2026-05-07
 
 **Slice 2 of the Remote Sessions track.** v0.6.0 made managed

@@ -682,6 +682,122 @@ pub async fn get_unresolved_alerts(
 }
 
 // ========================================================================
+// Remote Approvals — HELPER-side wrappers (v0.7.0).
+// ========================================================================
+//
+// These wrap the `remote_helper_*` RPCs (live since 2026-04-29 Phase 1)
+// for the Windows-side hook emission binary. They authenticate with
+// (device_id, helper_secret) — same auth model the existing
+// helper_sync uses, so the desktop's pairing credentials (already
+// stored in HelperConfig) are sufficient.
+//
+// The hook runs as a Claude-Code subprocess (NOT inside the Tauri
+// app), so these functions must be `pub` and not require any Tauri
+// runtime state. They re-use the module-level `client()` factory.
+
+/// Wraps `remote_helper_create_permission_request`. Creates a row in
+/// `remote_permission_requests` with status='pending'. Server-side
+/// gates on `user_settings.remote_control_enabled = true` AND
+/// validates `(device_id, helper_secret)`.
+///
+/// `payload` is JSON-encoded by the caller (typed-only on the
+/// adapter level — Rust client stays opaque to keep the wire shape
+/// pluggable for future provider adapters).
+///
+/// `ttl_seconds` is the deadline after which the row auto-expires.
+/// The Mac sibling uses 60 s (matches Claude's hook timeout window
+/// of 10 s with margin for the polling loop's cleanup).
+#[allow(clippy::too_many_arguments)]
+pub async fn remote_helper_create_permission_request(
+    device_id: &str,
+    helper_secret: &str,
+    request_id: &str,
+    session_id: Option<&str>,
+    provider: &str,
+    tool_name: &str,
+    summary: &str,
+    payload: serde_json::Value,
+    risk: &str,
+    ttl_seconds: u32,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_request_id: &'a str,
+        p_session_id: Option<&'a str>,
+        p_provider: &'a str,
+        p_tool_name: &'a str,
+        p_summary: &'a str,
+        p_payload: serde_json::Value,
+        p_risk: &'a str,
+        p_ttl_seconds: u32,
+    }
+    let v = rpc(
+        "remote_helper_create_permission_request",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_request_id: request_id,
+            p_session_id: session_id,
+            p_provider: provider,
+            p_tool_name: tool_name,
+            p_summary: summary,
+            p_payload: payload,
+            p_risk: risk,
+            p_ttl_seconds: ttl_seconds,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+/// One-shot poll for a decision on `request_id`. Returns:
+///   * `Some(("approve" | "deny", scope, reason))` if the user has
+///     decided.
+///   * `None` if the row is still pending.
+///   * `Err` on transport / auth failure (caller falls through to
+///     local-prompt fallback).
+///
+/// The Mac sibling polls every 1 s with a 10 s budget. Stub the same
+/// cadence in the hook binary.
+#[derive(Debug, Deserialize)]
+pub struct HelperPermissionDecision {
+    pub status: String, // "pending" / "approved" / "denied" / "expired"
+    #[serde(default)]
+    pub decision: Option<String>, // "approve" / "deny" — when status != pending
+    #[serde(default)]
+    pub scope: Option<String>, // "once" / "alwaysSession"
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+pub async fn remote_helper_poll_permission_decision(
+    device_id: &str,
+    helper_secret: &str,
+    request_id: &str,
+) -> SupabaseResult<HelperPermissionDecision> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_request_id: &'a str,
+    }
+    let v = rpc(
+        "remote_helper_poll_permission_decision",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_request_id: request_id,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(serde_json::from_value(v)?)
+}
+
+// ========================================================================
 // Remote Approvals + Sessions (v0.6.0) — app-side wrappers around the
 // existing live remote_app_* RPCs.
 // ========================================================================

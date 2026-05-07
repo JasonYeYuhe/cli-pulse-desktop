@@ -201,6 +201,19 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "remote.session_interrupt_tooltip",
     "remote.session_prompt_placeholder",
     "remote.session_prompt_submit",
+    // v0.7.0 — Claude hook installer (Settings → Privacy). Each
+    // status string and button copy is pinned because the user
+    // depends on accurate state to know if their hook is registered.
+    "settings.hook_install_heading",
+    "settings.hook_install_body",
+    "settings.hook_install_status_ok",
+    "settings.hook_install_status_stale",
+    "settings.hook_install_status_missing",
+    "settings.hook_install_install_button",
+    "settings.hook_install_reinstall_button",
+    "settings.hook_install_update_button",
+    "settings.hook_install_done_installed",
+    "settings.hook_install_done_updated",
     "settings.privacy_heading",
     "settings.privacy_body",
     "settings.privacy_toggle_label",

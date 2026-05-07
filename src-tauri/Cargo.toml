@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.6.2"
+version = "0.7.0"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -65,6 +65,20 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 # and we fail-closed via a clear UI error.
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 whoami = "1"
+# v0.7.0 — Rust port of the macOS team's helper/redaction.py +
+# helper/remote_hook.py + helper/provider_adapters/claude.py, used by
+# the Windows-side hook-emission binary. HMAC-SHA256 of the full cwd
+# path so the server's "same project" matching works without uploading
+# the path itself. Both crates are RustCrypto, audited, no_std-compat,
+# zero-dep beyond their own subsystem.
+hmac = "0.12"
+sha2 = "0.10"
+# v0.7.0 — proper CSPRNG for the cwd-hmac per-user secret. Already in
+# the build graph as a transitive dep of `uuid` and `keyring`; adding
+# it explicitly costs zero build time and lets us avoid the partial-
+# entropy reduction caused by uuid::v4's fixed version/variant bits
+# (Gemini 3.1 Pro v0.7.0 review P2).
+getrandom = "0.2"
 
 [dev-dependencies]
 # v0.4.20 — `start_paused = true` on `#[tokio::test]` advances virtual
