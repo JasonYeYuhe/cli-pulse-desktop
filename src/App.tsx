@@ -3747,6 +3747,173 @@ type RowMode =
   | { kind: "interrupting" }
   | { kind: "error"; message: string };
 
+/// v0.8.0 — Spawn-session launcher. Renders as a small "+ Start
+/// new session" button; clicking opens an inline dialog with a
+/// cwd field, optional label, and a Start submit. On success calls
+/// `onSpawned` so the parent refreshes the session list.
+///
+/// Privacy posture (per the dev plan): full cwd path stays LOCAL.
+/// Server only sees:
+///   - cwd_basename (last path segment, ≤255 chars; displayable)
+///   - cwd_hmac (HMAC-SHA256 of the full path, 32-byte hex)
+/// The HMAC uses a per-user secret stored in the OS keychain.
+function SpawnSessionLauncher({ onSpawned }: { onSpawned: () => Promise<void> }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [cwd, setCwd] = useState("");
+  const [label, setLabel] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = () => {
+    setCwd("");
+    setLabel("");
+    setError(null);
+    setSubmitting(false);
+  };
+
+  const close = () => {
+    setOpen(false);
+    reset();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedCwd = cwd.trim();
+    if (!trimmedCwd) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await invoke<string>("request_remote_session_start", {
+        args: {
+          cwd: trimmedCwd,
+          cwd_basename: null,
+          client_label: label.trim() || null,
+          provider: "claude",
+        },
+      });
+      // Refresh + close. The new session row will appear with
+      // status=pending within ~1s and flip to running once the
+      // agent picks up the start command.
+      await onSpawned();
+      close();
+    } catch (err: any) {
+      setError(String(err));
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="px-2 py-0.5 text-[10px] rounded bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-900 text-emerald-200"
+      >
+        + {t("remote.session_start_button")}
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="spawn-session-title"
+        className="w-full max-w-md rounded-lg border border-neutral-800 bg-neutral-950 p-4 space-y-3 shadow-xl"
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && !submitting) {
+            e.stopPropagation();
+            close();
+          }
+        }}
+      >
+        <h2
+          id="spawn-session-title"
+          className="text-sm font-semibold text-neutral-200"
+        >
+          {t("remote.session_start_dialog_title")}
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label
+              htmlFor="spawn-cwd"
+              className="block text-xs text-neutral-300 mb-1"
+            >
+              {t("remote.session_start_cwd_label")}
+            </label>
+            <input
+              id="spawn-cwd"
+              type="text"
+              value={cwd}
+              onChange={(e) => setCwd(e.target.value)}
+              placeholder={t("remote.session_start_cwd_placeholder")}
+              autoFocus
+              required
+              className="w-full px-2 py-1.5 text-xs font-mono bg-neutral-900 border border-neutral-800 rounded text-neutral-200 focus:outline-none focus:border-emerald-500"
+            />
+            <p className="mt-1 text-[10px] text-neutral-500 leading-snug">
+              {t("remote.session_start_cwd_help")}
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor="spawn-label"
+              className="block text-xs text-neutral-300 mb-1"
+            >
+              {t("remote.session_start_label_label")}
+            </label>
+            <input
+              id="spawn-label"
+              type="text"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder={t("remote.session_start_label_placeholder")}
+              className="w-full px-2 py-1.5 text-xs bg-neutral-900 border border-neutral-800 rounded text-neutral-200 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+          <div>
+            <span className="block text-xs text-neutral-300 mb-1">
+              {t("remote.session_start_provider_label")}
+            </span>
+            {/* v0.8.0 only supports claude — render as a static label
+                so users see what's being spawned. Codex / shell are
+                gated on Mac's v1.14+ Multi-CLI design. */}
+            <div className="px-2 py-1.5 text-xs bg-neutral-900 border border-neutral-800 rounded text-neutral-300">
+              {t("remote.session_start_provider_claude")}
+            </div>
+          </div>
+          {error && (
+            <div className="px-2 py-1.5 rounded bg-red-950/60 border border-red-900 text-red-200 text-[10px]">
+              {t("remote.session_start_failed", { err: error })}
+            </div>
+          )}
+          <div className="flex gap-2 justify-end pt-1">
+            <button
+              type="button"
+              onClick={close}
+              disabled={submitting}
+              className="px-3 py-1 text-xs rounded border border-neutral-700 hover:bg-neutral-800 text-neutral-300 disabled:opacity-40"
+            >
+              {t("action.cancel")}
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || cwd.trim().length === 0}
+              className="px-3 py-1 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {submitting
+                ? t("remote.session_start_processing")
+                : t("remote.session_start_submit")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function RemoteSessionsSection({
   sessions,
   enabled,
@@ -3838,6 +4005,10 @@ function RemoteSessionsSection({
         <h3 className="text-sm font-semibold text-neutral-300">
           {t("remote.sessions_heading")}
         </h3>
+        {/* v0.8.0 — Start new session CTA. Only shown when Remote
+            Control is enabled (the section is already gated on
+            `enabled` above). */}
+        <SpawnSessionLauncher onSpawned={onActionDone} />
       </div>
       {sessions.length === 0 ? (
         <div className="text-xs text-neutral-500 italic py-2">
@@ -4009,9 +4180,61 @@ type DiagnosticSnapshot = {
   provider_creds_backend: "os_keychain" | "file";
 };
 
+/** v0.8.0 — Agent loop diagnostic. Returns null when the agent isn't
+ * running (most commonly: not paired). */
+type AgentDiagnostic = {
+  running_count: number;
+  lifetime_count: number;
+  last_tick_seconds_ago: number | null;
+};
+
+/** v0.8.0 — Render the agent diagnostic block. Three lines: running
+ * count, lifetime count, last-tick age. Renders a single "not
+ * running" line when the agent is null (not paired). */
+function AgentDiagnosticBlock({ diag }: { diag: AgentDiagnostic | null }) {
+  const { t } = useTranslation();
+  if (diag === null) {
+    return (
+      <div className="text-xs text-neutral-500 italic">
+        {t("remote.agent_status_not_running")}
+      </div>
+    );
+  }
+  // Reuse the shared "X s/min/hr/d ago" decomposition by faking a
+  // timestamp `last_tick_seconds_ago` seconds in the past. Avoids a
+  // parallel formatter that could drift from the providers tab line.
+  const lastTickLine = (() => {
+    if (diag.last_tick_seconds_ago === null) {
+      return t("remote.agent_status_never_ticked");
+    }
+    const fakeTs = new Date(
+      Date.now() - diag.last_tick_seconds_ago * 1000
+    ).toISOString();
+    const parts = formatRelativeShortParts(fakeTs);
+    if (!parts) return t("remote.agent_status_never_ticked");
+    const age = t(`time.unit_${parts.unit}` as const, { count: parts.value });
+    return t("remote.agent_status_last_tick", { age });
+  })();
+  return (
+    <div className="space-y-0.5 text-xs text-neutral-400 border-l-2 border-neutral-800 pl-3">
+      <div className="font-medium text-neutral-300">
+        {t("remote.agent_status_heading")}
+      </div>
+      <div>
+        {t("remote.agent_status_running", { count: diag.running_count })}
+      </div>
+      <div>
+        {t("remote.agent_status_lifetime", { count: diag.lifetime_count })}
+      </div>
+      <div>{lastTickLine}</div>
+    </div>
+  );
+}
+
 function AboutSection({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
   const [diag, setDiag] = useState<DiagnosticSnapshot | null>(null);
+  const [agentDiag, setAgentDiag] = useState<AgentDiagnostic | null>(null);
   const [copied, setCopied] = useState(false);
   // v0.4.22 — Sentry diagnostic emit. The desktop project's lifetime
   // issue count was 0 since instrumentation went in (2026-04-22), but
@@ -4036,6 +4259,29 @@ function AboutSection({ paired }: { paired: boolean }) {
     invoke<DiagnosticSnapshot>("diagnostic_snapshot")
       .then(setDiag)
       .catch((e) => console.warn("diagnostic_snapshot failed", e));
+  }, [paired]);
+
+  // v0.8.0 — agent diagnostic. Polls every 5s while the About panel
+  // is mounted so users see live counters update. The Tauri command
+  // returns null when the agent loop isn't running (not paired or
+  // transport init failed); we render that as "not running".
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      invoke<AgentDiagnostic | null>("agent_diagnostic")
+        .then((d) => {
+          if (!cancelled) setAgentDiag(d);
+        })
+        .catch((e) => {
+          if (!cancelled) console.warn("agent_diagnostic failed", e);
+        });
+    };
+    refresh();
+    const id = window.setInterval(refresh, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, [paired]);
 
   function diagText(d: DiagnosticSnapshot): string {
@@ -4105,6 +4351,11 @@ function AboutSection({ paired }: { paired: boolean }) {
             </dd>
           </dl>
           <p className="text-xs text-neutral-500">{t("settings.about_diagnostics_hint")}</p>
+          {/* v0.8.0 — Agent diagnostic block. Lives in About so it's
+              co-located with the rest of the platform diagnostic
+              info; users copying the diagnostic block get the agent
+              counters too if they're surfacing a Sessions issue. */}
+          <AgentDiagnosticBlock diag={agentDiag} />
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={copyDiag}

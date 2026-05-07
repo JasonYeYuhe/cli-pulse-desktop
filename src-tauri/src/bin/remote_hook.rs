@@ -28,10 +28,19 @@
 //! unhandled error STILL emits a parseable hook output. Without
 //! this, Claude sees an empty stdout and either hangs or fails
 //! opaquely.
+//!
+//! v0.8.0 — file logging via `cli_pulse_desktop_lib::remote::log`.
+//! Folds in the v0.7.1 hotfix scope. Closes the diagnostic blind
+//! spot from `feedback_remote_hook_diagnostic_blind_spot.md`: the
+//! hook subprocess can now leave a forensic trail in
+//! %LOCALAPPDATA%\dev.clipulse.desktop\logs\remote-hook.log so a
+//! "remote_permission_requests row never appeared" finding has a
+//! diagnosable counterpart instead of an opaque silent fallback.
 
 use std::io::{Read, Write};
 use std::time::Duration;
 
+use cli_pulse_desktop_lib::remote::log as hook_log;
 use cli_pulse_desktop_lib::{config, cwd_hmac, redaction, risk, supabase};
 use serde_json::{json, Value};
 
@@ -104,9 +113,19 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 async fn run(provider: &str) -> anyhow::Result<()> {
+    // v0.8.0 — best-effort init of shared file logger. Failure (e.g.
+    // headless Linux without HOME) is a no-op; subsequent log_line
+    // calls drop silently. Closes the v0.7.0 diagnostic blind spot.
+    let _ = hook_log::try_init();
+    hook_log::info("hook", &format!("hook fired: provider={}", provider));
+
     if provider != "claude" {
         // Mac stubs codex/shell; we do the same. Emit local fallback
         // so Claude knows to handle the prompt itself.
+        hook_log::warn(
+            "hook",
+            &format!("unsupported provider {provider:?} — emitting local fallback"),
+        );
         emit_local_fallback("Provider not yet supported by Windows hook");
         return Ok(());
     }
@@ -115,10 +134,18 @@ async fn run(provider: &str) -> anyhow::Result<()> {
     let cfg = match config::load()? {
         Some(c) => c,
         None => {
+            hook_log::warn("hook", "config not paired — emitting local fallback");
             emit_local_fallback("Helper not paired");
             return Ok(());
         }
     };
+    hook_log::info(
+        "hook",
+        &format!(
+            "config loaded: device_id={}",
+            cfg.device_id.chars().take(8).collect::<String>()
+        ),
+    );
 
     let tool_name = raw
         .get("tool_name")
@@ -130,7 +157,9 @@ async fn run(provider: &str) -> anyhow::Result<()> {
 
     // Risk classify. HIGH = fail-closed locally, never round-trip.
     let r = risk::classify_risk(&tool_name, &tool_input);
+    hook_log::info("hook", &format!("risk classified: {}", r.as_str()));
     if r == risk::Risk::High {
+        hook_log::info("hook", "high-risk path — emitting local fallback");
         emit_local_fallback("High-risk action requires local approval");
         return Ok(());
     }
@@ -177,7 +206,7 @@ async fn run(provider: &str) -> anyhow::Result<()> {
     }
 
     // Create the request server-side.
-    if let Err(e) = supabase::remote_helper_create_permission_request(
+    match supabase::remote_helper_create_permission_request(
         &cfg.device_id,
         &cfg.helper_secret,
         &request_id,
@@ -191,9 +220,21 @@ async fn run(provider: &str) -> anyhow::Result<()> {
     )
     .await
     {
-        eprintln!("create_permission_request failed: {e:?}");
-        emit_local_fallback("Remote channel unavailable");
-        return Ok(());
+        Ok(()) => {
+            hook_log::info(
+                "hook",
+                &format!(
+                    "create_request POST → ok request_id={}",
+                    request_id.chars().take(8).collect::<String>()
+                ),
+            );
+        }
+        Err(e) => {
+            eprintln!("create_permission_request failed: {e:?}");
+            hook_log::error("hook", &format!("create_request POST → FAILED: {e}"));
+            emit_local_fallback("Remote channel unavailable");
+            return Ok(());
+        }
     }
 
     // Surface useful info: cwd_basename for the request row. The
@@ -233,10 +274,12 @@ async fn run(provider: &str) -> anyhow::Result<()> {
         match tokio::time::timeout(poll_http_timeout, poll_fut).await {
             Ok(Ok(decision)) => match decision.status.as_str() {
                 "approved" | "approve" => {
+                    hook_log::info("hook", "decision: allow");
                     emit_allow();
                     return Ok(());
                 }
                 "denied" | "deny" => {
+                    hook_log::info("hook", "decision: deny");
                     emit_deny(
                         decision
                             .reason
@@ -246,25 +289,40 @@ async fn run(provider: &str) -> anyhow::Result<()> {
                     return Ok(());
                 }
                 "expired" => {
+                    hook_log::info("hook", "decision: expired — emitting local fallback");
                     emit_local_fallback("Remote approval expired");
                     return Ok(());
                 }
-                _ => {} // pending / unknown → keep polling
+                _ => {
+                    hook_log::info(
+                        "hook",
+                        &format!("poll: status={} — continuing", decision.status),
+                    );
+                }
             },
             Ok(Err(e)) => {
                 // Transient RPC error (HTTP / parse). Retry unless
                 // the budget is exhausted.
                 eprintln!("poll error (will retry): {e:?}");
+                hook_log::warn("hook", &format!("poll error (will retry): {e}"));
             }
             Err(_elapsed) => {
                 // Per-poll timeout exceeded. Treat same as transient
                 // error — try the next interval if budget allows.
                 eprintln!("poll exceeded {poll_http_timeout:?} — retrying");
+                hook_log::warn(
+                    "hook",
+                    &format!("poll exceeded {poll_http_timeout:?} — retrying"),
+                );
             }
         }
 
         if start.elapsed() + interval >= timeout {
             // Out of budget; fail closed.
+            hook_log::warn(
+                "hook",
+                "out of budget — emitting local fallback (timeout reached)",
+            );
             emit_local_fallback(
                 "Remote approval unavailable. If this keeps happening, open CLI Pulse → Settings → Privacy and turn off Remote Control; the local Claude permission prompt will then run on your next attempt.",
             );

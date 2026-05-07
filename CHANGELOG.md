@@ -2,6 +2,201 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.8.0] — 2026-05-07
+
+**Slice 4 of the Remote Sessions track — ConPTY managed-session
+local host.** Closes the loop the macOS team explicitly designed
+for: Windows desktops (and Linux helpers) can now HOST managed
+Claude sessions that another device's UI is driving. Before
+v0.8.0, only Mac could host managed sessions (Mac shipped
+`helper/transports/posix_pty.py` while
+`helper/transports/conpty.py` was a `NotImplementedError` stub
+explicitly waiting for the cli-pulse-desktop track).
+
+When iOS / Mac / Windows app calls
+`remote_app_request_session_start(p_device_id=this-windows-box,
+p_provider=claude, ...)`, the desktop's new agent loop pulls the
+resulting `kind='start'` command via
+`remote_helper_pull_commands`, spawns Claude under a ConPTY
+pseudoconsole, registers `remote_sessions(status='running')`, then
+dispatches subsequent prompt / stop / interrupt commands until the
+child exits or the user stops it.
+
+### Added
+- **`src-tauri/src/remote/` module tree** — four new modules:
+  `transport.rs` (cross-platform `SessionTransport` trait +
+  `ConPtyTransport` via portable-pty), `agent.rs`
+  (`RemoteAgentManager` with 1 s tick loop + per-session state
+  map), `events.rs` (lifecycle event poster: `kind=status`
+  `stopped`/`errored` + `kind=info` for context), `log.rs`
+  (shared file appender used by BOTH the agent AND the
+  `bin/remote_hook.rs` subprocess — folds in the v0.7.1 hotfix
+  scope per `feedback_remote_hook_diagnostic_blind_spot.md`).
+- **4 new helper RPC wrappers** in `supabase.rs`:
+  `remote_helper_register_session`,
+  `remote_helper_pull_commands`, `remote_helper_post_event`,
+  `remote_helper_complete_command`. All four target already-live
+  RPCs the Mac team shipped in `cli-pulse` Phase 2 iter1
+  (2026-05-03); no new server-side schema changes.
+- **`remote_app_request_session_start` wrapper** in `supabase.rs`
+  for the spawn-dialog Tauri command.
+- **2 new Tauri commands**: `request_remote_session_start` (used
+  by the Sessions tab spawn dialog) and `agent_diagnostic`
+  (surfaces running count / lifetime count / last-tick age in
+  Settings → About).
+- **Sessions tab "+ Start new session" CTA** (`SpawnSessionLauncher`).
+  Click → modal dialog with cwd field, optional display label,
+  static "Claude" provider chip. Submit → calls
+  `remote_app_request_session_start` server-side; the local
+  agent picks up the resulting start command on its next ~1 s
+  tick and spawns via `ConPtyTransport`. Privacy posture: only
+  the cwd basename + HMAC-SHA256 fingerprint reach the server;
+  full path stays local.
+- **Settings → About agent diagnostic** — three lines: managed
+  sessions running, lifetime hosted, last-tick age. Polls every
+  5 s while About is mounted. Renders "agent not running (sign
+  in to enable)" when the loop isn't spawned.
+- **i18n** — 19 new keys × 3 languages (en / zh-CN / ja) for the
+  spawn dialog + agent diagnostic. All pinned in
+  `i18n.test.ts`'s critical-labels list.
+- **`bin/remote_hook.rs` file logging.** The hook subprocess
+  now writes timestamped lines to
+  `%LOCALAPPDATA%\dev.clipulse.desktop\logs\remote-hook.log`
+  (Win) /
+  `~/.local/share/dev.clipulse.desktop/logs/remote-hook.log`
+  (Linux). Closes the v0.7.0 VM verify diagnostic blind spot
+  where medium-risk D.1 came back with 0 server rows and no way
+  to tell whether the hook fail-fast'd locally OR the server
+  gate rejected. Now log lines record:
+  `hook fired → config loaded → risk classified →
+  create_request POST status → poll N → decision emitted`.
+  Local-only, never uploaded.
+
+### Changed
+- `bin/remote_hook.rs` `main()` calls `hook_log::try_init()` at
+  startup; every existing decision-point gains a parallel log
+  line (silent fallback paths now leave a forensic trail).
+
+### Reviewer fixes (Gemini 3.1 Pro plan review — all baked in
+from the first commit)
+- **P0 #1 — Tokio executor blocking.** Every sync transport call
+  inside the agent's async tick is wrapped in
+  `tokio::task::spawn_blocking`. A ConPTY pipe-buffer-full write
+  no longer parks Tauri's main runtime worker. Applied to
+  `start`, `write_stdin`, `interrupt`, `terminate`. `try_wait`
+  is the only non-blocking method (kernel poll only) and runs
+  on the runtime directly.
+- **P0 #2 — Process-group host-kill risk.** The plan called for
+  `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid)` against
+  a child spawned with `CREATE_NEW_PROCESS_GROUP`. Two findings
+  during impl: portable-pty 0.9 does NOT expose
+  `CommandBuilder::set_creation_flags` on Windows (only Unix
+  `umask` / `get_shell` are exposed), AND the signal-side path
+  carries a host-kill risk if the child shares the host's
+  console group. **Fix**: use the cross-platform pattern Windows
+  Terminal / wezterm / alacritty use — write 0x03 (ETX,
+  Ctrl-C) directly to the PTY stdin. ConPTY (Windows) and the
+  POSIX TTY driver both intercept this and translate to a
+  SIGINT-equivalent for the child's process group inside the
+  pseudoconsole. The host process is in a SEPARATE console (or
+  has none, for the windowed Tauri app) and CANNOT receive that
+  event. Eliminates the risk entirely without
+  `CREATE_NEW_PROCESS_GROUP` and gives us cross-platform
+  symmetry for free.
+- **P1 — Job Object orphan auto-cleanup.** On Windows we
+  `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
+  then `OpenProcess` the spawned child's PID and
+  `AssignProcessToJobObject`. When the desktop process exits
+  cleanly, crashes, or is force-killed via Task Manager, the
+  kernel closes the job handle and immediately terminates every
+  assigned child. Replaces the heuristic process-walking
+  approach from the v1 plan — kernel guarantee, not name
+  matching.
+- **P2 — `SessionHandle::close` Drop pattern.** v1 plan had
+  `close(self, handle)` consuming a clone, but reader threads
+  could keep the inner Arc alive and silently no-op the
+  teardown. v2: `Drop` on `HandleInner` runs when the LAST
+  clone goes out of scope, sets the reader-stop flag, kills the
+  child if still alive, closes the Job handle (kernel kills any
+  assigned children). The trait no longer carries a `close()`
+  method — callers drop `SessionHandle`.
+
+### Deps
+- New: `portable-pty 0.9` (used by VS Code, wezterm, alacritty;
+  ~200 KB binary cost). Cross-platform pseudoconsole on Win10+
+  and POSIX `openpty` on Linux.
+- New: `windows-sys 0.59` cfg-gated to Windows targets, with
+  `Win32_Foundation` + `Win32_System_JobObjects` +
+  `Win32_System_Threading` features for Job Object FFI. Already
+  a transitive dep of `keyring` / `getrandom`; explicit version
+  pin is zero binary cost.
+
+### Out of scope (deferred to v0.8.x or later)
+- Stdout / stderr tail upload via `remote_helper_post_event`
+  (Mac iter1 also defers — the cap-4 KB plumbing exists but
+  iter1 only uses lifecycle events).
+- Cross-device automatic routing via `cwd_hmac` matching (Mac
+  team punted; v0.8.0 user picks the device explicitly via the
+  spawn dialog).
+- Codex / shell adapter (waiting on Mac v1.14+ Multi-CLI
+  design). The `request_remote_session_start` Tauri command
+  rejects providers other than `claude` with a clear error.
+- Long-poll `remote_helper_pull_commands` instead of 1 s tick
+  (depends on real-user latency feedback).
+
+### Tests
+249 → ~285 backend tests (+5 wire-shape pins for the new
+`PulledCommand` shape; +6 transport tests for argv validation,
+ETX byte assertion, Drop-pattern reader-stop, real-child smoke;
++5 events tests covering seq increment, UTF-8 truncate, status
+enum). Frontend test count unchanged. CI matrix: Win + Linux
+both run `cargo test --lib` so the new module tree builds
+clean on the actual deployment targets.
+
+### Wire-format compatibility
+- `PulledCommand` decodes leniently: `payload` and `created_at`
+  are `Option<String>` so older / leaner server schemas decode
+  cleanly. `kind` is `String` not `enum` so future-class kinds
+  (`resize` / `signal` / etc. that Mac may add) don't crash
+  decode — the agent dispatcher returns `failed` with an
+  "unknown command kind" reason.
+
+### Gemini 3.1 Pro post-implementation diff review (3 P1 + 1 P2,
+all applied before commit)
+- **P1 #1 — Stalled prompt freezes whole agent loop.** Without a
+  per-call timeout, a child whose stdin pipe-buffer fills and won't
+  drain would block `handle_prompt` forever. Because dispatch is
+  sequential, every other session's commands queue behind the
+  stuck one. **Fix**: wrap each `tokio::task::spawn_blocking` for
+  `write_stdin` / `terminate` / `interrupt` in `tokio::time::timeout
+  (TRANSPORT_CALL_TIMEOUT)`. 5 s cap → one bad session degrades to
+  delayed dispatch; the agent loop keeps making forward progress.
+- **P1 #2 — Log file rotation silently broken on Windows.**
+  `OpenOptions::append(true)` alone grants only `FILE_APPEND_DATA`;
+  `File::set_len(0)` calls `SetEndOfFile` which needs
+  `FILE_WRITE_DATA` / `GENERIC_WRITE`. Rotation would fail with
+  ERROR_ACCESS_DENIED and the log would grow forever. **Fix**: add
+  `.write(true)` to the OpenOptions chain in `log.rs::try_init`
+  with a clippy::ineffective_open_options allow + reason.
+- **P1 #3 — App-exit lifecycle events stranded.** The agent's
+  `manager.shutdown()` (which posts `kind=info` `app_shutdown` for
+  running sessions) was never called on app exit. Tauri drops
+  managed state synchronously, never invoking the async shutdown.
+  **Fix**: agent loop now calls `manager.shutdown()` at the bottom
+  of its main loop body before returning, and `lib.rs::run_app`
+  sleeps 2 s after `stop.store(true)` so the loop has a window to
+  drain. Hard-crash path still falls back to Job Object for
+  process cleanup + `last_event_at` staleness as a UI hint.
+- **P2 — POSIX reader-thread leak when killed child has
+  descendants.** The reader is blocked in `read()` between iter
+  checks of the stop flag; normal exit relies on the slave PTY fd
+  closing. If the killed child had spawned long-lived descendants
+  that inherited the slave fd, those descendants keep the slave
+  open and the reader thread is stuck. For v0.8.0 `claude` doesn't
+  fork long-lived descendants under normal use; documented as a
+  known limitation in `transport.rs::spawn_reader_thread`. Windows
+  is unaffected (Job Object kills the entire descendant tree).
+
 ## [0.7.0] — 2026-05-07
 
 **Slice 3 of the Remote Sessions track — Windows-side hook

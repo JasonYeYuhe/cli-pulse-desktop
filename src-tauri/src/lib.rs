@@ -19,6 +19,9 @@ pub mod pricing;
 pub mod provider_creds;
 pub mod quota;
 pub mod redaction;
+// v0.8.0 — ConPTY managed-session local host. New module tree
+// (transport/agent/events/log) lives under `remote::*`.
+pub mod remote;
 pub mod risk;
 pub mod scanner;
 pub mod sentry_init;
@@ -1145,6 +1148,112 @@ async fn send_remote_session_command(
     .await
 }
 
+// ------------------------------------------------------------------------
+// v0.8.0 — Spawn a managed Claude session on this device.
+// ------------------------------------------------------------------------
+//
+// Frontend Sessions tab calls this when the user clicks "Start new
+// session" → fills the dialog → submits. We:
+//   1. Validate the user is signed in (need user JWT for the
+//      remote_app_request_session_start RPC).
+//   2. Compute cwd_hmac from the chosen path so the server can
+//      coalesce "same project" across devices in future iters.
+//   3. Call remote_app_request_session_start with this device's own
+//      device_id as target — the local agent loop's pull cycle picks
+//      up the resulting `start` command and spawns via ConPtyTransport.
+//   4. Return the new session_id so the frontend can immediately
+//      show the row as `pending` while the agent transitions it to
+//      `running` on the next tick (~1s).
+
+#[derive(Debug, Clone, Deserialize)]
+struct StartSessionArgs {
+    cwd: String,
+    #[serde(default)]
+    cwd_basename: Option<String>,
+    #[serde(default)]
+    client_label: Option<String>,
+    /// Provider — v0.8.0 only supports "claude".
+    #[serde(default = "default_provider")]
+    provider: String,
+}
+
+fn default_provider() -> String {
+    "claude".to_string()
+}
+
+#[tauri::command]
+async fn request_remote_session_start(args: StartSessionArgs) -> Result<String, String> {
+    // v0.8.0 only supports claude; reject codex / shell so the user
+    // sees an immediate error instead of a silently-failed agent
+    // dispatch (Mac team's Multi-CLI design ships in v1.14+).
+    if args.provider != "claude" {
+        return Err(format!(
+            "Provider `{}` is not yet supported. v0.8.0 hosts Claude sessions only.",
+            args.provider
+        ));
+    }
+
+    let cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Sign in required to start a remote session.".to_string())?;
+
+    // Compute basename + hmac from the user-provided cwd.
+    let basename = args.cwd_basename.clone().unwrap_or_else(|| {
+        args.cwd
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(255)
+            .collect::<String>()
+    });
+    let hmac_secret = cwd_hmac::load_or_create_secret().ok().flatten();
+    let cwd_hmac_hex = hmac_secret
+        .as_deref()
+        .and_then(|s| cwd_hmac::hmac_path(s, &args.cwd));
+
+    let device_id = cfg.device_id.clone();
+    let provider = args.provider.clone();
+    let client_label = args.client_label.clone();
+
+    with_user_jwt(move |jwt| {
+        let device_id = device_id.clone();
+        let provider = provider.clone();
+        let basename = basename.clone();
+        let cwd_hmac_hex = cwd_hmac_hex.clone();
+        let client_label = client_label.clone();
+        async move {
+            supabase::remote_request_session_start(
+                &device_id,
+                &provider,
+                Some(&basename),
+                cwd_hmac_hex.as_deref(),
+                client_label.as_deref(),
+                &jwt,
+            )
+            .await
+        }
+    })
+    .await
+}
+
+/// v0.8.0 — agent loop diagnostic for Settings → About display.
+/// Returns a `null` value when the agent isn't running (not paired
+/// or transport init failed); frontend renders a dash in that case.
+#[tauri::command]
+fn agent_diagnostic(app: tauri::AppHandle) -> Option<remote::AgentDiagnostic> {
+    use tauri::Manager;
+    let state = app.try_state::<RemoteAgentState>()?;
+    Some(state.handle.manager().diagnostic())
+}
+
+/// State wrapper held by Tauri. Stashes the `AgentHandle` so the
+/// `agent_diagnostic` command can read live counters and so the
+/// shutdown path can stop the loop cleanly.
+struct RemoteAgentState {
+    handle: remote::AgentHandle,
+}
+
 #[tauri::command]
 async fn get_remote_control_setting() -> Result<bool, String> {
     let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
@@ -2254,6 +2363,31 @@ pub fn run() {
             // stay on the plaintext file forever.
             provider_creds::init_backend();
             spawn_background_sync(app.handle().clone(), stop_bg.clone());
+
+            // v0.8.0 — ConPTY managed-session local host. Spawn the
+            // agent loop ONLY when paired (otherwise the loop has no
+            // helper credentials to authenticate the pull RPC, which
+            // would error every tick). Re-pair via Settings does NOT
+            // spawn the loop until next launch — acceptable trade-off
+            // since most v0.8.0 users will already be paired before
+            // updating; first-time pairs can re-launch.
+            match config::load() {
+                Ok(Some(cfg_for_agent)) => {
+                    let transport: std::sync::Arc<dyn remote::SessionTransport> =
+                        std::sync::Arc::new(remote::ConPtyTransport::new());
+                    let agent_handle =
+                        remote::spawn_agent_loop(transport, cfg_for_agent, stop_bg.clone());
+                    app.manage(RemoteAgentState {
+                        handle: agent_handle,
+                    });
+                    log::info!("Remote agent loop started");
+                }
+                Ok(None) => log::info!(
+                    "Remote agent loop not started — device not paired (sign in to enable)"
+                ),
+                Err(e) => log::warn!("Remote agent loop not started — config load failed: {e}"),
+            }
+
             // System tray — Windows first-class, Linux works with AppIndicator
             // when libayatana-appindicator3 is installed, otherwise we log and
             // continue window-first.
@@ -2327,12 +2461,28 @@ pub fn run() {
             // v0.7.0 — Install Claude hook + check current status
             install_claude_hook,
             get_claude_hook_status,
+            // v0.8.0 — ConPTY managed-session local host
+            request_remote_session_start,
+            agent_diagnostic,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
     // Let the background loop exit cleanly on app shutdown.
     stop.store(true, Ordering::Relaxed);
+
+    // v0.8.0 Gemini diff review P1 #3 — give the remote-agent loop a
+    // brief window to drain its final tick and call
+    // `manager.shutdown()`, which posts `kind=info` `app_shutdown`
+    // for any still-running managed sessions so the originating UI
+    // sees the row transition promptly instead of waiting for
+    // last_event_at staleness. The agent's own shutdown is bounded
+    // (per-session 5 s transport timeouts) so this sleep is a
+    // best-effort cap — a hung Supabase couldn't block process exit
+    // beyond a couple of seconds. Windows orphan PROCESS cleanup is
+    // handled by Job Object kill-on-close regardless of whether this
+    // sleep gets to run.
+    std::thread::sleep(std::time::Duration::from_secs(2));
 }
 
 // silence `Value` / `json` unused if not referenced elsewhere

@@ -958,6 +958,62 @@ pub async fn remote_send_command(
     Ok(())
 }
 
+/// v0.8.0 — Wraps `remote_app_request_session_start`. Creates a row
+/// in `remote_sessions(status='pending')` + `remote_session_commands
+/// (kind='start')` for the agent to pick up.
+///
+/// `target_device_id` is the device that should HOST the session
+/// (where the spawned `claude.exe` will run). For v0.8.0 the spawn
+/// dialog passes THIS Windows machine's own device_id so the local
+/// agent picks it up.
+///
+/// Returns the new session_id (UUID). Frontend stashes this so the
+/// pending row appears in the list immediately.
+pub async fn remote_request_session_start(
+    target_device_id: &str,
+    provider: &str,
+    cwd_basename: Option<&str>,
+    cwd_hmac: Option<&str>,
+    client_label: Option<&str>,
+    user_jwt: &str,
+) -> SupabaseResult<String> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_provider: &'a str,
+        p_cwd_basename: Option<&'a str>,
+        p_cwd_hmac: Option<&'a str>,
+        p_client_label: Option<&'a str>,
+    }
+    let v = rpc_with_auth(
+        "remote_app_request_session_start",
+        &Params {
+            p_device_id: target_device_id,
+            p_provider: provider,
+            p_cwd_basename: cwd_basename,
+            p_cwd_hmac: cwd_hmac,
+            p_client_label: client_label,
+        },
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    // RPC returns either { session_id: "uuid" } or { id: "uuid" } —
+    // server schema may evolve. Try both keys before erroring.
+    if let Some(id) = v.get("session_id").and_then(|x| x.as_str()) {
+        return Ok(id.to_string());
+    }
+    if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+        return Ok(id.to_string());
+    }
+    Err(SupabaseError::Json(serde_json::Error::io(
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "remote_app_request_session_start: response missing session_id/id",
+        ),
+    )))
+}
+
 /// Wraps `remote_app_list_sessions()` — Phase 2 iter1 RPC. Returns
 /// pending+running managed sessions across the user's devices, with
 /// `device_name` joined for display. Returns `[]` when Remote Control
@@ -1104,6 +1160,207 @@ pub struct HelperHeartbeatRequest<'a> {
 
 pub async fn helper_heartbeat(req: &HelperHeartbeatRequest<'_>) -> SupabaseResult<()> {
     let v = rpc("helper_heartbeat", req).await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+// ========================================================================
+// v0.8.0 — Remote Sessions HELPER-side wrappers (managed-session host).
+// ========================================================================
+//
+// These four RPCs are already-live (Mac sibling shipped them in
+// `cli-pulse` Phase 2 iter1, 2026-05-03). v0.8.0 wires the desktop
+// agent loop into the same surfaces so a Windows / Linux host can
+// register, dispatch commands, and report events for a managed
+// Claude session that another device's UI is driving.
+//
+// Auth: same `(device_id, helper_secret)` pair the existing
+// `remote_helper_create_permission_request` uses (v0.7.0 hook
+// emission). HelperConfig already has both — no new credential.
+//
+// Wire shape mirrors `helper/remote_agent.py`:
+//   * `register_session` is called once at spawn-success time to
+//     transition the row from `pending` → `running`.
+//   * `pull_commands` is called on every 1s tick; returns up to
+//     `p_max` queued commands across all sessions on this device.
+//   * `post_event` posts lifecycle status + info events.
+//   * `complete_command` reports per-command outcome
+//     ('delivered' | 'failed') so the app can dim the "in-flight"
+//     UI promptly.
+
+/// Wraps `remote_helper_register_session`. Called once after the
+/// transport spawn succeeds; flips the `remote_sessions.status` row
+/// from `pending` → `running` so the originating device's UI shows
+/// the session as live.
+///
+/// Server gates on `(device_id, helper_secret)` matching AND on
+/// `user_settings.remote_control_enabled = true`. Off-toggle returns
+/// an error variant; caller should still post a `kind=errored` event
+/// from the agent so the row doesn't sit at `pending` forever.
+#[allow(clippy::too_many_arguments)]
+pub async fn remote_helper_register_session(
+    device_id: &str,
+    helper_secret: &str,
+    session_id: &str,
+    provider: &str,
+    cwd_basename: &str,
+    cwd_hmac: Option<&str>,
+    client_label: Option<&str>,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_session_id: &'a str,
+        p_provider: &'a str,
+        p_cwd_basename: &'a str,
+        p_cwd_hmac: Option<&'a str>,
+        p_client_label: Option<&'a str>,
+    }
+    let v = rpc(
+        "remote_helper_register_session",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_session_id: session_id,
+            p_provider: provider,
+            p_cwd_basename: cwd_basename,
+            p_cwd_hmac: cwd_hmac,
+            p_client_label: client_label,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+/// One queued command for this device's agent loop. Mirrors the
+/// shape `remote_helper_pull_commands` returns. Fields beyond what
+/// v0.8.0 dispatches are decoded leniently (Option) so server schema
+/// drift doesn't break decode for older desktop clients.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PulledCommand {
+    pub id: String,
+    pub session_id: String,
+    /// "start" | "prompt" | "stop" | "interrupt". String not enum so
+    /// future-class servers don't crash decode (same posture as
+    /// `RemoteSession::status`).
+    pub kind: String,
+    /// Free-text payload (prompt body for `kind="prompt"`, JSON
+    /// metadata for `kind="start"`, empty for `stop` / `interrupt`).
+    #[serde(default)]
+    pub payload: Option<String>,
+    /// Optional `created_at` timestamp; informational only.
+    #[serde(default)]
+    pub created_at: Option<String>,
+}
+
+/// Wraps `remote_helper_pull_commands`. Returns up to `max` queued
+/// commands across all sessions on this device. Server-side gate
+/// returns an error when Remote Control is disabled — caller
+/// (`agent.rs`) catches and continues; on the next cycle, if the
+/// user re-enables, dispatching resumes.
+pub async fn remote_helper_pull_commands(
+    device_id: &str,
+    helper_secret: &str,
+    max: u32,
+) -> SupabaseResult<Vec<PulledCommand>> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_max: u32,
+    }
+    let v = rpc(
+        "remote_helper_pull_commands",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_max: max,
+        },
+    )
+    .await?;
+    // The RPC may return either an empty array or `{"error": ...}` shape;
+    // check_rpc_error handles the latter.
+    if let Some(obj) = v.as_object() {
+        if obj.contains_key("error") {
+            check_rpc_error(&v)?;
+        }
+    }
+    // Empty / null both decode to empty vec.
+    if v.is_null() {
+        return Ok(Vec::new());
+    }
+    Ok(serde_json::from_value(v)?)
+}
+
+/// Wraps `remote_helper_post_event`. Server-side gate transitions
+/// `remote_sessions.status` only when `p_kind = 'status'` AND
+/// `p_payload IN ('stopped', 'errored')`. See `events.rs` for the
+/// defensive enum that prevents typos.
+pub async fn remote_helper_post_event(
+    device_id: &str,
+    helper_secret: &str,
+    session_id: &str,
+    seq: i64,
+    kind: &str,
+    payload: &str,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_session_id: &'a str,
+        p_seq: i64,
+        p_kind: &'a str,
+        p_payload: &'a str,
+    }
+    let v = rpc(
+        "remote_helper_post_event",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_session_id: session_id,
+            p_seq: seq,
+            p_kind: kind,
+            p_payload: payload,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+/// Wraps `remote_helper_complete_command`. `status` is `"delivered"`
+/// or `"failed"`. `error` is a short reason string; passed when
+/// status == "failed". Mac sibling stores at most 200 chars in this
+/// column; we don't enforce that client-side (server CHECK does).
+pub async fn remote_helper_complete_command(
+    device_id: &str,
+    helper_secret: &str,
+    command_id: &str,
+    status: &str,
+    error: Option<&str>,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_command_id: &'a str,
+        p_status: &'a str,
+        p_error: Option<&'a str>,
+    }
+    let v = rpc(
+        "remote_helper_complete_command",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_command_id: command_id,
+            p_status: status,
+            p_error: error,
+        },
+    )
+    .await?;
     check_rpc_error(&v)?;
     Ok(())
 }
@@ -1292,6 +1549,76 @@ mod tests {
         assert_eq!(s.cwd_hmac, None);
         assert_eq!(s.client_label, None);
         assert_eq!(s.last_event_at, None);
+    }
+
+    // v0.8.0 — Remote Sessions HELPER-side wire-shape pins. Mirrors the
+    // Mac sibling's `remote_helper_pull_commands` / `post_event` shapes.
+
+    #[test]
+    fn pulled_command_round_trips_full_shape() {
+        let body = json!({
+            "id": "cmd-11111111",
+            "session_id": "11111111-1111-1111-1111-111111111111",
+            "kind": "prompt",
+            "payload": "what files exist?",
+            "created_at": "2026-05-07T12:00:00+00:00"
+        });
+        let cmd: PulledCommand = serde_json::from_value(body).unwrap();
+        assert_eq!(cmd.id, "cmd-11111111");
+        assert_eq!(cmd.kind, "prompt");
+        assert_eq!(cmd.payload.as_deref(), Some("what files exist?"));
+    }
+
+    #[test]
+    fn pulled_command_handles_missing_optional_fields() {
+        // stop / interrupt commands have no payload; created_at may
+        // be absent on older server schemas.
+        let body = json!({
+            "id": "cmd-22222222",
+            "session_id": "11111111-1111-1111-1111-111111111111",
+            "kind": "stop"
+        });
+        let cmd: PulledCommand = serde_json::from_value(body).unwrap();
+        assert_eq!(cmd.payload, None);
+        assert_eq!(cmd.created_at, None);
+    }
+
+    #[test]
+    fn pulled_command_array_decodes() {
+        // The agent's pull loop expects an array; pin that the typed
+        // wrapper accepts what `remote_helper_pull_commands` returns.
+        let body = json!([
+            {
+                "id": "cmd-1",
+                "session_id": "ses-1",
+                "kind": "start",
+                "payload": "{\"provider\":\"claude\",\"cwd_basename\":\"my-project\"}"
+            },
+            {
+                "id": "cmd-2",
+                "session_id": "ses-1",
+                "kind": "prompt",
+                "payload": "hi"
+            }
+        ]);
+        let cmds: Vec<PulledCommand> = serde_json::from_value(body).unwrap();
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].kind, "start");
+        assert_eq!(cmds[1].kind, "prompt");
+    }
+
+    #[test]
+    fn pulled_command_handles_unknown_kind() {
+        // Future-class kinds (Mac may add `resize` / `signal` later).
+        // Decode must not fail; agent dispatcher drops unknown kinds
+        // with a `failed` complete_command.
+        let body = json!({
+            "id": "cmd-future",
+            "session_id": "ses-1",
+            "kind": "future-class-not-yet-shipped"
+        });
+        let cmd: PulledCommand = serde_json::from_value(body).unwrap();
+        assert_eq!(cmd.kind, "future-class-not-yet-shipped");
     }
 
     #[test]
