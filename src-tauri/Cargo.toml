@@ -93,8 +93,14 @@ portable-pty = "0.9"
 # transitive dep via `keyring` / `getrandom`; adding it explicitly is
 # zero binary cost.
 [target.'cfg(windows)'.dependencies]
+# `Win32_Security` is required because `CreateJobObjectW`'s signature
+# references `*const SECURITY_ATTRIBUTES`; windows-sys 0.59 cfg-gates
+# the function on that feature even though we pass null. Without it,
+# the import fails with E0432 "unresolved import" — caught by the
+# v0.8.0 first-push CI run, see commit history.
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
