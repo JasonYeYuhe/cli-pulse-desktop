@@ -1,25 +1,23 @@
-//! v0.8.0 — Remote Sessions local-host module.
+//! v0.8.1 — Remote module (post-incident reduction).
 //!
-//! Slice 4 of the Remote Sessions track: this Windows / Linux desktop
-//! becomes a peer to the Mac helper for hosting managed Claude
-//! sessions that another device's UI is driving.
+//! v0.8.0 shipped a ConPTY managed-session local host (transport +
+//! agent + events submodules) that crashed on launch (BEX64,
+//! `STATUS_STACK_BUFFER_OVERRUN`, fault offset `0x4c9375`) on a clean
+//! Windows VM. Rather than ship a half-fixed hotfix that might still
+//! linger near the offending code path, v0.8.1 is a radical revert:
+//! the ConPTY feature is removed entirely (modules deleted,
+//! `portable-pty` + `windows-sys` deps removed, no agent loop spawn
+//! in `lib.rs::run`).
 //!
-//! Module layout (per `PROJECT_DEV_PLAN_2026-05-07_v0.8.0_conpty_managed_sessions.md`):
-//! - `transport` — `SessionTransport` trait + `ConPtyTransport` impl
-//!   (portable-pty wrapper, Job Object on Windows, write-0x03-for-
-//!   interrupt cross-platform pattern).
-//! - `agent` — `RemoteAgentManager` (per-session state map + 1s tick
-//!   loop pulling commands via `remote_helper_pull_commands` and
-//!   dispatching to the transport).
-//! - `events` — lifecycle event poster (status / info / orphan-cleanup).
-//! - `log` — shared file appender used by both the agent AND the
-//!   `remote_hook.rs` subprocess. Folds in the v0.7.1 hotfix scope
-//!   from `feedback_remote_hook_diagnostic_blind_spot.md`.
+//! What v0.8.1 KEEPS from the v0.8.0 ship:
+//! - `remote::log` — shared file appender used by `bin/remote_hook.rs`
+//!   (closes the v0.7.0 diagnostic blind spot per
+//!   `feedback_remote_hook_diagnostic_blind_spot.md`). Hook-side
+//!   logging worked cleanly in production; this is the one piece of
+//!   v0.8.0 worth preserving.
+//!
+//! ConPTY managed-session host returns in v0.9.x with a mandatory VM
+//! smoke gate before promote-to-Latest (autonomy contract, learned
+//! from the v0.8.0 incident).
 
-pub mod agent;
-pub mod events;
 pub mod log;
-pub mod transport;
-
-pub use agent::{spawn_agent_loop, AgentDiagnostic, AgentHandle, RemoteAgentManager};
-pub use transport::{ConPtyTransport, SessionHandle, SessionTransport, TransportError};

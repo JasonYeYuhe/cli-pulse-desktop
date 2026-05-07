@@ -2,7 +2,80 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
-## [0.8.0] — 2026-05-07
+## [0.8.1] — 2026-05-08
+
+**Radical revert of the v0.8.0 ConPTY managed-session feature.**
+v0.8.0 crashed on launch (`STATUS_STACK_BUFFER_OVERRUN` / BEX64,
+fault offset `0x4c9375`) on a clean Windows VM — auto-update from
+v0.7.0 left users with a non-functional app. v0.8.0 was YANKED to
+prerelease and Latest tag reverted to v0.7.0 within minutes of
+discovery. v0.8.1 ships the smallest possible delta from v0.7.0
+plus the one v0.8.0 piece that worked (the diagnostic file logger).
+
+### Removed (rolled back from v0.8.0)
+- `src-tauri/src/remote/{transport,agent,events}.rs` modules deleted
+- `portable-pty 0.9` dep removed
+- `windows-sys 0.59` cfg-windows dep removed
+- `spawn_agent_loop()` call in `lib.rs::run` setup hook removed
+- 4 helper RPC wrappers (`remote_helper_register_session`,
+  `remote_helper_pull_commands`, `remote_helper_post_event`,
+  `remote_helper_complete_command`) removed from `supabase.rs`
+- `remote_request_session_start` wrapper removed
+- `request_remote_session_start` + `agent_diagnostic` Tauri commands
+  removed
+- `RemoteAgentState` Tauri-managed state removed
+- 2-second post-`run` shutdown drain sleep removed
+- `SpawnSessionLauncher` + `AgentDiagnosticBlock` React components
+  removed from `src/App.tsx`
+- 19 spawn-dialog + agent-diagnostic i18n keys removed across
+  en / zh-CN / ja
+- `PulledCommand` wire-shape pin tests removed
+- 26 v0.8.0 backend tests removed (transport / agent / events /
+  PulledCommand) — the modules they tested are gone
+
+### Kept from v0.8.0
+- `src-tauri/src/remote/log.rs` — shared file appender used by
+  `bin/remote_hook.rs`. This is the v0.7.1 hotfix scope per
+  `feedback_remote_hook_diagnostic_blind_spot.md`. Hook-side
+  logging worked cleanly in production before v0.8.0 ever loaded
+  the buggy ConPTY code path; this is the one piece worth
+  preserving. Hook subprocess writes timestamped lines to:
+  - Windows: `%LOCALAPPDATA%\dev.clipulse.desktop\logs\remote-hook.log`
+  - Linux: `~/.local/share/dev.clipulse.desktop/logs/remote-hook.log`
+- `src-tauri/src/bin/remote_hook.rs` `try_init()` calls + 6
+  decision-point log lines (closes the v0.7.0 VM verify D.1
+  diagnostic blind spot)
+
+### Net effect
+v0.8.1 ≈ v0.7.0 + remote-hook.log diagnostic logger. No FFI, no
+portable-pty linkage, no agent loop, no spawn dialog, no
+ConPTY codepath at all. Auto-update from v0.7.0 → v0.8.1 lands
+users on a working app with the v0.7.0 feature surface intact
+plus better hook-side forensics.
+
+### Process change
+The autonomy contract had a **MANDATORY VM smoke test before
+promote-to-Latest** since v0.2.10 (the original packaging-class
+regression). The v0.8.0 handoff prompt's step 10 said "promote
+immediately" and skipped the smoke; I followed the handoff
+instead of the contract. **v0.8.1 reinstates the smoke gate and
+will not promote without VM-confirmed launch survival.** Memory
+updated to flag this rule as non-negotiable regardless of
+handoff-prompt phrasing.
+
+### What's next
+ConPTY managed-session host returns on the v0.9.x track. Root
+cause investigation of the v0.8.0 fault offset `0x4c9375` is in
+progress; suspects include a queued `start` command in the
+`remote_session_commands` table triggering portable-pty +
+Job Object FFI on first tick + crashing under
+`STATUS_STACK_BUFFER_OVERRUN`. v0.9.x will land the feature with:
+- A debug-symbol CI artifact for crash post-mortem
+- A kill-switch env var (`CLI_PULSE_DISABLE_REMOTE_AGENT=1`) so
+  a future incident can be mitigated without rolling Latest
+- Mandatory VM smoke gate before any promote-to-Latest
+
+## [0.8.0] — 2026-05-07 (YANKED — crashes on launch on Windows)
 
 **Slice 4 of the Remote Sessions track — ConPTY managed-session
 local host.** Closes the loop the macOS team explicitly designed

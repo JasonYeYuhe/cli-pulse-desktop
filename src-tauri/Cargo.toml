@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.8.0"
+version = "0.8.1"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -79,31 +79,12 @@ sha2 = "0.10"
 # entropy reduction caused by uuid::v4's fixed version/variant bits
 # (Gemini 3.1 Pro v0.7.0 review P2).
 getrandom = "0.2"
-# v0.8.0 — ConPTY managed-session local host. Used by VS Code, wezterm,
-# alacritty. Wraps Win10+ pseudoconsole + POSIX openpty under a single
-# trait. We use it only for the Windows path; on Linux it falls back to
-# POSIX openpty but Linux is also a supported host. ~200 KB binary cost.
-portable-pty = "0.9"
-
-# v0.8.0 — Job Object FFI for orphan auto-cleanup on Windows. When the
-# desktop process exits / crashes, the kernel kills assigned children
-# the same instant. Replaces the heuristic process-walking approach
-# from the v0.8.0 plan v1 (Gemini 3.1 Pro P1: kernel-level guarantee
-# is strictly better than name-matching heuristics). Already a
-# transitive dep via `keyring` / `getrandom`; adding it explicitly is
-# zero binary cost.
-[target.'cfg(windows)'.dependencies]
-# `Win32_Security` is required because `CreateJobObjectW`'s signature
-# references `*const SECURITY_ATTRIBUTES`; windows-sys 0.59 cfg-gates
-# the function on that feature even though we pass null. Without it,
-# the import fails with E0432 "unresolved import" — caught by the
-# v0.8.0 first-push CI run, see commit history.
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-] }
+# v0.8.0 added portable-pty + windows-sys deps for the ConPTY managed-
+# session host. v0.8.1 reverts that feature after a STATUS_STACK_BUFFER_OVERRUN
+# crash-on-launch was observed on a clean Windows VM (BEX64 fault at
+# offset 0x4c9375). Both deps are removed pending root-cause investigation.
+# v0.9.x will reintroduce the ConPTY host with a mandatory VM smoke gate
+# before promote-to-Latest.
 
 [dev-dependencies]
 # v0.4.20 — `start_paused = true` on `#[tokio::test]` advances virtual

@@ -224,24 +224,8 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.privacy_consent_body_b2",
     "settings.privacy_consent_body_b3",
     "settings.privacy_consent_enable_button",
-    // v0.8.0 — Spawn-session dialog + agent diagnostic. The spawn
-    // dialog is the first user-driven entry point to the new ConPTY
-    // managed-session host; mistranslating the cwd field label or
-    // the help text would mislead users about what gets uploaded
-    // (HMAC fingerprint + basename only — full path stays local).
-    "remote.session_start_button",
-    "remote.session_start_dialog_title",
-    "remote.session_start_cwd_label",
-    "remote.session_start_cwd_help",
-    "remote.session_start_provider_label",
-    "remote.session_start_submit",
-    "remote.session_start_processing",
-    "remote.session_start_failed",
-    "remote.agent_status_heading",
-    "remote.agent_status_lifetime",
-    "remote.agent_status_last_tick",
-    "remote.agent_status_never_ticked",
-    "remote.agent_status_not_running",
+    // v0.8.0 introduced spawn-dialog + agent-diagnostic keys; v0.8.1
+    // reverts the corresponding feature so those keys are gone too.
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(
