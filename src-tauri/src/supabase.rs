@@ -798,6 +798,50 @@ pub async fn remote_decide_permission(
     Ok(())
 }
 
+/// Wraps `remote_app_send_command(p_session_id, p_kind, p_payload)`.
+///
+/// `kind` is "prompt" | "stop" | "interrupt" (validated server-side).
+/// `payload` is the prompt text for "prompt" (capped at 8192 chars
+/// server-side per the v0.26 column constraint); empty for "stop"
+/// and "interrupt".
+///
+/// Server-side: gated on `user_settings.remote_control_enabled = true`
+/// AND on `remote_sessions.user_id = auth.uid()` (RLS-equivalent
+/// inside the SECURITY DEFINER function), so a user can only command
+/// sessions they own. The helper polls `remote_helper_pull_commands`
+/// every ~1s and dispatches by kind.
+///
+/// Returns `()` on success — the RPC writes the row and returns the
+/// command_id, but for v0.6.2 the desktop's Send/Stop UX is
+/// fire-and-forget (no wait for the helper to ACK). v0.6.x+ may add
+/// a sessions-events stream that surfaces command outcomes; for now
+/// the user re-checks via the next poll of `remote_app_list_sessions`.
+pub async fn remote_send_command(
+    session_id: &str,
+    kind: &str,
+    payload: Option<&str>,
+    user_jwt: &str,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_session_id: &'a str,
+        p_kind: &'a str,
+        p_payload: &'a str,
+    }
+    let v = rpc_with_auth(
+        "remote_app_send_command",
+        &Params {
+            p_session_id: session_id,
+            p_kind: kind,
+            p_payload: payload.unwrap_or(""),
+        },
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
 /// Wraps `remote_app_list_sessions()` — Phase 2 iter1 RPC. Returns
 /// pending+running managed sessions across the user's devices, with
 /// `device_name` joined for display. Returns `[]` when Remote Control

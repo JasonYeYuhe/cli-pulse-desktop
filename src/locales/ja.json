@@ -311,7 +311,16 @@
     "session_status_pending": "待機中",
     "session_status_running": "実行中",
     "session_status_stopped": "停止済み",
-    "session_status_errored": "エラー"
+    "session_status_errored": "エラー",
+    "session_send_button": "送信",
+    "session_stop_button": "停止",
+    "session_interrupt_button": "中断",
+    "session_interrupt_tooltip": "Ctrl+C 相当のシグナルを送信(現在の操作を中断、セッションは継続)。",
+    "session_sending": "送信中…",
+    "session_stopping": "停止中…",
+    "session_interrupting": "中断中…",
+    "session_prompt_placeholder": "セッションに送信するプロンプトを入力…",
+    "session_prompt_submit": "送信"
   },
   "tray": {
     "header_label": "CLI Pulse",

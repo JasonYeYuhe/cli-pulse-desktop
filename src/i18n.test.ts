@@ -192,6 +192,15 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "remote.sessions_heading",
     "remote.sessions_readonly_badge",
     "remote.sessions_empty",
+    // v0.6.2 — managed-session control buttons. Pinning the
+    // tooltip especially because it carries security-relevant
+    // copy ("Ctrl+C-equivalent — interrupt vs stop").
+    "remote.session_send_button",
+    "remote.session_stop_button",
+    "remote.session_interrupt_button",
+    "remote.session_interrupt_tooltip",
+    "remote.session_prompt_placeholder",
+    "remote.session_prompt_submit",
     "settings.privacy_heading",
     "settings.privacy_body",
     "settings.privacy_toggle_label",

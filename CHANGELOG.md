@@ -2,6 +2,65 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.6.2] — 2026-05-07
+
+**Slice 2 of the Remote Sessions track.** v0.6.0 made managed
+sessions visible; v0.6.2 makes them controllable. The Sessions tab
+"Active managed sessions" section now has per-row Send / Stop /
+Interrupt buttons (replaces the v0.6.0 "Read-only preview" badge).
+
+### Added
+- **Per-row Send / Stop / Interrupt buttons** in the Sessions tab
+  managed-sessions section. Wraps the existing live
+  `remote_app_send_command` RPC (Mac sibling has used it since
+  Phase 2 iter1, 2026-05-03). Behavior:
+  - **Send** expands an inline textarea (max 8192 chars per
+    server-side column cap) → submit fires `kind="prompt"` with the
+    typed text. Enter submits, Shift+Enter newlines, Esc cancels
+    and reverts to idle (matches typical chat-input UX).
+  - **Stop** fires `kind="stop"` immediately. Available on both
+    `pending` and `running` sessions (Stop on pending = cancel-the-
+    start; Stop on running = graceful shutdown).
+  - **Interrupt** fires `kind="interrupt"` (Ctrl+C-equivalent —
+    interrupts the current operation but keeps the session alive).
+    Tooltip explains the distinction. Only enabled on `running`.
+  - Terminal-state rows (`stopped` / `errored`) hide their action
+    buttons entirely — the row is informational only.
+- **`send_remote_session_command` Tauri command** wrapping
+  `supabase::remote_send_command`. Validates `kind` and the
+  prompt-non-empty invariant on the Rust side too (defense in
+  depth — frontend disables the Submit button on empty input, but
+  a frontend bug shouldn't ship a malformed command to Supabase).
+
+### Notes
+- Per-row state machine has 6 modes: `idle` / `prompting` /
+  `sending` / `stopping` / `interrupting` / `error`. Inline error
+  toasts revert to `idle` after the next action; the parent's
+  `refreshRemoteState` (called via `onActionDone` after every
+  command) immediately picks up the new server-side status so
+  the user doesn't have to wait for the next adaptive-poll tick.
+- The "Read-only preview" badge from v0.6.0 is removed — the
+  section is no longer read-only. Empty / hidden states unchanged.
+- ~12 new i18n keys per language (en / zh-CN / ja). The Interrupt
+  tooltip especially is pinned in `i18n.test.ts` because it
+  carries security-relevant copy distinguishing Stop from
+  Interrupt.
+- 200 backend tests unchanged (the new wrapper is a thin
+  passthrough; the existing `remote_app_decide_permission` test
+  pattern already covers the auth layer). Frontend test count
+  unchanged; per-row state machine is best verified end-to-end via
+  VM with a Mac-spawned managed session.
+- Backend RPC and schema: zero new SQL. Mac team's v0.26 schema +
+  iter1's `kind='start'` widening ship completely. No autonomy-
+  contract approval needed.
+- **Post-implementation Gemini 3.1 Pro review caught one P2:** the
+  per-row state Map<id, RowMode> would accumulate entries for
+  sessions that disappeared from the parent's poll (stopped /
+  errored / pruned). Bound was small (~KBs across a typical
+  session-day) but stale "error" rows could resurrect if an ID
+  recycled. Fix: added a `useEffect([sessions])` that prunes
+  row-mode entries whose IDs are no longer in the live list.
+
 ## [0.6.1] — 2026-05-07
 
 Same-day hotfix to v0.6.0. VM verify on clipulse-win-test

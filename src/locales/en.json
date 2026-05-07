@@ -315,7 +315,16 @@
     "session_status_pending": "pending",
     "session_status_running": "running",
     "session_status_stopped": "stopped",
-    "session_status_errored": "errored"
+    "session_status_errored": "errored",
+    "session_send_button": "Send",
+    "session_stop_button": "Stop",
+    "session_interrupt_button": "Interrupt",
+    "session_interrupt_tooltip": "Send Ctrl+C-equivalent (interrupt the current operation; the session keeps running).",
+    "session_sending": "Sending…",
+    "session_stopping": "Stopping…",
+    "session_interrupting": "Interrupting…",
+    "session_prompt_placeholder": "Type a prompt to send to the session…",
+    "session_prompt_submit": "Send"
   },
   "tray": {
     "header_label": "CLI Pulse",

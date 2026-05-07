@@ -571,6 +571,7 @@ export default function App() {
             onRefresh={refreshSessions}
             remoteSessions={remoteSessions}
             remoteControlEnabled={remoteControlEnabled === true}
+            onRemoteSessionAction={refreshRemoteState}
           />
         )}
         {tab === "alerts" && (
@@ -3594,14 +3595,64 @@ function RemotePrivacySection({
   );
 }
 
+// v0.6.2 — managed sessions are now actionable. Per-row state:
+//   - "idle" — buttons visible, no in-flight command
+//   - "prompting" — inline text input expanded, waiting for user
+//     to type + submit
+//   - "sending"/"stopping"/"interrupting" — RPC in flight
+//   - "error" — show error toast under the row, revert to idle
+//
+// Send/Stop/Interrupt only enabled for status === "running"; pending
+// sessions can still receive a Stop (cancel the start) but Send and
+// Interrupt are gated. Stopped/errored rows hide their buttons.
+type RowMode =
+  | { kind: "idle" }
+  | { kind: "prompting"; draft: string }
+  | { kind: "sending" }
+  | { kind: "stopping" }
+  | { kind: "interrupting" }
+  | { kind: "error"; message: string };
+
 function RemoteSessionsSection({
   sessions,
   enabled,
+  onActionDone,
 }: {
   sessions: RemoteSession[];
   enabled: boolean;
+  /** Called after a Send/Stop/Interrupt completes (success OR failure)
+   *  so the parent can refresh the list to pick up the new status. */
+  onActionDone: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  // Per-row mode keyed by session id. Map vs object for cleaner
+  // immutable updates.
+  const [rowModes, setRowModes] = useState<Map<string, RowMode>>(new Map());
+
+  // v0.6.2 Gemini post-impl P2: prune row-mode entries for sessions
+  // that are no longer in the parent's list. Without this, a long-
+  // running app would slowly accumulate state for stopped/expired
+  // sessions across many polls. Bound IS small (~tens of sessions
+  // per session-lifetime) so the leak is O(KB), not OOM-shaped, but
+  // still worth cleaning up — keeps the state diff readable in
+  // devtools and prevents stale "error" rows from re-appearing if
+  // a session ID gets recycled.
+  useEffect(() => {
+    setRowModes((prev) => {
+      const liveIds = new Set(sessions.map((s) => s.id));
+      let changed = false;
+      const next = new Map<string, RowMode>();
+      for (const [id, mode] of prev) {
+        if (liveIds.has(id)) {
+          next.set(id, mode);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [sessions]);
+
   // Hidden when Remote Control is off (Gemini v0.6.0 Q2: read-only
   // section needs explicit context — better to omit when feature is
   // off than to render an empty card).
@@ -3614,17 +3665,45 @@ function RemoteSessionsSection({
     const translated = t(key);
     return translated === key ? status : translated;
   };
+
+  const setMode = (id: string, mode: RowMode) => {
+    setRowModes((m) => {
+      const next = new Map(m);
+      next.set(id, mode);
+      return next;
+    });
+  };
+
+  const sendCommand = async (
+    sessionId: string,
+    kind: "prompt" | "stop" | "interrupt",
+    payload: string | null,
+    inflightMode: "sending" | "stopping" | "interrupting"
+  ) => {
+    setMode(sessionId, { kind: inflightMode });
+    try {
+      await invoke("send_remote_session_command", {
+        sessionId,
+        kind,
+        payload,
+      });
+      // Success: clear row mode and refresh parent. The next list
+      // poll will reflect status changes (running → stopped on Stop;
+      // last_event_at bump on Send).
+      setMode(sessionId, { kind: "idle" });
+      await onActionDone();
+    } catch (e: any) {
+      setMode(sessionId, { kind: "error", message: String(e) });
+      await onActionDone();
+    }
+  };
+
   return (
     <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 space-y-2">
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-semibold text-neutral-300">
           {t("remote.sessions_heading")}
         </h3>
-        {/* Gemini v0.6.0 Q2: read-only for v0.6.0 needs explicit
-            "preview" label so users don't expect Send/Stop. */}
-        <span className="text-[10px] uppercase tracking-wide text-neutral-500 px-1.5 py-0.5 rounded border border-neutral-700">
-          {t("remote.sessions_readonly_badge")}
-        </span>
       </div>
       {sessions.length === 0 ? (
         <div className="text-xs text-neutral-500 italic py-2">
@@ -3632,30 +3711,151 @@ function RemoteSessionsSection({
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {sessions.map((s) => (
-            <li
-              key={s.id}
-              className="text-xs text-neutral-300 px-2 py-1.5 rounded bg-neutral-950/40 border border-neutral-800"
-            >
-              <div className="flex items-center justify-between">
-                <span>
-                  {s.device_name ?? t("remote.row_unknown_device")} · {s.provider} ·{" "}
-                  <span className="font-mono">{s.cwd_basename}</span>
-                </span>
-                <span
-                  className={
-                    s.status === "running"
-                      ? "text-emerald-400 text-[10px]"
-                      : s.status === "pending"
-                        ? "text-amber-400 text-[10px]"
-                        : "text-neutral-500 text-[10px]"
-                  }
-                >
-                  {statusLabel(s.status)}
-                </span>
-              </div>
-            </li>
-          ))}
+          {sessions.map((s) => {
+            const mode = rowModes.get(s.id) ?? { kind: "idle" };
+            const isRunning = s.status === "running";
+            const isPending = s.status === "pending";
+            const isTerminal =
+              s.status === "stopped" || s.status === "errored";
+            const inFlight =
+              mode.kind === "sending" ||
+              mode.kind === "stopping" ||
+              mode.kind === "interrupting";
+            return (
+              <li
+                key={s.id}
+                className="text-xs text-neutral-300 px-2 py-1.5 rounded bg-neutral-950/40 border border-neutral-800 space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate">
+                    {s.device_name ?? t("remote.row_unknown_device")} ·{" "}
+                    {s.provider} ·{" "}
+                    <span className="font-mono">{s.cwd_basename}</span>
+                  </span>
+                  <span
+                    className={
+                      isRunning
+                        ? "text-emerald-400 text-[10px]"
+                        : isPending
+                          ? "text-amber-400 text-[10px]"
+                          : "text-neutral-500 text-[10px]"
+                    }
+                  >
+                    {statusLabel(s.status)}
+                  </span>
+                </div>
+                {/* Action buttons — hidden for terminal-state rows.
+                    Send/Interrupt enabled only when running; Stop
+                    works for both pending and running (Stop on
+                    pending = cancel-the-start). */}
+                {!isTerminal && mode.kind !== "prompting" && (
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      disabled={!isRunning || inFlight}
+                      onClick={() =>
+                        setMode(s.id, { kind: "prompting", draft: "" })
+                      }
+                      className="px-2 py-0.5 text-[10px] rounded bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-900 text-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {mode.kind === "sending"
+                        ? t("remote.session_sending")
+                        : t("remote.session_send_button")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={inFlight}
+                      onClick={() =>
+                        sendCommand(s.id, "stop", null, "stopping")
+                      }
+                      className="px-2 py-0.5 text-[10px] rounded bg-red-950/60 hover:bg-red-900/60 border border-red-900 text-red-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {mode.kind === "stopping"
+                        ? t("remote.session_stopping")
+                        : t("remote.session_stop_button")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!isRunning || inFlight}
+                      onClick={() =>
+                        sendCommand(s.id, "interrupt", null, "interrupting")
+                      }
+                      className="px-2 py-0.5 text-[10px] rounded bg-amber-950/60 hover:bg-amber-900/60 border border-amber-900 text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={t("remote.session_interrupt_tooltip")}
+                    >
+                      {mode.kind === "interrupting"
+                        ? t("remote.session_interrupting")
+                        : t("remote.session_interrupt_button")}
+                    </button>
+                  </div>
+                )}
+                {/* Inline prompt input — expands when user clicks Send.
+                    Trims on submit; empty disables the submit button. */}
+                {mode.kind === "prompting" && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const text = mode.draft.trim();
+                      if (!text) return;
+                      sendCommand(s.id, "prompt", text, "sending");
+                    }}
+                    className="space-y-1"
+                  >
+                    <textarea
+                      value={mode.draft}
+                      onChange={(e) =>
+                        setMode(s.id, {
+                          kind: "prompting",
+                          draft: e.target.value,
+                        })
+                      }
+                      rows={2}
+                      maxLength={8192}
+                      placeholder={t("remote.session_prompt_placeholder")}
+                      className="w-full px-2 py-1 text-xs font-mono bg-neutral-950 border border-emerald-900/60 rounded text-neutral-200 focus:outline-none focus:border-emerald-500"
+                      autoFocus
+                      // Esc cancels the prompt mode, Enter submits
+                      // (Shift+Enter for newline). Matches typical
+                      // chat-input UX.
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setMode(s.id, { kind: "idle" });
+                          e.stopPropagation();
+                        } else if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          const text = mode.draft.trim();
+                          if (text) {
+                            sendCommand(s.id, "prompt", text, "sending");
+                          }
+                        }
+                      }}
+                    />
+                    <div className="flex gap-1 justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setMode(s.id, { kind: "idle" })}
+                        className="px-2 py-0.5 text-[10px] rounded border border-neutral-700 hover:bg-neutral-800 text-neutral-300"
+                      >
+                        {t("action.cancel")}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={mode.draft.trim().length === 0}
+                        className="px-2 py-0.5 text-[10px] rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {t("remote.session_prompt_submit")}
+                      </button>
+                    </div>
+                  </form>
+                )}
+                {mode.kind === "error" && (
+                  <div className="px-2 py-1 rounded bg-red-950/60 border border-red-900 text-red-200 text-[10px]">
+                    {t("remote.action_failed", { err: mode.message })}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -4438,15 +4638,21 @@ function Sessions({
   onRefresh,
   remoteSessions,
   remoteControlEnabled,
+  onRemoteSessionAction,
 }: {
   snapshot: SessionsSnapshot | null;
   loading: boolean;
   onRefresh: () => void;
   // v0.6.0 — cross-device managed sessions surfaced above the
-  // local-process snapshot. Read-only in v0.6.0 (Slice 1); Send /
-  // Stop / Interrupt come in v0.6.1 (Slice 2).
+  // local-process snapshot. Actionable in v0.6.2 (Slice 2): per-row
+  // Send / Stop / Interrupt buttons.
   remoteSessions: RemoteSession[];
   remoteControlEnabled: boolean;
+  /** Called after a managed-session command completes (success OR
+   *  failure) so the parent can refresh and pick up the new status
+   *  immediately rather than waiting for the next adaptive-poll
+   *  tick. */
+  onRemoteSessionAction: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   if (!snapshot && loading) {
@@ -4461,6 +4667,7 @@ function Sessions({
       <RemoteSessionsSection
         sessions={remoteSessions}
         enabled={remoteControlEnabled}
+        onActionDone={onRemoteSessionAction}
       />
 
       <div className="flex items-center justify-between">

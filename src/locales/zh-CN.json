@@ -311,7 +311,16 @@
     "session_status_pending": "等待中",
     "session_status_running": "运行中",
     "session_status_stopped": "已停止",
-    "session_status_errored": "出错"
+    "session_status_errored": "出错",
+    "session_send_button": "发送",
+    "session_stop_button": "停止",
+    "session_interrupt_button": "中断",
+    "session_interrupt_tooltip": "发送 Ctrl+C 等价信号(中断当前操作,会话继续运行)。",
+    "session_sending": "发送中…",
+    "session_stopping": "停止中…",
+    "session_interrupting": "中断中…",
+    "session_prompt_placeholder": "输入要发送给会话的提示词…",
+    "session_prompt_submit": "发送"
   },
   "tray": {
     "header_label": "CLI Pulse",

@@ -1077,6 +1077,46 @@ async fn list_remote_sessions() -> Result<Vec<supabase::RemoteSession>, String> 
     with_user_jwt(|jwt| async move { supabase::remote_list_sessions(&jwt).await }).await
 }
 
+/// v0.6.2 — send a command (prompt / stop / interrupt) to a managed
+/// session running on any of the user's paired devices. Wraps the
+/// existing live `remote_app_send_command` RPC.
+///
+/// `kind` validation duplicated here (also done server-side) so a
+/// frontend bug doesn't ship a malformed kind. The 8192-char payload
+/// cap is enforced server-side; we don't pre-trim so an over-cap
+/// payload surfaces as a typed error the frontend can render
+/// instead of a silent truncation.
+#[tauri::command]
+async fn send_remote_session_command(
+    session_id: String,
+    kind: String,
+    payload: Option<String>,
+) -> Result<(), String> {
+    if kind != "prompt" && kind != "stop" && kind != "interrupt" {
+        return Err(format!(
+            "Invalid command kind `{kind}` — must be `prompt`, `stop`, or `interrupt`."
+        ));
+    }
+    if kind == "prompt" {
+        let trimmed = payload.as_deref().unwrap_or("").trim();
+        if trimmed.is_empty() {
+            return Err("Prompt command requires non-empty payload.".to_string());
+        }
+    }
+    let _cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Sign in required to send remote commands.".to_string())?;
+    with_user_jwt(move |jwt| {
+        let session_id = session_id.clone();
+        let kind = kind.clone();
+        let payload = payload.clone();
+        async move {
+            supabase::remote_send_command(&session_id, &kind, payload.as_deref(), &jwt).await
+        }
+    })
+    .await
+}
+
 #[tauri::command]
 async fn get_remote_control_setting() -> Result<bool, String> {
     let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
@@ -2254,6 +2294,8 @@ pub fn run() {
             list_remote_sessions,
             get_remote_control_setting,
             set_remote_control_setting,
+            // v0.6.2 — Send / Stop / Interrupt managed sessions
+            send_remote_session_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
