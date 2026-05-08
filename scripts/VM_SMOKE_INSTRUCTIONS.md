@@ -1,17 +1,34 @@
 # VM Smoke Instructions — cli-pulse-desktop
 
-Self-contained step-by-step for verifying a new release on
-`clipulse-win-test`. Designed so a fresh Claude Code session (or a
-human in RDP) can run it without any prior context.
+**The fastest way to run a smoke test:** download and execute
+`vm-smoke-full.ps1` with the target tag. ONE command, end-to-end:
 
-**Goal of this smoke**: confirm the new build LAUNCHES and STAYS
-ALIVE for 60 s on Windows. That's it. We're not checking features —
-just survival, because the v0.8.0 incident proved the launch path is
-where things break first.
+```powershell
+$tag = "v0.8.2"  # ← change this to the tag under test
+$url = "https://raw.githubusercontent.com/JasonYeYuhe/cli-pulse-desktop/main/scripts/vm-smoke-full.ps1"
+Invoke-WebRequest $url -OutFile $env:TEMP\smoke.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\smoke.ps1 -Tag $tag
+```
 
-**Target version**: replace `<TAG>` everywhere below with the version
-under test, e.g. `v0.8.2`. The test driver should pass `<TAG>` as the
-first argument when invoking these instructions.
+The script:
+1. Uninstalls any pre-existing CLI Pulse silently
+2. Downloads `<TAG>` NSIS installer from GitHub Releases
+3. Installs silently
+4. Launches the GUI, waits 60 s, checks process is alive + no new
+   WER `Application Error` events for `cli-pulse-desktop`
+5. Prints `PASS`, `DEGRADED`, or `FAIL` on the **last line**
+
+Copy the entire output (it's about 30 lines) into chat. The Mac-side
+maintainer reads the verdict and decides whether to flip the tag to
+Latest.
+
+---
+
+## When to use the manual step-by-step below instead
+
+Use the inline steps below ONLY if the all-in-one script fails (rare
+— it's been tested in CI) and you need to debug which step broke.
+Otherwise the all-in-one is strictly better.
 
 ---
 
