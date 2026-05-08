@@ -242,6 +242,22 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "remote.agent_status_last_tick",
     "remote.agent_status_never_ticked",
     "remote.agent_status_not_running",
+    // v0.10.0 — keyboard shortcut help overlay. The shortcut bindings
+    // themselves live in App.tsx's keydown handler; the overlay
+    // reads these labels. A missing label would render a blank row
+    // in the help dialog, which silently miscommunicates the
+    // shortcut. Pin every label.
+    "shortcuts.title",
+    "shortcuts.rescan",
+    "shortcuts.settings",
+    "shortcuts.tab_overview",
+    "shortcuts.tab_providers",
+    "shortcuts.tab_sessions",
+    "shortcuts.tab_alerts",
+    "shortcuts.tab_settings",
+    "shortcuts.toggle_help",
+    "shortcuts.close_modal",
+    "action.close",
     // v0.9.3 — Save diagnostic bundle button (Settings → About).
     // The tooltip carries the privacy posture explanation; missing
     // translation would silently leave users unsure what's in the

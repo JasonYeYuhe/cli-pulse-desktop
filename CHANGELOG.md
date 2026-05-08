@@ -2,6 +2,51 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.10.0] — 2026-05-09
+
+**Stability sprint #5 — keyboard shortcuts.** Power users have asked
+for this; the v0.6.1 Esc-modal fix already showed the foundation
+works in Tauri 2 / WebView2.
+
+### Added
+
+- **Global keyboard shortcuts** (App.tsx keydown handler):
+  - `Ctrl/Cmd + R` — rescan local logs (overrides browser refresh)
+  - `Ctrl/Cmd + ,` — open Settings tab
+  - `Ctrl/Cmd + 1..5` — switch tabs (Overview / Providers / Sessions
+    / Alerts / Settings); skipped when typing in input/textarea/select
+  - `Ctrl/Cmd + Shift + /` — toggle the shortcut help overlay
+  - `Esc` — close modals (per-modal handlers, unchanged from v0.6.1)
+- **`ShortcutHelpOverlay`** component — modal listing all shortcuts
+  with platform-aware modifier key (`⌘` on macOS, `Ctrl` elsewhere).
+  Click outside or press Esc to close.
+- **11 i18n keys × 3 langs** for the help overlay labels + an
+  `action.close` key (used by the overlay's close button). All
+  pinned in `i18n.test.ts` critical-labels.
+
+### Out of scope (deferred)
+
+- **Date range picker** — touches the data-fetching layer (Overview /
+  Providers / Sessions all need to thread the range param through).
+  Punted to a later v0.10.x ship to keep v0.10.0's blast radius
+  contained.
+- **Per-provider visibility toggle** — small but touches the
+  Providers tab rendering. Folded into the v0.10.x ship.
+
+### Tests
+285 backend (unchanged — no Rust changes). 57 frontend (unchanged;
+the 11 new i18n keys are exercised via the critical-labels gate).
+
+### Sprint context
+Fifth ship of the v0.9.x → v0.10.x sprint:
+- v0.9.0 ✅ Stability hardening
+- v0.9.1 ✅ Agent scaffolding (stub)
+- v0.9.2 ✅ ConPTY transport + FFI
+- v0.9.3 ✅ Diagnostic bundle
+- v0.10.0 ✅ Keyboard shortcuts (THIS ship)
+- v0.10.1 — Date range + per-provider visibility + export + compare
+  (next; possibly split further depending on review)
+
 ## [0.9.3] — 2026-05-09
 
 **Stability sprint #4 — diagnostic bundle.** Adds a one-click

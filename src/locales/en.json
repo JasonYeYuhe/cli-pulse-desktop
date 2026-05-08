@@ -23,7 +23,20 @@
     "unpair_device": "Unpair device",
     "check_updates": "Check for updates",
     "checking": "Checking…",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "close": "Close"
+  },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "rescan": "Rescan local logs",
+    "settings": "Open Settings",
+    "tab_overview": "Switch to Overview",
+    "tab_providers": "Switch to Providers",
+    "tab_sessions": "Switch to Sessions",
+    "tab_alerts": "Switch to Alerts",
+    "tab_settings": "Switch to Settings",
+    "toggle_help": "Toggle this help",
+    "close_modal": "Close modal / dialog"
   },
   "tab": {
     "overview": "Overview",

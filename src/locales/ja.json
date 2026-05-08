@@ -23,7 +23,20 @@
     "unpair_device": "ペアリング解除",
     "check_updates": "アップデート確認",
     "checking": "確認中…",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "close": "閉じる"
+  },
+  "shortcuts": {
+    "title": "キーボードショートカット",
+    "rescan": "ローカルログを再スキャン",
+    "settings": "設定を開く",
+    "tab_overview": "概要に切り替え",
+    "tab_providers": "プロバイダーに切り替え",
+    "tab_sessions": "セッションに切り替え",
+    "tab_alerts": "アラートに切り替え",
+    "tab_settings": "設定に切り替え",
+    "toggle_help": "このヘルプを表示/非表示",
+    "close_modal": "モーダル / ダイアログを閉じる"
   },
   "tab": {
     "overview": "概要",

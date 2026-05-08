@@ -23,7 +23,20 @@
     "unpair_device": "解除配对",
     "check_updates": "检查更新",
     "checking": "检查中…",
-    "cancel": "取消"
+    "cancel": "取消",
+    "close": "关闭"
+  },
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "rescan": "重新扫描本地日志",
+    "settings": "打开设置",
+    "tab_overview": "切换到概览",
+    "tab_providers": "切换到服务商",
+    "tab_sessions": "切换到会话",
+    "tab_alerts": "切换到提醒",
+    "tab_settings": "切换到设置",
+    "toggle_help": "显示/隐藏此帮助",
+    "close_modal": "关闭弹窗 / 对话框"
   },
   "tab": {
     "overview": "概览",

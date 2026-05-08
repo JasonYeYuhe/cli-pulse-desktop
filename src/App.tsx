@@ -153,6 +153,9 @@ export default function App() {
     { key: "settings", label: t("tab.settings") },
   ];
   const [tab, setTab] = useState<TabKey>("overview");
+  // v0.10.0 — keyboard shortcut help overlay. Triggered by
+  // Ctrl/Cmd + Shift + / (the ?-menu binding power users expect).
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [sessions, setSessions] = useState<SessionsSnapshot | null>(null);
@@ -322,6 +325,83 @@ export default function App() {
   useEffect(() => {
     pushTrayCopyFromI18n((key) => i18n.t(key));
   }, [i18n.language, i18n]);
+
+  // v0.10.0 — global keyboard shortcuts. Power users have asked for
+  // this; the v0.6.1 Esc-modal fix already showed the foundation
+  // works in Tauri 2 / WebView2.
+  //
+  //   Ctrl/Cmd + R       rescan local logs
+  //   Ctrl/Cmd + ,       go to Settings tab
+  //   Ctrl/Cmd + 1..5    switch between tabs (Overview / Providers /
+  //                      Sessions / Alerts / Settings)
+  //   Ctrl/Cmd + Shift + /  toggle shortcut help overlay (the
+  //                      ?-menu power users expect)
+  //
+  // Esc-to-close-modal stays per-modal (existing in v0.6.1) so each
+  // modal can decide whether the Esc should also clear other state.
+  //
+  // We DON'T bind anything that would shadow text-input shortcuts:
+  // - Ctrl/Cmd + A / X / C / V are left to the browser
+  // - Ctrl/Cmd + S is NOT bound (would conflict with "save" muscle
+  //   memory in any future text-edit features)
+  // - Esc is left to per-modal handlers
+  //
+  // Active-element check skips shortcuts that are typing-keys when
+  // an input/textarea/select has focus, so users don't lose their
+  // typing if they happen to type "1" while in a textarea.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.ctrlKey || e.metaKey;
+      // Only trap shortcuts with the modifier — no bare-key bindings.
+      if (!meta) return;
+      // Ctrl/Cmd + Shift + / — open help overlay. Note: many keyboard
+      // layouts emit "?" for Shift+/, others emit "/"; check both.
+      if (e.shiftKey && (e.key === "/" || e.key === "?")) {
+        e.preventDefault();
+        setShortcutHelpOpen((v) => !v);
+        return;
+      }
+      // Pure-modifier shortcuts. Block while focused in an input
+      // element (text inputs / textareas / selects) so we don't
+      // hijack the user's edit. Exception: Cmd+R/Ctrl+R still works
+      // because rescan is a global app action.
+      const target = e.target as HTMLElement | null;
+      const inEditableField =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable;
+
+      // Ctrl/Cmd + R — rescan. Always allowed (overrides browser refresh).
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        runScan();
+        return;
+      }
+      // Ctrl/Cmd + , — Settings tab.
+      if (e.key === ",") {
+        e.preventDefault();
+        setTab("settings");
+        return;
+      }
+      // Ctrl/Cmd + 1..5 — tab switch. Skip when typing.
+      if (!inEditableField && /^[1-5]$/.test(e.key)) {
+        e.preventDefault();
+        const tabsByIndex: TabKey[] = [
+          "overview",
+          "providers",
+          "sessions",
+          "alerts",
+          "settings",
+        ];
+        const idx = parseInt(e.key, 10) - 1;
+        if (tabsByIndex[idx]) setTab(tabsByIndex[idx]);
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [runScan]);
 
   // v0.5.3 — runs the full check+download+install flow. Idempotent:
   // calling twice while a download is in flight is a no-op (reducer
@@ -621,6 +701,87 @@ export default function App() {
           />
         )}
       </main>
+      {shortcutHelpOpen && (
+        <ShortcutHelpOverlay onClose={() => setShortcutHelpOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+/// v0.10.0 — keyboard shortcut help overlay. Listed in one
+/// alphabetical order; modifier shown first ("Ctrl/Cmd"). The list
+/// MUST stay in sync with the keydown handler in `App` — if you
+/// add a binding there, add a row here. The i18n.test.ts
+/// critical-labels gate covers the labels but not the bindings,
+/// so the eyeball check on this list is the gate.
+function ShortcutHelpOverlay({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  // Cmd on macOS, Ctrl elsewhere. Tauri 2 doesn't (yet) expose the
+  // user's platform via JS — sniff via navigator.platform as the
+  // pre-Tauri-2 conventional approach.
+  const isMac =
+    typeof navigator !== "undefined" &&
+    /(Mac|iPhone|iPad|iPod)/i.test(navigator.platform);
+  const mod = isMac ? "⌘" : "Ctrl";
+  const shortcuts: Array<{ keys: string; label: string }> = [
+    { keys: `${mod}+R`, label: t("shortcuts.rescan") },
+    { keys: `${mod}+,`, label: t("shortcuts.settings") },
+    { keys: `${mod}+1`, label: t("shortcuts.tab_overview") },
+    { keys: `${mod}+2`, label: t("shortcuts.tab_providers") },
+    { keys: `${mod}+3`, label: t("shortcuts.tab_sessions") },
+    { keys: `${mod}+4`, label: t("shortcuts.tab_alerts") },
+    { keys: `${mod}+5`, label: t("shortcuts.tab_settings") },
+    { keys: `${mod}+Shift+/`, label: t("shortcuts.toggle_help") },
+    { keys: "Esc", label: t("shortcuts.close_modal") },
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcut-help-title"
+        className="w-full max-w-md rounded-lg border border-neutral-800 bg-neutral-950 p-4 space-y-3 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-baseline justify-between">
+          <h2
+            id="shortcut-help-title"
+            className="text-sm font-semibold text-neutral-200"
+          >
+            {t("shortcuts.title")}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-2 py-0.5 text-[10px] rounded border border-neutral-700 hover:bg-neutral-800 text-neutral-300"
+            aria-label={t("action.close")}
+          >
+            ✕
+          </button>
+        </div>
+        <ul className="space-y-1.5 text-xs">
+          {shortcuts.map((s) => (
+            <li
+              key={s.keys}
+              className="flex items-baseline justify-between gap-3"
+            >
+              <span className="text-neutral-400">{s.label}</span>
+              <kbd className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-neutral-900 border border-neutral-700 text-neutral-300">
+                {s.keys}
+              </kbd>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
