@@ -2,6 +2,66 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.8.2] — 2026-05-08
+
+**Sentry-driven follow-up after the v0.8.0 BEX64 incident.** The
+v0.8.1 radical revert restored launch survival; v0.8.2 closes
+two related findings the Sentry triage surfaced and improves the
+diagnostic path for the next time we ship something subtle.
+
+### Fixed
+- **DESKTOP-2 / DESKTOP-3 stderr pipe panic** (pre-existing in
+  v0.7.0 and earlier, surfaced during v0.8.0 incident triage).
+  `tauri-plugin-log`'s `Stdout` target was attached even on
+  Windows GUI release builds, where there is no console attached.
+  Stdout writes returned `The pipe is being closed (os error 232)`,
+  the plugin fell back to stderr (also closed), and the underlying
+  `log` crate panicked with "Error performing stderr logging after
+  error occurred during regular logging." On `panic = "abort"`
+  release builds this could terminate the process. Sentry shows
+  this issue firing 6+ times per day on the test VM since v0.7.0
+  shipped. **Fix**: gate the `Stdout` target on
+  `cfg(debug_assertions)` in `lib.rs::run`. Release builds now
+  log only to the OS-conventional log directory (which is also
+  what users copy from when reporting bugs); debug builds keep
+  the Stdout target so `cargo run` / `cargo tauri dev` still
+  prints to the terminal.
+
+### Added
+- **Windows PDB upload to release page** for crash post-mortem
+  symbolization. `[profile.release]` now sets
+  `debug = "line-tables-only"`, which tells rustc to emit a
+  `cli_pulse_desktop_lib.pdb` alongside the .exe on Windows
+  MSVC builds. `strip = true` is unchanged so the shipped .exe
+  stays slim (~3 MB NSIS); the PDB (~30-40 MB) uploads as a
+  separate release asset named
+  `cli-pulse-desktop_<tag>_x64.pdb`. Future BEX64 / 0xc0000409
+  fault offsets can be symbolized via cdb / windbg / breakpad
+  `minidump_stackwalk`. Lesson from v0.8.0: fault offset
+  `0x4c9375` was unsymbolizable until Sentry's panic-message
+  capture independently identified the root cause.
+
+### Documented
+- v0.8.0 incident memory updated with **confirmed root cause**
+  via Sentry DESKTOP-4 capture: `panic: there is no reactor
+  running, must be called from the context of a Tokio 1.x
+  runtime`. The bug was `tokio::spawn(...)` in `spawn_agent_loop`
+  called from Tauri's `setup` hook, which is OUTSIDE any Tokio
+  runtime context. Compare `spawn_background_sync` in `lib.rs`
+  which correctly used `tauri::async_runtime::spawn`. The fix
+  for v0.9.x ConPTY revival is one line: use
+  `async_runtime::spawn` instead of `tokio::spawn`. The hypothesis
+  about queued `start` commands triggering an FFI fault was
+  WRONG — the panic fired synchronously in the setup hook, before
+  any tick ran. The fault offset `0x4c9375` was inside the
+  panic-abort path itself.
+
+### Tests
+253 backend + 57 frontend (unchanged from v0.8.1).
+
+### Wire-format
+None changed. v0.8.2 is purely a stability / diagnostic ship.
+
 ## [0.8.1] — 2026-05-08
 
 **Radical revert of the v0.8.0 ConPTY managed-session feature.**

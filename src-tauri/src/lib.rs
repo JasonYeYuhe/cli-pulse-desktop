@@ -2219,15 +2219,34 @@ pub fn run() {
         //  macOS: ~/Library/Logs/dev.clipulse.desktop/,
         //  Linux: ~/.local/share/dev.clipulse.desktop/logs/)
         // Rotation: keep up to 5 files at 5 MB each = ~25 MB cap.
+        //
+        // v0.8.2 Sentry-driven fix: the Stdout target was the source of
+        // DESKTOP-2/DESKTOP-3 panics ("Error performing stderr logging
+        // after error occurred during regular logging" → "The pipe is
+        // being closed (os error 232)"). Windows GUI release builds
+        // have no console attached; stdout is a closed pipe; writes
+        // fail; tauri-plugin-log falls back to stderr, which also
+        // fails; the underlying `log` crate panics. Pre-existed v0.7.0
+        // (multiple Sentry events 2026-05-07/08); not caused by v0.8.0
+        // ConPTY incident, just surfaced by it.
+        // Fix: only attach Stdout target in debug builds (cargo run /
+        // cargo tauri dev). Release builds rely on the LogDir target
+        // — which is also where bug-report copy-paste reads from.
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("cli-pulse".into()),
-                    }),
-                ])
+                .targets({
+                    let mut targets = vec![tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::LogDir {
+                            file_name: Some("cli-pulse".into()),
+                        },
+                    )];
+                    #[cfg(debug_assertions)]
+                    targets.push(tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Stdout,
+                    ));
+                    targets
+                })
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
                 .max_file_size(5 * 1024 * 1024)
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)

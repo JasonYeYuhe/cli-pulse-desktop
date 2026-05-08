@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.8.1"
+version = "0.8.2"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -99,3 +99,13 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+# v0.8.2 — emit line-tables-only debug info so a `.pdb` is generated
+# alongside the .exe on Windows MSVC. `strip = true` still removes
+# debug info from the .exe (binary size unchanged), and on Windows the
+# .pdb stays as a separate file in `target/release/`. release.yml
+# uploads it as an additional release asset for crash post-mortem.
+# Lesson from v0.8.0 BEX64 crash: without symbols, fault offset
+# `0x4c9375` was unsymbolizable; Sentry's separate panic-message
+# capture identified the cause first. Next time both routes give
+# us a fast root-cause path.
+debug = "line-tables-only"

@@ -196,3 +196,33 @@ jobs:
               ;;
           esac
           echo "✅ All bundle checks passed"
+
+      # v0.8.2 — Upload Windows .pdb as a separate release asset for
+      # crash post-mortem. Triggered by [profile.release] now having
+      # `debug = "line-tables-only"` which causes rustc to emit a .pdb
+      # alongside the .exe even with `strip = true`. The shipped NSIS
+      # is unchanged (~3 MB stripped); the .pdb is uploaded
+      # independently (~30-40 MB) so future BEX64 / 0xc0000409 fault
+      # offsets can be symbolized via cdb / windbg / breakpad
+      # minidump_stackwalk. Lesson from v0.8.0 BEX64 (fault offset
+      # 0x4c9375 was unsymbolizable until Sentry's panic message
+      # independently identified the cause).
+      - name: Upload Windows PDB to release (crash post-mortem)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PDB="$GITHUB_WORKSPACE/src-tauri/target/${{ matrix.rust-target }}/release/cli_pulse_desktop_lib.pdb"
+          if [ ! -f "$PDB" ]; then
+            echo "::warning::PDB not found at $PDB — skipping upload"
+            ls -la "$GITHUB_WORKSPACE/src-tauri/target/${{ matrix.rust-target }}/release/" | grep -i pdb || true
+            exit 0
+          fi
+          # Stage with a release-tagged name so multiple versions can
+          # coexist as historical artifacts on the release page.
+          STAGED="$RUNNER_TEMP/cli-pulse-desktop_${{ github.event.inputs.tag || github.ref_name }}_x64.pdb"
+          cp "$PDB" "$STAGED"
+          ls -la "$STAGED"
+          gh release upload "${{ github.event.inputs.tag || github.ref_name }}" "$STAGED" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
