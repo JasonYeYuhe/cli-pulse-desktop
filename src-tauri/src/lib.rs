@@ -9,6 +9,7 @@ pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod cost_forecast;
+pub mod crash_recovery;
 pub mod creds;
 pub mod cwd_hmac;
 pub mod install_hook;
@@ -2194,10 +2195,28 @@ pub fn run() {
     // 2026-05-02 confirmed users had nothing on disk to attach to bug
     // reports.
 
+    // v0.9.0 — record this launch in crash-history.jsonl FIRST,
+    // before anything risky runs. If we crash before
+    // record_setup_complete() at the end of the setup hook, the next
+    // launch's `assess_recovery_mode_at_startup()` sees this orphan
+    // `Starting` entry as evidence of a crash. (See `crash_recovery`
+    // module docstring for the full rationale.)
+    crash_recovery::record_startup();
+    let recovery_active = crash_recovery::assess_recovery_mode_at_startup();
+
     // Sentry — no-op when CLI_PULSE_SENTRY_DSN is unset (the default).
     // Install before tauri::Builder so the panic handler is registered
     // for the lifetime of the process.
+    //
+    // v0.9.0 (Gemini plan-review P2): keep Sentry ON even in recovery
+    // mode. The whole point of crash recovery is to debug the crash
+    // loop; turning off telemetry would blind us at exactly the wrong
+    // time.
     sentry_init::install();
+
+    if recovery_active {
+        log::warn!("Recovery mode active — agent loop and tray refresh will be skipped");
+    }
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_bg = stop.clone();
@@ -2309,14 +2328,39 @@ pub fn run() {
             // libayatana-appindicator3 sees no tray at all (per the
             // module-level comment), and there's nothing for the loop
             // to mutate.
-            match tray::install(app.handle()) {
-                Ok(()) => {
-                    spawn_tray_refresh_loop(app.handle().clone(), stop_bg.clone());
+            //
+            // v0.9.0 — skip the tray refresh loop in recovery mode.
+            // Tray ITSELF still installs (so users can Quit via the
+            // tray icon and aren't stuck), but the 120 s refresh loop
+            // — which runs cached metric reads — is one of the
+            // potential failure surfaces we cut off until the user
+            // re-enables.
+            if !crash_recovery::is_in_recovery_mode() {
+                match tray::install(app.handle()) {
+                    Ok(()) => {
+                        spawn_tray_refresh_loop(app.handle().clone(), stop_bg.clone());
+                    }
+                    Err(e) => {
+                        log::warn!("tray init failed (continuing without tray): {e}");
+                    }
                 }
-                Err(e) => {
-                    log::warn!("tray init failed (continuing without tray): {e}");
+            } else {
+                // Even in recovery mode, install the tray itself so
+                // users can Quit cleanly. Skip only the refresh loop.
+                if let Err(e) = tray::install(app.handle()) {
+                    log::warn!("tray init failed in recovery mode (continuing): {e}");
                 }
+                log::warn!(
+                    "Recovery mode: tray refresh loop skipped (re-enable in Settings → About)"
+                );
             }
+
+            // v0.9.0 — Tauri setup hook completed without panic.
+            // Mark this so the next launch's
+            // `assess_recovery_mode_at_startup()` sees this run as
+            // healthy, not an incomplete startup.
+            crash_recovery::record_setup_complete();
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2378,6 +2422,13 @@ pub fn run() {
 
     // Let the background loop exit cleanly on app shutdown.
     stop.store(true, Ordering::Relaxed);
+
+    // v0.9.0 — record clean exit so the next launch's
+    // `assess_recovery_mode_at_startup()` sees this run as healthy.
+    // (A crashed run skips this and leaves an orphan `Starting`
+    // entry, which is what gets counted as a crash on the next
+    // boot.)
+    crash_recovery::record_clean_exit();
 }
 
 // silence `Value` / `json` unused if not referenced elsewhere
