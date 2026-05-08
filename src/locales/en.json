@@ -177,6 +177,11 @@
     "about_sentry_test_sending": "Sending…",
     "about_sentry_test_sent": "Sent",
     "about_sentry_test_tooltip": "Fires a tagged Info event into Sentry so you can verify the crash-reporting chain is live. Check sentry.io for an event with diagnostic_test=true.",
+    "about_save_bundle_button": "Save diagnostic bundle",
+    "about_save_bundle_saving": "Saving…",
+    "about_save_bundle_done": "Saved to Downloads",
+    "about_save_bundle_failed": "Save failed",
+    "about_save_bundle_tooltip": "Saves a zip with cli-pulse.log, remote-hook.log, crash history, and a diagnostic snapshot to your Downloads folder. Review the contents before sharing — it does NOT contain credentials, but does contain log lines that may include cwd basenames.",
     "about_repo_link": "Open repository on GitHub",
     "integrations": {
       "heading": "Integrations",

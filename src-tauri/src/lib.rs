@@ -12,6 +12,7 @@ pub mod cost_forecast;
 pub mod crash_recovery;
 pub mod creds;
 pub mod cwd_hmac;
+pub mod diagnostic_bundle;
 pub mod install_hook;
 pub mod keychain;
 pub mod notify;
@@ -297,6 +298,35 @@ fn diagnostic_snapshot(app: tauri::AppHandle) -> Result<DiagnosticSnapshot, Stri
         log_dir,
         provider_creds_backend: provider_creds::current_backend(),
     })
+}
+
+/// v0.9.3 — Save a diagnostic bundle (zip) to ~/Downloads/. Includes
+/// cli-pulse.log, remote-hook.log, crash-history.jsonl,
+/// diagnostic_snapshot, and version info. Privacy posture: bundle
+/// is saved LOCALLY; the user attaches it to a bug report
+/// deliberately. Sensitive credentials (helper_secret, refresh_token,
+/// OAuth tokens, JWTs) are NEVER included.
+#[tauri::command]
+fn save_diagnostic_bundle(
+    app: tauri::AppHandle,
+) -> Result<diagnostic_bundle::BundleResult, String> {
+    // In-memory extras: the diagnostic_snapshot output and a
+    // versions.txt sanity file. Both are lifecycle-fixed strings
+    // that don't already live on disk.
+    let snapshot = diagnostic_snapshot(app)?;
+    let snapshot_json = serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?;
+    let versions = format!(
+        "tauri.conf.json version: {}\nCargo.toml version: {}\n",
+        HELPER_VERSION, HELPER_VERSION,
+    );
+    let extras = vec![
+        (
+            "diagnostic_snapshot.json".to_string(),
+            snapshot_json.into_bytes(),
+        ),
+        ("versions.txt".to_string(), versions.into_bytes()),
+    ];
+    diagnostic_bundle::create_bundle(extras).map_err(|e| e.to_string())
 }
 
 /// v0.4.22 — fire a tagged test event into Sentry for ingestion
@@ -2551,6 +2581,8 @@ pub fn run() {
             // v0.9.1a — ConPTY managed-session local host
             request_remote_session_start,
             agent_diagnostic,
+            // v0.9.3 — Save diagnostic bundle (zip) to ~/Downloads/
+            save_diagnostic_bundle,
             // v0.7.0 — Install Claude hook + check current status
             install_claude_hook,
             get_claude_hook_status,

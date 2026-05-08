@@ -4224,6 +4224,70 @@ function AgentDiagnosticBlock({ diag }: { diag: AgentDiagnostic | null }) {
   );
 }
 
+/// v0.9.3 — Save diagnostic bundle button. Calls the
+/// `save_diagnostic_bundle` Tauri command which zips logs +
+/// crash-history + diagnostic snapshot to `~/Downloads/`. Three
+/// states: idle / saving / done (shows the path for ~6s).
+function SaveDiagnosticBundleButton() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<
+    "idle" | "saving" | { kind: "done"; path: string } | { kind: "error"; msg: string }
+  >("idle");
+
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  async function save() {
+    if (status === "saving") return;
+    setStatus("saving");
+    try {
+      const result = await invoke<{ path: string; entries: string[] }>(
+        "save_diagnostic_bundle"
+      );
+      if (mountedRef.current) {
+        setStatus({ kind: "done", path: result.path });
+        setTimeout(() => {
+          if (mountedRef.current) setStatus("idle");
+        }, 6000);
+      }
+    } catch (e: any) {
+      if (mountedRef.current) {
+        setStatus({ kind: "error", msg: String(e) });
+        setTimeout(() => {
+          if (mountedRef.current) setStatus("idle");
+        }, 6000);
+      }
+    }
+  }
+
+  const label = (() => {
+    if (status === "idle") return t("settings.about_save_bundle_button");
+    if (status === "saving") return `… ${t("settings.about_save_bundle_saving")}`;
+    if (typeof status === "object" && status.kind === "done") {
+      return `✓ ${t("settings.about_save_bundle_done")}`;
+    }
+    if (typeof status === "object" && status.kind === "error") {
+      return `✘ ${t("settings.about_save_bundle_failed")}`;
+    }
+    return "";
+  })();
+
+  return (
+    <button
+      onClick={save}
+      disabled={status === "saving"}
+      className="px-3 py-1.5 text-xs rounded-md border border-neutral-700 hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed"
+      title={
+        typeof status === "object" && status.kind === "done"
+          ? status.path
+          : t("settings.about_save_bundle_tooltip")
+      }
+    >
+      {label}
+    </button>
+  );
+}
+
 function AboutSection({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
   const [diag, setDiag] = useState<DiagnosticSnapshot | null>(null);
@@ -4371,6 +4435,12 @@ function AboutSection({ paired }: { paired: boolean }) {
                   ? `… ${t("settings.about_sentry_test_sending")}`
                   : t("settings.about_sentry_test_button")}
             </button>
+            {/* v0.9.3 — Save diagnostic bundle to ~/Downloads/.
+                One-click triage helper: zips cli-pulse.log,
+                remote-hook.log, crash-history.jsonl, diagnostic
+                snapshot, and version info. The user attaches the
+                zip to a bug report deliberately. */}
+            <SaveDiagnosticBundleButton />
             <a
               href="https://github.com/JasonYeYuhe/cli-pulse-desktop"
               target="_blank"

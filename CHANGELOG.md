@@ -2,6 +2,66 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.9.3] — 2026-05-09
+
+**Stability sprint #4 — diagnostic bundle.** Adds a one-click
+"Save diagnostic bundle" button to Settings → About that zips the
+files a maintainer would need to triage a bug report. Closes the
+v0.8.0-incident-style "verifier manually collects 5 files for 20
+min" loop.
+
+### Added
+- **`src-tauri/src/diagnostic_bundle.rs`** new module — creates a
+  zip in `~/Downloads/cli-pulse-diag-<YYYYMMDD-HHMMSS>.zip`
+  containing:
+  - `cli-pulse.log` (main app log, full file)
+  - `remote-hook.log` (hook subprocess log)
+  - `crash-history.jsonl` (v0.9.0 recovery markers, if any)
+  - `diagnostic_snapshot.json` (the existing platform snapshot)
+  - `versions.txt` (sanity check)
+  Best-effort: missing files are skipped, not errors. Bundle creation
+  succeeds even with no logs (returns just the in-memory entries).
+- **`save_diagnostic_bundle` Tauri command** + frontend
+  `SaveDiagnosticBundleButton` in Settings → About. Three states:
+  idle / saving / done (shows zip path for ~6s, then idle).
+- **5 i18n keys × 3 langs** (en / zh-CN / ja). Tooltip explains
+  the privacy posture: "Bundle is saved locally — review the
+  contents before sharing. Does NOT contain credentials, but log
+  lines may include cwd basenames."
+- **Explicit `zip = "4"` dep declaration** in `Cargo.toml` (was
+  already a transitive dep via `tauri-plugin-updater`; pinning
+  explicitly is zero binary cost).
+
+### Privacy posture
+- Bundle saved LOCALLY to `~/Downloads/`, never auto-uploaded
+- `helper_secret`, `refresh_token`, OAuth tokens, JWTs are NEVER
+  written into the bundle
+- Full PDB symbols (~27 MB) are NOT included; they're already on
+  the GitHub release page
+- WER mdmp files are NOT included; those contain process memory
+  that may have OAuth tokens — maintainer asks separately on a
+  case-by-case basis with explicit user consent
+
+### Tests
+281 → 285 backend (+4 in `diagnostic_bundle::tests`):
+- timestamp filename-safety (no `:` / `/` / `\\`)
+- Unix epoch handling
+- bundle creation with only extras (no disk files)
+- bundle creation with nonexistent files in SOURCES list
+- days_to_ymd known dates
+
+Frontend 57 unchanged (the 5 new i18n keys are exercised via the
+critical-labels gate).
+
+### Sprint context
+Fourth ship of the v0.9.x → v0.10.x sprint:
+- v0.9.0 ✅ Stability hardening
+- v0.9.1 ✅ Agent scaffolding (stub)
+- v0.9.2 ✅ ConPTY transport + FFI
+- v0.9.3 ✅ Diagnostic bundle (THIS ship)
+- v0.10.0 — UX polish (next)
+- v0.10.1 — Export + compare
+
 ## [0.9.2] — 2026-05-09
 
 **Stability sprint #3 — ConPTY managed-session host RETURNS (FFI ship).**

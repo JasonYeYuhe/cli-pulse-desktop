@@ -173,6 +173,11 @@
     "about_sentry_test_sending": "送信中…",
     "about_sentry_test_sent": "送信済み",
     "about_sentry_test_tooltip": "タグ付き Info イベントを Sentry に送信し、クラッシュレポートの経路が機能しているか確認します。sentry.io で diagnostic_test=true タグのイベントを確認してください。",
+    "about_save_bundle_button": "診断バンドルを保存",
+    "about_save_bundle_saving": "保存中…",
+    "about_save_bundle_done": "ダウンロードに保存しました",
+    "about_save_bundle_failed": "保存失敗",
+    "about_save_bundle_tooltip": "cli-pulse.log / remote-hook.log / クラッシュ履歴 / 診断スナップショットを zip にまとめてダウンロードフォルダーに保存します。共有前に内容を確認してください — 認証情報は含まれませんが、ログ行に cwd ベース名が含まれる場合があります。",
     "about_repo_link": "GitHub でリポジトリを開く",
     "integrations": {
       "heading": "連携サービス",

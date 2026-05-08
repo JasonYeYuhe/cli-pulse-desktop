@@ -242,6 +242,15 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "remote.agent_status_last_tick",
     "remote.agent_status_never_ticked",
     "remote.agent_status_not_running",
+    // v0.9.3 — Save diagnostic bundle button (Settings → About).
+    // The tooltip carries the privacy posture explanation; missing
+    // translation would silently leave users unsure what's in the
+    // zip they're about to share. Pin every key.
+    "settings.about_save_bundle_button",
+    "settings.about_save_bundle_saving",
+    "settings.about_save_bundle_done",
+    "settings.about_save_bundle_failed",
+    "settings.about_save_bundle_tooltip",
     // v0.9.0 — categorized update error messages. Each maps to a
     // specific user-actionable instruction; missing translations
     // would silently fall back to the generic message and lose the

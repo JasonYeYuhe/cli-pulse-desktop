@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.9.2"
+version = "0.9.3"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -79,6 +79,11 @@ sha2 = "0.10"
 # entropy reduction caused by uuid::v4's fixed version/variant bits
 # (Gemini 3.1 Pro v0.7.0 review P2).
 getrandom = "0.2"
+
+# v0.9.3 — diagnostic bundle export. Already a transitive dep via
+# tauri-plugin-updater; pinning it explicitly is zero binary cost
+# but lets `diagnostic_bundle` use the same version we already ship.
+zip = { version = "4", default-features = false, features = ["deflate"] }
 
 # v0.9.2 — ConPTY managed-session local host (the v0.8.0 redo with
 # the one-line bug fixed in v0.9.1: `tokio::spawn` →

@@ -173,6 +173,11 @@
     "about_sentry_test_sending": "发送中…",
     "about_sentry_test_sent": "已发送",
     "about_sentry_test_tooltip": "向 Sentry 发送一条带标签的 Info 事件,用于验证崩溃上报链路是否真的接通。在 sentry.io 检查 diagnostic_test=true 标签的事件。",
+    "about_save_bundle_button": "保存诊断包",
+    "about_save_bundle_saving": "保存中…",
+    "about_save_bundle_done": "已保存到下载文件夹",
+    "about_save_bundle_failed": "保存失败",
+    "about_save_bundle_tooltip": "将 cli-pulse.log、remote-hook.log、崩溃历史和诊断快照打包成 zip 保存到下载文件夹。分享前请检查内容 — 不含凭据,但日志行可能包含 cwd 目录名。",
     "about_repo_link": "在 GitHub 打开仓库",
     "integrations": {
       "heading": "集成",
