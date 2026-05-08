@@ -1,6 +1,6 @@
 [package]
 name = "cli-pulse-desktop"
-version = "0.9.1"
+version = "0.9.2"
 description = "CLI Pulse — track AI CLI usage and cost across Windows and Linux"
 authors = ["Jason Ye <yyyyy.yeyuhe@gmail.com>"]
 edition = "2021"
@@ -79,12 +79,28 @@ sha2 = "0.10"
 # entropy reduction caused by uuid::v4's fixed version/variant bits
 # (Gemini 3.1 Pro v0.7.0 review P2).
 getrandom = "0.2"
-# v0.8.0 added portable-pty + windows-sys deps for the ConPTY managed-
-# session host. v0.8.1 reverts that feature after a STATUS_STACK_BUFFER_OVERRUN
-# crash-on-launch was observed on a clean Windows VM (BEX64 fault at
-# offset 0x4c9375). Both deps are removed pending root-cause investigation.
-# v0.9.x will reintroduce the ConPTY host with a mandatory VM smoke gate
-# before promote-to-Latest.
+
+# v0.9.2 — ConPTY managed-session local host (the v0.8.0 redo with
+# the one-line bug fixed in v0.9.1: `tokio::spawn` →
+# `tauri::async_runtime::spawn` in agent's setup-time spawn site).
+# Same crate that VS Code, wezterm, alacritty use. ~200 KB binary
+# cost. v0.8.0 used 0.9 successfully on the FFI side (no incidents
+# in transport.rs itself); the v0.8.1 revert dropped it; v0.9.2
+# brings it back.
+portable-pty = "0.9"
+
+# v0.9.2 — Job Object FFI for orphan auto-cleanup on Windows. Same
+# config the v0.8.2 build had: `Win32_Security` is required for
+# `CreateJobObjectW` because its signature references
+# `SECURITY_ATTRIBUTES` even when callers pass null. Caught by
+# Windows CI on v0.8.0's first push (3 versions ago); fixed in v0.8.2.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 # v0.4.20 — `start_paused = true` on `#[tokio::test]` advances virtual

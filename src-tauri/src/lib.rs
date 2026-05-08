@@ -2437,16 +2437,13 @@ pub fn run() {
                         );
                     } else {
                         let transport: std::sync::Arc<dyn remote::SessionTransport> =
-                            std::sync::Arc::new(remote::StubTransport::new());
+                            std::sync::Arc::new(remote::ConPtyTransport::new());
                         let agent_handle =
                             remote::spawn_agent_loop(transport, cfg_for_agent, stop_bg.clone());
                         app.manage(RemoteAgentState {
                             handle: agent_handle,
                         });
-                        log::info!(
-                            "Remote agent loop started (StubTransport — v0.9.1a; \
-                             ConPTY FFI returns in v0.9.1b)"
-                        );
+                        log::info!("Remote agent loop started (ConPtyTransport — v0.9.2)");
                     }
                 }
                 Ok(None) => log::info!(

@@ -225,7 +225,23 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.privacy_consent_body_b3",
     "settings.privacy_consent_enable_button",
     // v0.8.0 introduced spawn-dialog + agent-diagnostic keys; v0.8.1
-    // reverts the corresponding feature so those keys are gone too.
+    // reverted them; v0.9.2 brings them back as part of the ConPTY
+    // managed-session host redo. Mistranslating the cwd help text
+    // would mislead users about what gets uploaded (only the HMAC
+    // fingerprint + basename — full path stays local).
+    "remote.session_start_button",
+    "remote.session_start_dialog_title",
+    "remote.session_start_cwd_label",
+    "remote.session_start_cwd_help",
+    "remote.session_start_provider_label",
+    "remote.session_start_submit",
+    "remote.session_start_processing",
+    "remote.session_start_failed",
+    "remote.agent_status_heading",
+    "remote.agent_status_lifetime",
+    "remote.agent_status_last_tick",
+    "remote.agent_status_never_ticked",
+    "remote.agent_status_not_running",
     // v0.9.0 — categorized update error messages. Each maps to a
     // specific user-actionable instruction; missing translations
     // would silently fall back to the generic message and lose the

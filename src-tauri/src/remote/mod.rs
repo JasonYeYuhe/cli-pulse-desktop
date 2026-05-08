@@ -49,4 +49,4 @@ pub mod log;
 pub mod transport;
 
 pub use agent::{spawn_agent_loop, AgentDiagnostic, AgentHandle, RemoteAgentManager};
-pub use transport::{SessionHandle, SessionTransport, StubTransport, TransportError};
+pub use transport::{ConPtyTransport, SessionHandle, SessionTransport, TransportError};

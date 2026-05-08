@@ -2,6 +2,97 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.9.2] — 2026-05-09
+
+**Stability sprint #3 — ConPTY managed-session host RETURNS (FFI ship).**
+
+v0.9.1 brought back the agent scaffolding (with the v0.8.0 root cause
+fixed: `tokio::spawn` → `tauri::async_runtime::spawn` in setup hook)
+but used a `StubTransport` that returned errors from every method.
+v0.9.2 swaps the stub for `ConPtyTransport` — same content as the
+v0.8.0 transport.rs (which had no bugs in the FFI itself; the v0.8.0
+incident was the agent spawn site, NOT transport.rs).
+
+This re-attempts the v0.8.0 ship with all 7 lessons applied:
+1. Spawn site uses `tauri::async_runtime::spawn` (the v0.8.0 fix)
+2. Pre-push hook fails on bare `tokio::spawn` outside test contexts
+3. Sentry sync-flush in panic hook (v0.9.0) so any future panic
+   reaches Sentry reliably
+4. Crash-recovery mode (v0.9.0) breaks the launch-crash loop after
+   3 crashes within 5 min
+5. `CLI_PULSE_DISABLE_REMOTE_AGENT=1` env kill-switch (v0.9.1)
+6. PDB upload artifact (v0.8.2) for symbolizing future fault offsets
+7. Mandatory VM smoke gate before promote-to-Latest (sprint rule)
+
+### Added
+- **`src-tauri/src/remote/transport.rs`** restored from v0.8.0 commit
+  `c37cec0` verbatim. All 4 plan-review fixes baked in:
+  - **P0 #1**: `tokio::task::spawn_blocking` wrapping every sync
+    transport call in agent.rs
+  - **P0 #2**: 0x03-byte cross-platform Ctrl-C (avoids host-kill
+    risk; the canonical Windows Terminal / wezterm / alacritty
+    pattern; works because ConPTY isolates the child's console)
+  - **P1**: Job Object `KILL_ON_JOB_CLOSE` for orphan auto-cleanup
+    on Windows (kernel-level guarantee, no heuristics)
+  - **P2**: `Drop` on `HandleInner` (Arc-wrapped) so teardown
+    runs when the LAST clone goes out of scope
+- All 3 v0.8.0 post-impl review P1 fixes baked in:
+  - per-call `tokio::time::timeout(5s)` in dispatch
+  - log rotation Win write-bit (`OpenOptions::write(true).append(true)`)
+  - graceful shutdown via `manager.shutdown()` before loop exits
+- **`portable-pty 0.9`** + **`windows-sys 0.59`** deps re-added
+  (with `Win32_Security` feature for `CreateJobObjectW` — the v0.8.2
+  fix). Cfg-gated to Windows targets only.
+- **Frontend spawn dialog** restored — `SpawnSessionLauncher`
+  component on the Sessions tab. Click "+ Start new session" →
+  modal with cwd field, optional label, static "Claude" provider
+  → submit calls `request_remote_session_start` Tauri command →
+  `remote_app_request_session_start` server-side → agent loop
+  picks up the start command on next 1s tick and spawns via
+  `ConPtyTransport`.
+- **`AgentDiagnosticBlock`** in Settings → About — three lines
+  (running count / lifetime hosted / last-tick age). Polls every
+  5 s while About is mounted. "Not running" line when
+  `agent_diagnostic` returns null (not paired / recovery mode /
+  env kill-switch).
+- **13 i18n keys × 3 langs** (en / zh-CN / ja) for the spawn
+  dialog + agent diagnostic. All pinned in `i18n.test.ts`'s
+  critical-labels list.
+
+### Changed
+- `lib.rs::run`'s setup hook now constructs `ConPtyTransport`
+  instead of `StubTransport`. The 3-way gate from v0.9.1 stays
+  (paired AND `!recovery_mode` AND `!env_killed`).
+
+### Tests
+283 → 281 backend tests (-2 net). The v0.8.0 transport.rs has
+fewer transport-specific tests than the v0.9.1 stub had (the stub
+had +7 stub-contract tests; the real transport has the agent-
+integration tests +5 covering ConPTY-specific behavior). Frontend
+57 unchanged.
+
+### Reviewer fixes — Gemini 3.1 Pro
+- Plan v1 review: 2 P0 + 3 P1 + 3 P2 + 2 P3, all addressed in v2
+- Plan v2 review: API capacity exhausted at review time. Self-
+  verified via 1:1 mapping of v1 findings; Codex review path
+  required SendMessage tool which wasn't available
+- v0.9.2 diff review: API capacity still exhausted. Will retry
+  pre-VM-smoke; if still exhausted, ship and review post-impl.
+
+### Sprint context
+Third ship of the v0.9.x → v0.10.x post-incident sprint:
+- v0.9.0 ✅ Stability hardening
+- v0.9.1 ✅ Agent scaffolding (stub transport)
+- v0.9.2 ✅ ConPTY transport + FFI (THIS ship — the v0.8.0 redo)
+- v0.9.3 — diagnostic bundle + binary polish (next)
+- v0.10.0 — UX polish
+- v0.10.1 — Export + compare
+
+**Mandatory VM smoke gate before promote-to-Latest.** This is the
+ship that re-introduces the FFI surface that crashed v0.8.0. Latest
+stays at v0.7.0 until the verifier reports PASS on
+`scripts/vm-smoke-full.ps1` against v0.9.2.
+
 ## [0.9.1] — 2026-05-08
 
 **Stability sprint #2 — ConPTY managed-session host SCAFFOLDING (no
