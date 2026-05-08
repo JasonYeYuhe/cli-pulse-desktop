@@ -226,6 +226,17 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.privacy_consent_enable_button",
     // v0.8.0 introduced spawn-dialog + agent-diagnostic keys; v0.8.1
     // reverts the corresponding feature so those keys are gone too.
+    // v0.9.0 — categorized update error messages. Each maps to a
+    // specific user-actionable instruction; missing translations
+    // would silently fall back to the generic message and lose the
+    // category-specific guidance. Pin every key in every language.
+    "updater.error_network",
+    "updater.error_permissions",
+    "updater.error_disk_full",
+    "updater.error_path_not_found",
+    "updater.error_signature",
+    "updater.error_unknown",
+    "updater.error_manual_download",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

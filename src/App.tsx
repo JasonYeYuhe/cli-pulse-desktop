@@ -4402,15 +4402,101 @@ function UpdaterPanel({
           </button>
         </div>
       );
-    case "error":
+    case "error": {
+      // v0.9.0 — categorize the raw error so users get an actionable
+      // message instead of "os error 3". Maps common Tauri-updater
+      // failure shapes onto the new `updater.error_<category>` keys
+      // (which include retry hints and a "Download manually" link).
+      // The raw error stays in the message via {{error}} interpolation
+      // for bug-report copy-paste.
+      const cat = categorizeUpdateError(state.text);
+      const truncated =
+        state.text.length > 160 ? state.text.slice(0, 160) + "…" : state.text;
       return (
-        <div className="text-sm text-red-300">
-          {t("updater.error", {
-            error: state.text.length > 160 ? state.text.slice(0, 160) + "…" : state.text,
-          })}
+        <div className="space-y-1">
+          <div className="text-sm text-red-300">
+            {t(cat.key, { error: truncated })}
+          </div>
+          {cat.showManualDownload && (
+            <a
+              href="https://github.com/JasonYeYuhe/cli-pulse-desktop/releases/latest"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-emerald-400 hover:underline"
+            >
+              {t("updater.error_manual_download")} ↗
+            </a>
+          )}
         </div>
       );
+    }
   }
+}
+
+/// v0.9.0 — categorize a raw tauri-plugin-updater error into one of
+/// a handful of buckets, each mapped to an actionable i18n key. The
+/// raw error string is preserved in the rendered message so bug
+/// reports can quote the OS error code; the category just decides
+/// the explanation text + whether to show a manual-download link.
+///
+/// Patterns we recognize (all case-insensitive substring match):
+///   - `os error 3` / `not found` / `path not found` → path_not_found
+///     (the v0.5.3 per-user-NSIS bug; manual download recommended)
+///   - `os error 5` / `denied` / `permission` → permissions
+///   - `network` / `connection` / `dns` / `timeout` / `os error 10` /
+///     `unreachable` / `tls` / `cert` → network
+///   - `os error 112` / `disk full` / `space` → disk_full
+///   - `signature` / `invalid` / `corrupt` → signature
+///   - everything else → unknown
+function categorizeUpdateError(raw: string): {
+  key: string;
+  showManualDownload: boolean;
+} {
+  const s = raw.toLowerCase();
+  if (
+    s.includes("os error 3") ||
+    s.includes("path not found") ||
+    s.includes("the system cannot find")
+  ) {
+    return {
+      key: "updater.error_path_not_found",
+      showManualDownload: true,
+    };
+  }
+  if (
+    s.includes("os error 5") ||
+    s.includes("permission denied") ||
+    s.includes("access is denied")
+  ) {
+    return { key: "updater.error_permissions", showManualDownload: true };
+  }
+  if (
+    s.includes("network") ||
+    s.includes("connection") ||
+    s.includes("dns") ||
+    s.includes("timeout") ||
+    s.includes("os error 10") ||
+    s.includes("unreachable") ||
+    s.includes("tls") ||
+    s.includes("certificate")
+  ) {
+    return { key: "updater.error_network", showManualDownload: false };
+  }
+  if (
+    s.includes("os error 112") ||
+    s.includes("disk full") ||
+    s.includes("no space")
+  ) {
+    return { key: "updater.error_disk_full", showManualDownload: false };
+  }
+  if (
+    s.includes("signature") ||
+    s.includes("invalid update") ||
+    s.includes("corrupt")
+  ) {
+    return { key: "updater.error_signature", showManualDownload: false };
+  }
+  return { key: "updater.error_unknown", showManualDownload: true };
 }
 
 // v0.5.5 — Activity Timeline chart. Renders a 24h horizontal bar

@@ -2,6 +2,105 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.9.0] — 2026-05-08
+
+**Stability sprint #1 — driven by lessons from the v0.8.0 BEX64
+incident.** Three orthogonal hardening fixes bundled because none
+is large enough to warrant its own ship and all three reduce the
+recurrence risk for the v0.9.1 ConPTY redo coming next.
+
+### Added
+- **Sentry sync-flush panic hook** (`src-tauri/src/sentry_init.rs`).
+  Under `panic = "abort"` in our release profile, sentry-rust's
+  auto-installed panic hook captures into an MPSC channel that the
+  worker thread reads + sends — but `abort()` runs immediately
+  after the hook chain returns, racing with the worker thread to
+  drain the channel before process exit. v0.8.0 events DID arrive
+  in Sentry but only by luck. Fix: install our own panic hook that
+  wraps sentry's, captures the event via the chained hook, then
+  blocks on `Client::close(Some(2s))` to flush synchronously
+  before chaining to default abort. Gemini 3.1 Pro plan-review P1.
+- **Crash-recovery mode** (`src-tauri/src/crash_recovery.rs`, new
+  module). Append-only JSONL at `<config_dir>/crash-history.jsonl`
+  records `{ts, phase, version}` markers. `record_startup()` runs
+  at the very top of `lib.rs::run`; `record_setup_complete()` runs
+  at end of Tauri's setup hook closure; `record_clean_exit()` runs
+  after `Builder::run` returns. `assess_recovery_mode_at_startup()`
+  walks the JSONL and counts crashes (a `Starting` whose nearest
+  following entry is another `Starting`, within a 5-min window).
+  ≥3 crashes flips an atomic `RECOVERY_MODE` flag.
+  - Recovery mode active: tray refresh loop SKIPPED (tray icon
+    itself still installs so users can Quit cleanly), agent loop
+    will be skipped when v0.9.1+ ships
+  - **Sentry stays ON** in recovery mode (Gemini P2: telemetry
+    during a crash loop is the right direction, not the wrong one)
+  - Privacy: crash-history is local-only, just timestamp + phase
+    + version. File capped at 100 entries with FIFO rotation. The
+    diagnostic-bundle button planned for v0.9.2 will ship this
+    file with explicit user consent.
+- **Categorized update error messages** in the Settings → Updates
+  banner. Frontend `categorizeUpdateError(raw)` maps common
+  tauri-plugin-updater failure shapes onto 6 actionable i18n keys:
+  - `updater.error_path_not_found` (the v0.5.3 `os error 3`
+    per-user-NSIS bug; manual-download link surfaced)
+  - `updater.error_permissions` (admin elevation hint)
+  - `updater.error_network` (retry hint)
+  - `updater.error_disk_full` (free up space hint)
+  - `updater.error_signature` (don't install + report hint)
+  - `updater.error_unknown` (raw error preserved verbatim)
+  - All 6 + `updater.error_manual_download` translated in en /
+    zh-CN / ja, pinned in `i18n.test.ts` critical-labels
+- **`crash_recovery::is_in_recovery_mode()`** read-only API for
+  future modules (v0.9.1+ agent loop, etc.) to gate their init.
+
+### Tests
+- 253 → 263 backend (+10 covering crash-recovery threshold logic,
+  ts-window edge cases, mixed-history scenarios, phase JSON
+  round-trip)
+- 57 → 57 frontend (no test count change — categorizeUpdateError
+  exercised via the i18n.test.ts critical-labels gate; behavior
+  contract checked by manual UI test against deliberate
+  os-error-3 reproducer)
+
+### Reviewer findings
+- **Plan v1**: Gemini 3.1 Pro caught 2 P0 + 3 P1 + 3 P2 + 2 P3.
+  All P0/P1 dropped or fixed in plan v2:
+  - P0 dropped lazy-init Sentry (would blind us to startup panics)
+  - P0 dropped light theme (codebase isn't structured for `dark:`
+    prefix; needs 2-3k LOC dedicated sprint with full UI design)
+  - P1 added global pre-push grep for `tokio::spawn` outside test
+    (deferred to v0.9.1a where it's actually load-bearing)
+  - P1 added sync Sentry flush via panic hook (in this ship)
+  - P1 deferred v0.11.0 custom alerts (needs Supabase schema
+    design)
+  - P2 keep Sentry ON during recovery (in this ship)
+  - P3 split v0.9.1 into 2a (scaffolding) + 2b (FFI) for
+    smaller-blast-radius ships (deferred to v0.9.1a/b)
+- **Plan v2**: Gemini API capacity exhausted; Codex review path
+  required SendMessage which wasn't available. Self-verified each
+  v2 change is a 1:1 mapping of a v1 finding; full rationale in
+  the plan v2 file.
+
+### Out of scope (deferred)
+- v0.5.3 `os error 3` reproducer-driven fix — original VM was
+  upgraded past v0.5.3 long ago, no longer reproducible without
+  reinstalling. Re-address if a real user surfaces it.
+- Light theme — Gemini P0 from plan v1, would need its own
+  ~2-3k LOC sprint
+- v0.11.0 custom alert rules engine — Gemini P1 from plan v1,
+  needs Supabase schema design first
+
+### Sprint context
+First ship of the v0.9.x → v0.10.x post-incident sprint (see
+`PROJECT_DEV_PLAN_2026-05-08_v0.9-v0.10_post_incident_sprint_v2.md`).
+Sequence:
+- v0.9.0 (this ship) — stability hardening
+- v0.9.1a — ConPTY agent comms scaffolding (no FFI yet)
+- v0.9.1b — ConPTY FFI + transport (the redo of the v0.8.0 attempt)
+- v0.9.2 — diagnostic bundle + binary polish
+- v0.10.0 — keyboard shortcuts + date range + per-provider visibility
+- v0.10.1 — CSV/JSON export + provider compare
+
 ## [0.8.2] — 2026-05-08
 
 **Sentry-driven follow-up after the v0.8.0 BEX64 incident.** The
