@@ -197,32 +197,51 @@ jobs:
           esac
           echo "✅ All bundle checks passed"
 
-      # v0.8.2 — Upload Windows .pdb as a separate release asset for
-      # crash post-mortem. Triggered by [profile.release] now having
-      # `debug = "line-tables-only"` which causes rustc to emit a .pdb
-      # alongside the .exe even with `strip = true`. The shipped NSIS
-      # is unchanged (~3 MB stripped); the .pdb is uploaded
-      # independently (~30-40 MB) so future BEX64 / 0xc0000409 fault
-      # offsets can be symbolized via cdb / windbg / breakpad
-      # minidump_stackwalk. Lesson from v0.8.0 BEX64 (fault offset
-      # 0x4c9375 was unsymbolizable until Sentry's panic message
-      # independently identified the cause).
-      - name: Upload Windows PDB to release (crash post-mortem)
+      # v0.8.2 — Upload Windows .pdb files as separate release assets
+      # for crash post-mortem. Triggered by [profile.release] having
+      # `debug = "line-tables-only"` which causes rustc to emit .pdb
+      # files alongside each binary on Windows MSVC even with
+      # `strip = true`. The shipped NSIS is unchanged (~3 MB stripped);
+      # the .pdb files upload independently so future BEX64 / 0xc0000409
+      # fault offsets can be symbolized via cdb / windbg / breakpad
+      # minidump_stackwalk.
+      #
+      # Files we ship:
+      #   - cli_pulse_desktop.pdb (~27 MB) — the GUI binary; primary
+      #   - remote_hook.pdb (~9 MB) — the PermissionRequest hook
+      #     subprocess (separate process, separate symbols needed)
+      # We skip the scan_cli + sessions_smoke sidecar PDBs because
+      # those binaries aren't shipped in the NSIS installer — diagnostic
+      # binaries only, used via cargo run.
+      #
+      # v0.8.2 first push had wrong filename (`cli_pulse_desktop_lib.pdb`
+      # instead of `cli_pulse_desktop.pdb`) — Cargo names the PDB after
+      # the BIN target, not the LIB target. Fixed in the smoke-script
+      # commit's wake.
+      - name: Upload Windows PDBs to release (crash post-mortem)
         if: matrix.platform == 'windows'
         shell: bash
         run: |
           set -euo pipefail
-          PDB="$GITHUB_WORKSPACE/src-tauri/target/${{ matrix.rust-target }}/release/cli_pulse_desktop_lib.pdb"
-          if [ ! -f "$PDB" ]; then
-            echo "::warning::PDB not found at $PDB — skipping upload"
-            ls -la "$GITHUB_WORKSPACE/src-tauri/target/${{ matrix.rust-target }}/release/" | grep -i pdb || true
-            exit 0
+          REL_DIR="$GITHUB_WORKSPACE/src-tauri/target/${{ matrix.rust-target }}/release"
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          UPLOADED=0
+          for src_basename in cli_pulse_desktop remote_hook; do
+            SRC="$REL_DIR/${src_basename}.pdb"
+            if [ ! -f "$SRC" ]; then
+              echo "::warning::PDB not found at $SRC — skipping"
+              continue
+            fi
+            STAGED="$RUNNER_TEMP/${src_basename}_${TAG}_x64.pdb"
+            cp "$SRC" "$STAGED"
+            ls -la "$STAGED"
+            gh release upload "$TAG" "$STAGED" --clobber
+            UPLOADED=$((UPLOADED + 1))
+          done
+          echo "Uploaded $UPLOADED PDB file(s) to release $TAG"
+          if [ "$UPLOADED" -eq 0 ]; then
+            echo "::warning::No PDB files uploaded — debug = line-tables-only may not be active in [profile.release]"
+            ls -la "$REL_DIR/" | grep -i pdb || true
           fi
-          # Stage with a release-tagged name so multiple versions can
-          # coexist as historical artifacts on the release page.
-          STAGED="$RUNNER_TEMP/cli-pulse-desktop_${{ github.event.inputs.tag || github.ref_name }}_x64.pdb"
-          cp "$PDB" "$STAGED"
-          ls -la "$STAGED"
-          gh release upload "${{ github.event.inputs.tag || github.ref_name }}" "$STAGED" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
