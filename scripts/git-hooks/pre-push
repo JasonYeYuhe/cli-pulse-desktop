@@ -35,6 +35,65 @@ fail() {
 step "rustfmt"
 ( cd src-tauri && cargo fmt --all -- --check ) || fail "cargo fmt"
 
+# v0.9.1a regression guard against the v0.8.0 BEX64 root cause.
+#
+# v0.8.0 crashed on launch with "panic: there is no reactor running,
+# must be called from the context of a Tokio 1.x runtime" because
+# `spawn_agent_loop` used `tokio::spawn` from inside Tauri's `setup`
+# hook, which runs OUTSIDE any tokio runtime context. The fix is
+# `tauri::async_runtime::spawn`, which dispatches via Tauri's
+# internal handle.
+#
+# This step fails the pre-push if any Rust file under src-tauri/src/
+# matches `tokio::spawn(` AND is not inside a `#[cfg(test)]` module.
+# Test-time code is allowed (and unavoidable, since `#[tokio::test]`
+# expands to constructs that include `tokio::spawn`).
+#
+# To suppress on a legitimate non-test call site, add `// @allow tokio-spawn`
+# on the same line.
+step "tokio::spawn regression guard"
+TOKIO_SPAWN_HITS=$(grep -rn --include='*.rs' 'tokio::spawn(' src-tauri/src/ 2>/dev/null \
+    | grep -v '@allow tokio-spawn' \
+    | grep -v '/\*\* tokio::spawn' \
+    | grep -v 'cfg(test)' || true)
+# Drop hits that fall inside test modules / tokio::test attribute.
+# Heuristic: filter by file+line — if line is in mod tests, ignore.
+# Easier: rg "tokio::spawn\(" --no-config -t rust src-tauri/src/ -B 2 \
+# would let us see surrounding context. Simpler — just drop matches
+# where the full file path's containing function is annotated with
+# #[tokio::test] OR is in a `mod tests` block. For now, keep it
+# conservative: any production hit fails the pre-push, and devs
+# annotate with `// @allow tokio-spawn` if it's intentional.
+if [ -n "$TOKIO_SPAWN_HITS" ]; then
+    # Check if all hits are within `mod tests` or `#[tokio::test]`
+    # blocks by inspecting the file context around each line.
+    PRODUCTION_HITS=""
+    while IFS= read -r hit; do
+        FILE=$(echo "$hit" | cut -d: -f1)
+        LINE=$(echo "$hit" | cut -d: -f2)
+        # Look at the 50 lines preceding the hit. If we see
+        # `mod tests {` or `#[tokio::test]` more recently than any
+        # `mod ` declaration, the hit is in a test context.
+        CONTEXT=$(sed -n "$((LINE > 50 ? LINE - 50 : 1)),${LINE}p" "$FILE")
+        # Match #[tokio::test], #[tokio::test(...)], mod tests, #[cfg(test)]
+        if echo "$CONTEXT" | grep -qE '#\[tokio::test|mod tests \{|#\[cfg\(test\)\]'; then
+            continue
+        fi
+        PRODUCTION_HITS="${PRODUCTION_HITS}${hit}\n"
+    done <<< "$TOKIO_SPAWN_HITS"
+
+    if [ -n "$PRODUCTION_HITS" ]; then
+        echo
+        printf 'Found bare tokio::spawn in production code:\n'
+        printf '%b' "$PRODUCTION_HITS"
+        echo
+        echo "v0.8.0 root cause: tokio::spawn from Tauri setup hook = panic-abort."
+        echo "Use tauri::async_runtime::spawn instead, OR add '// @allow tokio-spawn'"
+        echo "on the line if you've verified the call site has tokio runtime context."
+        fail "tokio::spawn regression guard"
+    fi
+fi
+
 step "clippy"
 ( cd src-tauri && cargo clippy --all-targets -- -D warnings ) || fail "cargo clippy"
 

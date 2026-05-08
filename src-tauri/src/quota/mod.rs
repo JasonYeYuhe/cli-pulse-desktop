@@ -178,13 +178,18 @@ pub fn last_outcomes() -> Vec<CollectorOutcome> {
 /// guarantee as v0.4.3 (Codex 2026-05-02 review).
 pub async fn collect_all() -> Vec<CollectorOutcome> {
     type CollectFut = tokio::task::JoinHandle<Result<Option<QuotaSnapshot>, CollectorError>>;
+    // @allow tokio-spawn for the next 6 lines: these run inside an
+    // async fn called from a Tauri command, which always has the
+    // Tauri tokio runtime entered. The v0.9.1a pre-push guard
+    // protects against tokio::spawn in SYNC contexts (like Tauri's
+    // setup hook — the v0.8.0 root cause); these calls are safe.
     let tasks: Vec<(&'static str, CollectFut)> = vec![
-        (PROVIDER_CLAUDE, tokio::spawn(claude::collect())),
-        (PROVIDER_CODEX, tokio::spawn(codex::collect())),
-        (PROVIDER_CURSOR, tokio::spawn(cursor::collect())),
-        (PROVIDER_GEMINI, tokio::spawn(gemini::collect())),
-        (PROVIDER_COPILOT, tokio::spawn(copilot::collect())),
-        (PROVIDER_OPENROUTER, tokio::spawn(openrouter::collect())),
+        (PROVIDER_CLAUDE, tokio::spawn(claude::collect())), // @allow tokio-spawn
+        (PROVIDER_CODEX, tokio::spawn(codex::collect())),   // @allow tokio-spawn
+        (PROVIDER_CURSOR, tokio::spawn(cursor::collect())), // @allow tokio-spawn
+        (PROVIDER_GEMINI, tokio::spawn(gemini::collect())), // @allow tokio-spawn
+        (PROVIDER_COPILOT, tokio::spawn(copilot::collect())), // @allow tokio-spawn
+        (PROVIDER_OPENROUTER, tokio::spawn(openrouter::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {

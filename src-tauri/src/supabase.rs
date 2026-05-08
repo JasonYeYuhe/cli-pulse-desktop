@@ -958,6 +958,64 @@ pub async fn remote_send_command(
     Ok(())
 }
 
+/// v0.9.1a — Wraps `remote_app_request_session_start`. Creates a row
+/// in `remote_sessions(status='pending')` + `remote_session_commands
+/// (kind='start')` for the agent to pick up. Originally introduced
+/// in v0.8.0; reverted in v0.8.1 along with the rest of ConPTY;
+/// restored verbatim in v0.9.1a.
+///
+/// `target_device_id` is the device that should HOST the session
+/// (where the spawned `claude.exe` will run). For v0.9.1a the spawn
+/// dialog passes THIS Windows machine's own device_id so the local
+/// agent picks it up — but the agent's `StubTransport` returns
+/// `Internal("not yet implemented")` so the row gets marked errored
+/// on the agent's first tick. v0.9.1b swaps the stub for
+/// `ConPtyTransport` and the spawn actually succeeds.
+///
+/// Returns the new session_id (UUID).
+pub async fn remote_request_session_start(
+    target_device_id: &str,
+    provider: &str,
+    cwd_basename: Option<&str>,
+    cwd_hmac: Option<&str>,
+    client_label: Option<&str>,
+    user_jwt: &str,
+) -> SupabaseResult<String> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_provider: &'a str,
+        p_cwd_basename: Option<&'a str>,
+        p_cwd_hmac: Option<&'a str>,
+        p_client_label: Option<&'a str>,
+    }
+    let v = rpc_with_auth(
+        "remote_app_request_session_start",
+        &Params {
+            p_device_id: target_device_id,
+            p_provider: provider,
+            p_cwd_basename: cwd_basename,
+            p_cwd_hmac: cwd_hmac,
+            p_client_label: client_label,
+        },
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    if let Some(id) = v.get("session_id").and_then(|x| x.as_str()) {
+        return Ok(id.to_string());
+    }
+    if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+        return Ok(id.to_string());
+    }
+    Err(SupabaseError::Json(serde_json::Error::io(
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "remote_app_request_session_start: response missing session_id/id",
+        ),
+    )))
+}
+
 /// Wraps `remote_app_list_sessions()` — Phase 2 iter1 RPC. Returns
 /// pending+running managed sessions across the user's devices, with
 /// `device_name` joined for display. Returns `[]` when Remote Control
@@ -1109,13 +1167,197 @@ pub async fn helper_heartbeat(req: &HelperHeartbeatRequest<'_>) -> SupabaseResul
 }
 
 // ========================================================================
-// v0.8.1 — the four `remote_helper_*` HELPER-side wrappers
-// (`register_session`, `pull_commands`, `post_event`,
-// `complete_command`) introduced in v0.8.0 are removed in this revert.
-// They were the agent loop's RPC surface; with the agent loop deleted
-// (`spawn_agent_loop` no longer called from `lib.rs::run`), the
-// wrappers are dead code. They return on the v0.9.x track.
+// v0.9.1a — Remote Sessions HELPER-side wrappers (managed-session host).
 // ========================================================================
+//
+// These four RPCs are already-live (Mac sibling shipped them in
+// `cli-pulse` Phase 2 iter1, 2026-05-03). v0.9.1a wires the desktop
+// agent loop into the same surfaces so a Windows / Linux host can
+// register, dispatch commands, and report events for a managed
+// Claude session that another device's UI is driving. v0.9.1a uses
+// `StubTransport` so `register_session` is never actually called
+// (spawn always fails) — but `pull_commands`, `post_event`, and
+// `complete_command` are exercised on every agent tick.
+//
+// Auth: same `(device_id, helper_secret)` pair the existing
+// `remote_helper_create_permission_request` uses (v0.7.0 hook
+// emission). HelperConfig already has both — no new credential.
+//
+// Originally introduced in v0.8.0; reverted in v0.8.1 along with
+// the rest of ConPTY; restored in v0.9.1a verbatim.
+
+/// Wraps `remote_helper_register_session`. Called once after the
+/// transport spawn succeeds; flips the `remote_sessions.status` row
+/// from `pending` → `running` so the originating device's UI shows
+/// the session as live.
+///
+/// Server gates on `(device_id, helper_secret)` matching AND on
+/// `user_settings.remote_control_enabled = true`. Off-toggle returns
+/// an error variant; caller should still post a `kind=errored` event
+/// from the agent so the row doesn't sit at `pending` forever.
+#[allow(clippy::too_many_arguments)]
+pub async fn remote_helper_register_session(
+    device_id: &str,
+    helper_secret: &str,
+    session_id: &str,
+    provider: &str,
+    cwd_basename: &str,
+    cwd_hmac: Option<&str>,
+    client_label: Option<&str>,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_session_id: &'a str,
+        p_provider: &'a str,
+        p_cwd_basename: &'a str,
+        p_cwd_hmac: Option<&'a str>,
+        p_client_label: Option<&'a str>,
+    }
+    let v = rpc(
+        "remote_helper_register_session",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_session_id: session_id,
+            p_provider: provider,
+            p_cwd_basename: cwd_basename,
+            p_cwd_hmac: cwd_hmac,
+            p_client_label: client_label,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+/// One queued command for this device's agent loop. Mirrors the
+/// shape `remote_helper_pull_commands` returns. Fields beyond what
+/// v0.9.1a dispatches are decoded leniently (Option) so server schema
+/// drift doesn't break decode for older desktop clients.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PulledCommand {
+    pub id: String,
+    pub session_id: String,
+    /// "start" | "prompt" | "stop" | "interrupt". String not enum so
+    /// future-class servers don't crash decode.
+    pub kind: String,
+    /// Free-text payload (prompt body for `kind="prompt"`, JSON
+    /// metadata for `kind="start"`, empty for `stop` / `interrupt`).
+    #[serde(default)]
+    pub payload: Option<String>,
+    /// Optional `created_at` timestamp; informational only.
+    #[serde(default)]
+    pub created_at: Option<String>,
+}
+
+/// Wraps `remote_helper_pull_commands`. Returns up to `max` queued
+/// commands across all sessions on this device. Server-side gate
+/// returns an error when Remote Control is disabled — caller
+/// (`agent.rs`) catches and continues; on the next cycle, if the
+/// user re-enables, dispatching resumes.
+pub async fn remote_helper_pull_commands(
+    device_id: &str,
+    helper_secret: &str,
+    max: u32,
+) -> SupabaseResult<Vec<PulledCommand>> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_max: u32,
+    }
+    let v = rpc(
+        "remote_helper_pull_commands",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_max: max,
+        },
+    )
+    .await?;
+    if let Some(obj) = v.as_object() {
+        if obj.contains_key("error") {
+            check_rpc_error(&v)?;
+        }
+    }
+    if v.is_null() {
+        return Ok(Vec::new());
+    }
+    Ok(serde_json::from_value(v)?)
+}
+
+/// Wraps `remote_helper_post_event`. Server-side gate transitions
+/// `remote_sessions.status` only when `p_kind = 'status'` AND
+/// `p_payload IN ('stopped', 'errored')`. See `events.rs` for the
+/// defensive enum that prevents typos.
+pub async fn remote_helper_post_event(
+    device_id: &str,
+    helper_secret: &str,
+    session_id: &str,
+    seq: i64,
+    kind: &str,
+    payload: &str,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_session_id: &'a str,
+        p_seq: i64,
+        p_kind: &'a str,
+        p_payload: &'a str,
+    }
+    let v = rpc(
+        "remote_helper_post_event",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_session_id: session_id,
+            p_seq: seq,
+            p_kind: kind,
+            p_payload: payload,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
+
+/// Wraps `remote_helper_complete_command`. `status` is `"delivered"`
+/// or `"failed"`. `error` is a short reason string; passed when
+/// status == "failed". Mac sibling stores at most 200 chars in this
+/// column; we don't enforce that client-side (server CHECK does).
+pub async fn remote_helper_complete_command(
+    device_id: &str,
+    helper_secret: &str,
+    command_id: &str,
+    status: &str,
+    error: Option<&str>,
+) -> SupabaseResult<()> {
+    #[derive(Serialize)]
+    struct Params<'a> {
+        p_device_id: &'a str,
+        p_helper_secret: &'a str,
+        p_command_id: &'a str,
+        p_status: &'a str,
+        p_error: Option<&'a str>,
+    }
+    let v = rpc(
+        "remote_helper_complete_command",
+        &Params {
+            p_device_id: device_id,
+            p_helper_secret: helper_secret,
+            p_command_id: command_id,
+            p_status: status,
+            p_error: error,
+        },
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {

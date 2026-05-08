@@ -2,6 +2,139 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [0.9.1] — 2026-05-08
+
+**Stability sprint #2 — ConPTY managed-session host SCAFFOLDING (no
+FFI yet).** v0.8.0 shipped a full ConPTY implementation that crashed
+on launch (BEX64). Sentry confirmed the root cause:
+`tokio::spawn(...)` from inside Tauri's `setup` hook, which runs
+OUTSIDE any tokio runtime context — panic with "no reactor running",
+amplified by `panic = "abort"` into immediate process termination.
+
+v0.8.1 reverted the entire feature. v0.9.1 brings back the agent
+**scaffolding** with the bug fixed (`tauri::async_runtime::spawn`
+instead of `tokio::spawn`) but uses a **stub transport** that returns
+`TransportError::Internal` from every method. v0.9.2 adds the actual
+ConPTY + Job Object FFI on top, swapping the stub for `ConPtyTransport`.
+
+This 2-phase split (Gemini 3.1 Pro plan-review P3) keeps the blast
+radius small: v0.9.1 validates the agent's tick loop / RPC dispatch
+/ event posting on its own; v0.9.2 adds FFI risk to a smaller diff.
+
+### Added
+
+- **`src-tauri/src/remote/{transport, agent, events}.rs`** — restored
+  from v0.8.0 commit `c37cec0` with three changes:
+  1. **`tokio::spawn` → `tauri::async_runtime::spawn`** in
+     `agent::spawn_agent_loop` (THE v0.8.0 fix; one-line bug)
+  2. `transport.rs` is now `StubTransport` instead of `ConPtyTransport`
+     — every method returns `TransportError::Internal("v0.9.1a stub
+     transport — ConPTY spawn not yet implemented in this build
+     (planned for v0.9.1b)")`. No portable-pty, no windows-sys, no
+     Job Object, no reader thread.
+  3. `JoinHandle` import switched from `tokio::task::JoinHandle` to
+     `tauri::async_runtime::JoinHandle` (Tauri 2 has its own
+     JoinHandle type; importing tokio's gave a type mismatch on the
+     `AgentHandle.join` field — caught by the compiler the moment the
+     spawn-API change went in).
+
+- **4 helper RPC wrappers** restored in `supabase.rs`:
+  `remote_helper_register_session`, `remote_helper_pull_commands`,
+  `remote_helper_post_event`, `remote_helper_complete_command`. All
+  4 target already-live RPCs the Mac team shipped in `cli-pulse`
+  Phase 2 iter1 (2026-05-03); no new server-side schema changes.
+
+- **`remote_request_session_start` wrapper** in `supabase.rs` — the
+  app-side RPC for the spawn dialog UI to call.
+
+- **2 Tauri commands**: `request_remote_session_start` (frontend
+  spawn dialog will call this in v0.9.2; for v0.9.1 it's exposed via
+  the invoke handler but no UI dialog ships yet) and
+  `agent_diagnostic` (returns running count / lifetime count /
+  last-tick age — `null` when agent isn't running).
+
+- **`CLI_PULSE_DISABLE_REMOTE_AGENT=1` kill-switch env var.** Set to
+  any value to skip the agent loop spawn. Logged at startup so users
+  can verify their env flag took effect. Combined with the v0.9.0
+  recovery-mode flag, the agent has a 3-way gate: paired AND not in
+  recovery mode AND not env-killed.
+
+- **Pre-push hook regression guard for `tokio::spawn`** in
+  `scripts/git-hooks/pre-push`. Greps `src-tauri/src/**.rs` for
+  `tokio::spawn(`, filters out hits whose surrounding 50 lines
+  contain `#[tokio::test]` / `mod tests {` / `#[cfg(test)]`. Any
+  remaining hit fails the pre-push with a message pointing at the
+  v0.8.0 root cause. Legitimate non-test calls (e.g. `quota::collect_all`
+  inside an async fn called from a Tauri command) opt out via
+  `// @allow tokio-spawn` annotation. Six such annotations added in
+  `quota/mod.rs` with rationale (those calls are inside async fns
+  that always run inside Tauri's tokio runtime).
+
+- **Shutdown sleep** in `lib.rs::run`'s post-`tauri::Builder::run`
+  exit path. Sleeps 2 s after `stop.store(true)` to give the agent
+  loop time to drain its final tick + post `kind=info` `app_shutdown`
+  for any running sessions before `record_clean_exit`. Bounded by
+  the agent's per-call 5 s timeouts.
+
+### Changed
+
+- `lib.rs::run`'s setup hook now spawns `RemoteAgentManager` with
+  `StubTransport` when:
+  1. Device is paired (need helper_secret for RPC auth)
+  2. NOT in recovery mode (v0.9.0 crash-loop circuit breaker)
+  3. `CLI_PULSE_DISABLE_REMOTE_AGENT` env var unset
+
+  Otherwise logs the reason for skipping. The agent ticks every 1 s,
+  pulls commands from `remote_helper_pull_commands`, and dispatches.
+  For `start` commands: `StubTransport.start()` returns
+  `TransportError::Internal` → agent posts `kind=errored` lifecycle
+  event + `kind=info` detail event with the stub's reason → calls
+  `remote_helper_complete_command(failed)` so the queue advances. UI
+  surfaces the row's flip from `pending` → `errored`.
+
+### v0.9.1a behavior end-to-end
+
+When (in some future v0.9.2+ build) a user clicks "+ Start new
+session":
+1. Frontend invokes `request_remote_session_start` Tauri command
+2. Backend calls `supabase::remote_request_session_start` →
+   server creates `remote_sessions(status='pending')` + queues
+   `kind='start'` command
+3. Agent loop pulls the command on its next 1 s tick
+4. `StubTransport::start()` returns
+   `Internal("v0.9.1a stub transport — ConPTY spawn not yet
+   implemented in this build (planned for v0.9.1b)")`
+5. Agent posts `kind=errored` status + `kind=info` detail with
+   the stub's reason; calls `complete_command(failed, error=reason)`
+6. UI surfaces the error message
+
+For v0.9.1, no UI dialog ships — the Tauri command is exposed but
+not wired into the Sessions tab. Users / Mac side can exercise the
+agent path by sending a start command directly via the existing
+Sessions wire-up.
+
+### Tests
+
+263 → 283 backend tests (+20):
+- 7 in `remote::transport::tests` (StubTransport contract,
+  Default, with_reason, dyn object safety, try_wait returns
+  Some-not-None defensively, all-methods-return-Internal)
+- 13 in `remote::agent::tests` (preserved from v0.8.0; the bug
+  was outside the test surface)
+- 0 in `remote::events::tests` already counted in v0.8.0
+
+### Sprint context
+
+Second ship of the v0.9.x → v0.10.x post-incident sprint. Sequence:
+- v0.9.0 ✅ Stability hardening (Sentry sync-flush, crash recovery,
+  categorized update errors)
+- v0.9.1 ✅ ConPTY agent scaffolding (THIS ship)
+- v0.9.2 — ConPTY transport + FFI (the "big one" that re-attempts
+  the v0.8.0 work with the lessons applied)
+- v0.9.3 — diagnostic bundle + binary polish
+- v0.10.0 — keyboard shortcuts + date range + per-provider visibility
+- v0.10.1 — CSV/JSON export + provider compare
+
 ## [0.9.0] — 2026-05-08
 
 **Stability sprint #1 — driven by lessons from the v0.8.0 BEX64

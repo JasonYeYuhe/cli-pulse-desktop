@@ -1154,6 +1154,108 @@ async fn send_remote_session_command(
 }
 
 // ------------------------------------------------------------------------
+// v0.9.1a — Spawn a managed Claude session on this device.
+// ------------------------------------------------------------------------
+//
+// Frontend Sessions tab calls this when the user clicks "+ Start new
+// session" → fills the dialog → submits. We:
+//   1. Validate the user is signed in (need user JWT for the
+//      `remote_app_request_session_start` RPC).
+//   2. Compute cwd_hmac from the chosen path so the server can
+//      coalesce "same project" across devices in a future iter.
+//   3. Call `remote_app_request_session_start` with this device's own
+//      device_id as target — the local agent loop's pull cycle picks
+//      up the resulting `start` command.
+//   4. In v0.9.1a the agent's `StubTransport.start()` returns
+//      `Internal("not yet implemented")`, so the user sees "Spawn not
+//      yet supported in this build" in the row's error UI. v0.9.1b
+//      swaps the stub for ConPtyTransport and the spawn actually
+//      succeeds.
+
+#[derive(Debug, Clone, Deserialize)]
+struct StartSessionArgs {
+    cwd: String,
+    #[serde(default)]
+    cwd_basename: Option<String>,
+    #[serde(default)]
+    client_label: Option<String>,
+    #[serde(default = "default_provider_args")]
+    provider: String,
+}
+
+fn default_provider_args() -> String {
+    "claude".to_string()
+}
+
+#[tauri::command]
+async fn request_remote_session_start(args: StartSessionArgs) -> Result<String, String> {
+    if args.provider != "claude" {
+        return Err(format!(
+            "Provider `{}` is not yet supported. v0.9.1a hosts Claude sessions only.",
+            args.provider
+        ));
+    }
+    let cfg = config::load()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Sign in required to start a remote session.".to_string())?;
+
+    let basename = args.cwd_basename.clone().unwrap_or_else(|| {
+        args.cwd
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(255)
+            .collect::<String>()
+    });
+    let hmac_secret = cwd_hmac::load_or_create_secret().ok().flatten();
+    let cwd_hmac_hex = hmac_secret
+        .as_deref()
+        .and_then(|s| cwd_hmac::hmac_path(s, &args.cwd));
+
+    let device_id = cfg.device_id.clone();
+    let provider = args.provider.clone();
+    let client_label = args.client_label.clone();
+
+    with_user_jwt(move |jwt| {
+        let device_id = device_id.clone();
+        let provider = provider.clone();
+        let basename = basename.clone();
+        let cwd_hmac_hex = cwd_hmac_hex.clone();
+        let client_label = client_label.clone();
+        async move {
+            supabase::remote_request_session_start(
+                &device_id,
+                &provider,
+                Some(&basename),
+                cwd_hmac_hex.as_deref(),
+                client_label.as_deref(),
+                &jwt,
+            )
+            .await
+        }
+    })
+    .await
+}
+
+/// v0.9.1a — agent loop diagnostic for Settings → About display.
+/// Returns null when the agent isn't running (not paired, in recovery
+/// mode, or kill-switched via env var).
+#[tauri::command]
+fn agent_diagnostic(app: tauri::AppHandle) -> Option<remote::AgentDiagnostic> {
+    use tauri::Manager;
+    let state = app.try_state::<RemoteAgentState>()?;
+    Some(state.handle.manager().diagnostic())
+}
+
+/// State wrapper held by Tauri. Stashes the `AgentHandle` so the
+/// `agent_diagnostic` command can read live counters and so the
+/// shutdown path can stop the loop cleanly.
+struct RemoteAgentState {
+    handle: remote::AgentHandle,
+}
+
+// ------------------------------------------------------------------------
 // v0.8.1 — `request_remote_session_start` and `agent_diagnostic` Tauri
 // commands shipped in v0.8.0 are removed in this revert; they were the
 // frontend entry points to the ConPTY managed-session host that
@@ -2309,14 +2411,50 @@ pub fn run() {
             provider_creds::init_backend();
             spawn_background_sync(app.handle().clone(), stop_bg.clone());
 
-            // v0.8.0 spawned a ConPTY managed-session agent loop here;
-            // v0.8.1 reverts that feature after a STATUS_STACK_BUFFER_OVERRUN
-            // crash-on-launch was observed on a clean Windows VM. The
-            // remote-hook.log shared logger (the v0.7.1 hotfix scope
-            // folded into v0.8.0) is preserved — `bin/remote_hook.rs`
-            // still calls `remote::log::try_init()`. ConPTY work
-            // resumes on the v0.9.x track with mandatory VM smoke
-            // gating before promote-to-Latest.
+            // v0.9.1a — ConPTY managed-session agent loop returns
+            // (scaffolding only; v0.9.1b adds the actual FFI). The
+            // v0.8.0 root cause was using `tokio::spawn` from this
+            // setup hook; we now use `tauri::async_runtime::spawn`
+            // inside `remote::spawn_agent_loop` which has the right
+            // runtime context.
+            //
+            // Three-way gate before spawning:
+            //  1. Device is paired (need helper_secret for RPC auth)
+            //  2. NOT in recovery mode (v0.9.0 crash-loop circuit
+            //     breaker — if we're here because of agent-related
+            //     crashes, don't re-spawn the agent)
+            //  3. CLI_PULSE_DISABLE_REMOTE_AGENT env var unset
+            //     (kill-switch for users who hit a future bug)
+            match config::load() {
+                Ok(Some(cfg_for_agent)) => {
+                    let kill_switch = std::env::var("CLI_PULSE_DISABLE_REMOTE_AGENT").is_ok();
+                    if crash_recovery::is_in_recovery_mode() {
+                        log::warn!("Remote agent loop NOT spawned — recovery mode active");
+                    } else if kill_switch {
+                        log::warn!(
+                            "Remote agent loop NOT spawned — \
+                             CLI_PULSE_DISABLE_REMOTE_AGENT env var set"
+                        );
+                    } else {
+                        let transport: std::sync::Arc<dyn remote::SessionTransport> =
+                            std::sync::Arc::new(remote::StubTransport::new());
+                        let agent_handle =
+                            remote::spawn_agent_loop(transport, cfg_for_agent, stop_bg.clone());
+                        app.manage(RemoteAgentState {
+                            handle: agent_handle,
+                        });
+                        log::info!(
+                            "Remote agent loop started (StubTransport — v0.9.1a; \
+                             ConPTY FFI returns in v0.9.1b)"
+                        );
+                    }
+                }
+                Ok(None) => log::info!(
+                    "Remote agent loop not started — device not paired \
+                     (sign in via Settings to enable)"
+                ),
+                Err(e) => log::warn!("Remote agent loop not started — config load failed: {e}"),
+            }
 
             // System tray — Windows first-class, Linux works with AppIndicator
             // when libayatana-appindicator3 is installed, otherwise we log and
@@ -2413,6 +2551,9 @@ pub fn run() {
             set_remote_control_setting,
             // v0.6.2 — Send / Stop / Interrupt managed sessions
             send_remote_session_command,
+            // v0.9.1a — ConPTY managed-session local host
+            request_remote_session_start,
+            agent_diagnostic,
             // v0.7.0 — Install Claude hook + check current status
             install_claude_hook,
             get_claude_hook_status,
@@ -2422,6 +2563,14 @@ pub fn run() {
 
     // Let the background loop exit cleanly on app shutdown.
     stop.store(true, Ordering::Relaxed);
+
+    // v0.9.1a — give the remote agent loop a brief window to drain
+    // its final tick + post `kind=info` `app_shutdown` for any
+    // running sessions. Sleep 2s after stop so the loop has time
+    // to react. The agent's own per-call timeouts (5s) bound this
+    // path even if a hung Supabase couldn't block process exit
+    // beyond a couple of seconds.
+    std::thread::sleep(std::time::Duration::from_secs(2));
 
     // v0.9.0 — record clean exit so the next launch's
     // `assess_recovery_mode_at_startup()` sees this run as healthy.
