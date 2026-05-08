@@ -85,8 +85,62 @@ fn install_inner() -> Option<ClientInitGuard> {
         scope.set_tag("app_version", env!("CARGO_PKG_VERSION"));
     });
 
+    install_sync_flush_panic_hook();
+
     log::info!("sentry initialized ({environment})");
     Some(guard)
+}
+
+/// v0.9.0 — wrap the previously-installed panic hook (by sentry's
+/// `panic` feature, which captures the panic into the in-process
+/// transport channel) with a synchronous flush before chaining to the
+/// default abort handler.
+///
+/// **Why**: under `panic = "abort"` (our release profile), the panic
+/// handler chain ends with `abort()`, which terminates the process
+/// immediately. Sentry's transport runs on a separate thread and pulls
+/// events from an MPSC channel — when the parent aborts, the
+/// transport thread is killed, and any unflushed event in the channel
+/// is lost.
+///
+/// The v0.8.0 incident's events DID arrive in Sentry, but only by
+/// luck — the panic-to-abort window happened to be long enough for
+/// the channel + reqwest send to complete. Gemini 3.1 Pro plan
+/// review (v0.9.x sprint, 2026-05-08) flagged this as P1.
+///
+/// **Fix**: install our own panic hook that runs AFTER sentry's hook
+/// captures the event. Our hook calls `Hub::current().client()
+/// .map(|c| c.close(timeout))` which blocks until the transport
+/// drains, THEN chains to whatever panic handler was previously
+/// installed (which under `panic = "abort"` is the default, leading
+/// to abort).
+///
+/// **Hook chain order** (set last → run first):
+/// 1. `sentry::init` installed its hook (captures panic into channel)
+/// 2. We install ours (captures already-set hook, then our flush
+///    runs after the chained hook completes)
+/// 3. On panic, hooks run in REVERSE registration order — our hook
+///    runs LAST, so by the time `close()` is called, the panic event
+///    is already in the channel
+///
+/// **2-second flush timeout**: long enough for a typical reqwest
+/// HTTPS POST to Sentry, short enough to not noticeably stall the
+/// abort path. If the transport is still draining after 2 s, abort
+/// proceeds anyway (event lost in that edge case).
+fn install_sync_flush_panic_hook() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Run the previous hook (sentry's) first — captures panic info
+        // into the in-process transport channel.
+        prev(info);
+        // Now block until the transport drains. ClientInitGuard's Drop
+        // would also flush, but Drop only runs on normal exit, not on
+        // abort(). We have to flush explicitly here, before the chain
+        // returns to the runtime which then calls abort().
+        if let Some(client) = sentry::Hub::current().client() {
+            let _ = client.close(Some(std::time::Duration::from_secs(2)));
+        }
+    }));
 }
 
 fn platform_label() -> &'static str {
