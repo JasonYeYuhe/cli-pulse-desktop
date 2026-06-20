@@ -319,6 +319,8 @@
   "misc": {
     "provider_label": "服务商:{{name}}",
     "project_label": "项目:{{name}}",
+    "session_label": "会话:{{name}}",
+    "device_label": "设备:{{name}}",
     "none": "—",
     "loading": "加载中…",
     "scanning_hint": "正在扫描 ~/.claude 和 ~/.codex 近 30 天数据…"

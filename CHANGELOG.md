@@ -40,6 +40,16 @@ gap audit against the Mac app (v1.28).
   (RGB→hex), plus `providerColor` (case-insensitive, gray fallback) and
   `providerMonogram`. Reusable by sessions / alerts / tray in later
   ships. 9 unit tests. No new i18n (color + monogram are non-textual).
+- **Provider brand-color dots on Sessions rows** (macOS parity) — each
+  live-session row's provider cell now leads with its brand-color dot,
+  reusing `providerTheme`.
+- **Alerts card polish** (macOS parity) — replaced the emoji severity
+  glyph with the existing SVG `SeverityIcon` (emoji render as fixed
+  multicolor on Win/Linux and ignore CSS color), and rendered the
+  related-entity metadata as chips: provider (with brand-color dot),
+  project, plus the previously-unused **session** and **device** fields.
+  2 new i18n keys (`misc.session_label`, `misc.device_label`) × 3 langs,
+  pinned in the critical-labels gate.
 
 ## [0.10.0] — 2026-05-09
 

@@ -5515,7 +5515,17 @@ function Sessions({
             <tbody>
               {sessions.map((s) => (
                 <tr key={s.id} className="border-t border-neutral-800">
-                  <td className="px-3 py-2 font-medium">{s.provider}</td>
+                  <td className="px-3 py-2 font-medium">
+                    {/* v0.10.1 — provider brand-color dot (macOS parity,
+                        reuses lib/providerTheme). */}
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: providerColor(s.provider) }}
+                      />
+                      {s.provider}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 font-mono text-xs">{s.project}</td>
                   <td
                     className="px-3 py-2 font-mono text-xs max-w-sm truncate"
@@ -5608,24 +5618,53 @@ function AlertCard({ alert }: { alert: Alert }) {
       : alert.severity === "Warning"
       ? "border-amber-800 bg-amber-950/30"
       : "border-neutral-800 bg-neutral-900/40";
-  const icon =
-    alert.severity === "Critical" ? "🛑" : alert.severity === "Warning" ? "⚠️" : "ℹ️";
+  // v0.10.1 — chip style for related-entity metadata (macOS parity).
+  const chip =
+    "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-neutral-700/70 bg-neutral-800/40 text-neutral-300";
   return (
     <div className={`p-4 rounded-lg border ${accent}`}>
       <div className="flex items-start gap-3">
-        <div className="text-lg leading-none mt-0.5">{icon}</div>
+        {/* v0.10.1 — SVG severity icon (was an emoji, which renders as a
+            fixed multicolor system glyph on Win/Linux and ignores CSS
+            color — same reason RiskSignalsCard switched to SVG in v0.5.1). */}
+        <SeverityIcon severity={alert.severity} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">{alert.title}</span>
             <span className="text-xs text-neutral-500 font-mono">{alert.type}</span>
           </div>
           <div className="text-sm text-neutral-300 mt-1">{alert.message}</div>
-          <div className="text-xs text-neutral-500 mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
-            {alert.related_provider && <span>{t("misc.provider_label", { name: alert.related_provider })}</span>}
-            {alert.related_project_name && (
-              <span>{t("misc.project_label", { name: alert.related_project_name })}</span>
+          {/* v0.10.1 — related-entity chips. Surfaces session + device,
+              which the wire shape already carried but the card never
+              rendered; the provider chip carries its brand-color dot. */}
+          <div className="text-xs mt-2 flex flex-wrap items-center gap-2">
+            {alert.related_provider && (
+              <span className={chip}>
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: providerColor(alert.related_provider) }}
+                />
+                {alert.related_provider}
+              </span>
             )}
-            <span>{new Date(alert.created_at).toLocaleString()}</span>
+            {alert.related_project_name && (
+              <span className={chip}>
+                {t("misc.project_label", { name: alert.related_project_name })}
+              </span>
+            )}
+            {alert.related_session_name && (
+              <span className={chip}>
+                {t("misc.session_label", { name: alert.related_session_name })}
+              </span>
+            )}
+            {alert.related_device_name && (
+              <span className={chip}>
+                {t("misc.device_label", { name: alert.related_device_name })}
+              </span>
+            )}
+            <span className="text-neutral-500">
+              {new Date(alert.created_at).toLocaleString()}
+            </span>
           </div>
         </div>
       </div>

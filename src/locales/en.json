@@ -323,6 +323,8 @@
   "misc": {
     "provider_label": "provider: {{name}}",
     "project_label": "project: {{name}}",
+    "session_label": "session: {{name}}",
+    "device_label": "device: {{name}}",
     "none": "—",
     "loading": "Loading…",
     "scanning_hint": "Scanning ~/.claude and ~/.codex for the past 30 days…"
