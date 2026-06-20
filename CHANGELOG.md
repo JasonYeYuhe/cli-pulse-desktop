@@ -4,9 +4,10 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
-**v0.10.1 sprint (in progress).** First of the deferred v0.10.0
-items — per-provider visibility — landed; date range picker + export
-+ compare still to come.
+**v0.10.1 sprint (in progress).** Two threads: the deferred v0.10.0
+items (per-provider visibility done; date range picker + export +
+compare still to come) and a macOS/iOS visual-parity pass driven by a
+gap audit against the Mac app (v1.28).
 
 ### Added
 
@@ -29,6 +30,16 @@ items — per-provider visibility — landed; date range picker + export
   `visibility_show_all`, `visibility_hide_tooltip`,
   `visibility_show_tooltip`, `all_hidden`) — all pinned in
   `i18n.test.ts`'s critical-labels gate.
+- **Per-provider brand colors + avatars** (Providers tab — macOS/iOS
+  parity). Each provider card now carries its brand accent as a 3px
+  left stripe plus a colored monogram avatar, and the visibility-filter
+  chips show a matching color dot. Closes the audit's most-repeated
+  visual gap ("Claude / Codex / Gemini are indistinguishable").
+- **`src/lib/providerTheme.ts`** new module — the 29-provider accent
+  palette ported 1:1 from the Mac app's `PulseTheme.providerColor`
+  (RGB→hex), plus `providerColor` (case-insensitive, gray fallback) and
+  `providerMonogram`. Reusable by sessions / alerts / tray in later
+  ships. 9 unit tests. No new i18n (color + monogram are non-textual).
 
 ## [0.10.0] — 2026-05-09
 

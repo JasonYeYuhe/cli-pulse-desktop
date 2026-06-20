@@ -17,6 +17,7 @@ import {
   saveHiddenProviders,
   toggleHiddenProvider,
 } from "./lib/providerVisibility";
+import { providerColor, providerMonogram } from "./lib/providerTheme";
 import appIcon from "./assets/app-icon.png";
 import "./App.css";
 
@@ -2008,6 +2009,10 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                     : "px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/40"
                 }
               >
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle"
+                  style={{ backgroundColor: providerColor(g.provider) }}
+                />
                 {g.provider}
               </button>
             );
@@ -2030,10 +2035,12 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
           .sort((a, b) => b[1].cost - a[1].cost)
           .slice(0, 10);
         const srv = serverByProvider.get(v.provider);
+        const color = providerColor(v.provider);
         return (
           <div
             key={v.provider}
             className="rounded-lg border border-neutral-800 bg-neutral-900/40 overflow-hidden"
+            style={{ borderLeftColor: color, borderLeftWidth: "3px" }}
           >
             <button
               type="button"
@@ -2044,6 +2051,17 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                 <span className="text-neutral-500 text-xs w-4">{isOpen ? "▼" : "▶"}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold shrink-0"
+                      style={{
+                        backgroundColor: `${color}22`,
+                        color,
+                        border: `1px solid ${color}55`,
+                      }}
+                      aria-hidden="true"
+                    >
+                      {providerMonogram(v.provider)}
+                    </span>
                     <span className="font-semibold">{v.provider}</span>
                     {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
                     {/* v0.4.20 — error badge takes precedence over the
