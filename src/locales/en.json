@@ -54,6 +54,7 @@
     "last_n_days_cost": "Last {{days}}d — Cost",
     "files_scanned_hint": "{{n}} files scanned",
     "trend_title": "Last 7 days — cost",
+    "provider_usage_title": "Provider usage — last {{days}}d",
     "today_breakdown": "Today's breakdown",
     "no_usage_today": "No usage today.",
     "max_per_day": "Max: {{value}}/day",

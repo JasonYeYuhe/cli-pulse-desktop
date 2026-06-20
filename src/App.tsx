@@ -954,6 +954,29 @@ function Overview({
     return { cost, tokens, msgs };
   }, [scan]);
 
+  // v0.10.1 — provider usage breakdown for the Overview "Provider usage"
+  // section (macOS parity — OverviewTab.swift costSection per-provider
+  // breakdown). Computed from the local N-day scan (works offline),
+  // excluding the Claude message-count bucket. Bars rank by I/O tokens
+  // (non-zero even for flat-rate subscription usage where cost is $0);
+  // cost shown as a secondary figure. Top 6 by tokens.
+  const byProvider = useMemo(() => {
+    if (!scan) return [];
+    const m = new Map<string, { tokens: number; cost: number }>();
+    for (const e of scan.entries) {
+      if (e.model === CLAUDE_MSG_BUCKET) continue;
+      const cur = m.get(e.provider) ?? { tokens: 0, cost: 0 };
+      cur.tokens += e.input_tokens + e.output_tokens;
+      cur.cost += e.cost_usd ?? 0;
+      m.set(e.provider, cur);
+    }
+    return Array.from(m.entries())
+      .map(([provider, v]) => ({ provider, tokens: v.tokens, cost: v.cost }))
+      .filter((p) => p.tokens > 0)
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, 6);
+  }, [scan]);
+
   // v0.3.4 — fetch server-aggregated dashboard summary when paired.
   // This is the cross-device "today" view (Mac + Win + Linux + iOS all
   // contributing to the same account). Failures are soft — the
@@ -1037,6 +1060,52 @@ function Overview({
           />
         </div>
       </section>
+
+      {/* v0.10.1 — Provider usage breakdown (macOS parity, OverviewTab
+          costSection). Brand-colored bars ranked by I/O tokens from the
+          local scan; works offline. Hidden when no provider has usage. */}
+      {byProvider.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-neutral-400 mb-2">
+            {t("overview.provider_usage_title", { days: scan.days_scanned })}
+          </h2>
+          <div className="space-y-2">
+            {(() => {
+              const maxTokens = Math.max(...byProvider.map((p) => p.tokens), 1);
+              return byProvider.map((p) => {
+                const color = providerColor(p.provider);
+                const pct = (p.tokens / maxTokens) * 100;
+                return (
+                  <div key={p.provider} className="flex items-center gap-3">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span
+                      className="text-sm w-20 shrink-0 truncate"
+                      title={p.provider}
+                    >
+                      {p.provider}
+                    </span>
+                    <div className="flex-1 h-2 bg-neutral-800 rounded overflow-hidden">
+                      <div
+                        className="h-full rounded"
+                        style={{ width: `${pct}%`, backgroundColor: color }}
+                      />
+                    </div>
+                    <span className="text-xs text-neutral-400 tabular-nums w-32 text-right shrink-0">
+                      {t("providers.io_tokens", { value: formatInt(p.tokens) })}
+                    </span>
+                    <span className="text-xs font-mono text-neutral-300 w-16 text-right shrink-0">
+                      {formatUSD(p.cost)}
+                    </span>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </section>
+      )}
 
       {/* v0.5.1 — Insights row: cost forecast + risk signals.
           Mac sibling parity (CostForecastEngine + RiskSignalsList in

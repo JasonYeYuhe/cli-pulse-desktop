@@ -54,6 +54,7 @@
     "last_n_days_cost": "直近 {{days}} 日間の費用",
     "files_scanned_hint": "{{n}} ファイルスキャン済み",
     "trend_title": "直近 7 日間 — 費用",
+    "provider_usage_title": "プロバイダ別使用量 — 直近 {{days}} 日",
     "today_breakdown": "本日の内訳",
     "no_usage_today": "本日はまだ利用がありません。",
     "max_per_day": "最大: {{value}}/日",

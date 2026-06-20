@@ -50,6 +50,13 @@ gap audit against the Mac app (v1.28).
   project, plus the previously-unused **session** and **device** fields.
   2 new i18n keys (`misc.session_label`, `misc.device_label`) × 3 langs,
   pinned in the critical-labels gate.
+- **Provider usage breakdown on Overview** (macOS parity — OverviewTab
+  costSection). A new section ranks providers by I/O tokens with
+  brand-colored bars (reuses `providerTheme`), computed from the local
+  N-day scan so it works offline; cost shown as a secondary figure.
+  Ranks by tokens (not cost) so flat-rate subscription usage — where
+  cost is $0 — still shows a meaningful breakdown. 1 new i18n key
+  (`overview.provider_usage_title`) × 3 langs, pinned.
 
 ## [0.10.0] — 2026-05-09
 

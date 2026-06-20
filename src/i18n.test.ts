@@ -97,6 +97,8 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // v0.10.1 — alert related-entity chips (session + device), macOS parity.
     "misc.session_label",
     "misc.device_label",
+    // v0.10.1 — Overview provider-usage breakdown section title.
+    "overview.provider_usage_title",
     // v0.4.22 — Sentry diagnostic emit button in Settings → About.
     "settings.about_sentry_test_button",
     "settings.about_sentry_test_sending",
