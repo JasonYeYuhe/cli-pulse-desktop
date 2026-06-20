@@ -12,6 +12,11 @@ import {
   isStaleProviderRow,
   rowsToCsv,
 } from "./lib/format";
+import {
+  loadHiddenProviders,
+  saveHiddenProviders,
+  toggleHiddenProvider,
+} from "./lib/providerVisibility";
 import appIcon from "./assets/app-icon.png";
 import "./App.css";
 
@@ -1701,6 +1706,11 @@ type CollectorStatus = {
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // v0.10.1 — per-provider visibility filter. Users with several paired
+  // providers can mute the ones they don't track. Persisted to
+  // localStorage as the HIDDEN set (so a provider that only starts
+  // reporting later defaults to visible). See lib/providerVisibility.ts.
+  const [hidden, setHidden] = useState<Set<string>>(() => loadHiddenProviders());
 
   // v0.3.4 — fetch server-side provider quota / plan / tiers when paired.
   // Keyed by `paired` so a sign-in/sign-out cycle re-fetches. Errors are
@@ -1931,7 +1941,25 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
     setExpanded(next);
   }
 
-  const maxCost = Math.max(...grouped.map((g) => g.cost), 1);
+  // v0.10.1 — flip a provider in/out of the hidden set and persist.
+  function toggleHidden(provider: string) {
+    const next = toggleHiddenProvider(hidden, provider);
+    setHidden(next);
+    saveHiddenProviders(next);
+  }
+
+  // v0.10.1 — clear the filter (used by the bar chip + all-hidden hint).
+  function showAllProviders() {
+    const empty = new Set<string>();
+    setHidden(empty);
+    saveHiddenProviders(empty);
+  }
+
+  // Cards the user hasn't muted. The bar scaling + empty-state checks
+  // below all key off the visible set, so hiding the priciest provider
+  // rescales the remaining bars instead of leaving them all tiny.
+  const visible = grouped.filter((g) => !hidden.has(g.provider));
+  const maxCost = Math.max(...visible.map((g) => g.cost), 1);
 
   return (
     <div className="space-y-3">
@@ -1953,7 +1981,49 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
           {t("providers.server_unavailable")}
         </div>
       )}
-      {grouped.map((v) => {
+      {/* v0.10.1 — per-provider visibility filter. Only worth showing
+          when there's more than one provider to choose between. Chips
+          render in the same cost-sorted order as the cards; a muted
+          (line-through) chip means hidden. A separate "Show all" chip
+          appears once anything is hidden. */}
+      {grouped.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="text-neutral-500">{t("providers.visibility_label")}</span>
+          {grouped.map((g) => {
+            const isHidden = hidden.has(g.provider);
+            return (
+              <button
+                key={g.provider}
+                type="button"
+                onClick={() => toggleHidden(g.provider)}
+                aria-pressed={!isHidden}
+                title={
+                  isHidden
+                    ? t("providers.visibility_show_tooltip", { provider: g.provider })
+                    : t("providers.visibility_hide_tooltip", { provider: g.provider })
+                }
+                className={
+                  isHidden
+                    ? "px-2 py-0.5 rounded-full border border-neutral-800 text-neutral-600 line-through hover:border-neutral-700"
+                    : "px-2 py-0.5 rounded-full border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/40"
+                }
+              >
+                {g.provider}
+              </button>
+            );
+          })}
+          {hidden.size > 0 && (
+            <button
+              type="button"
+              onClick={showAllProviders}
+              className="px-2 py-0.5 rounded-full border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+            >
+              {t("providers.visibility_show_all")}
+            </button>
+          )}
+        </div>
+      )}
+      {visible.map((v) => {
         const isOpen = expanded.has(v.provider);
         const barPct = (v.cost / maxCost) * 100;
         const sortedModels = Array.from(v.models.entries())
@@ -2190,6 +2260,21 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
       })}
       {grouped.length === 0 && (
         <div className="text-sm text-neutral-500">{t("providers.no_usage")}</div>
+      )}
+      {/* v0.10.1 — everything is hidden by the filter. Distinct from the
+          no_usage state above (there IS data, the user just muted it
+          all). Offer a one-click way back. */}
+      {grouped.length > 0 && visible.length === 0 && (
+        <div className="flex items-center gap-3 text-sm text-neutral-500">
+          <span>{t("providers.all_hidden")}</span>
+          <button
+            type="button"
+            onClick={showAllProviders}
+            className="px-2 py-0.5 text-xs rounded-full border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+          >
+            {t("providers.visibility_show_all")}
+          </button>
+        </div>
       )}
     </div>
   );

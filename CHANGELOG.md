@@ -2,6 +2,34 @@
 
 All notable changes to CLI Pulse Desktop (Windows + Linux).
 
+## [Unreleased]
+
+**v0.10.1 sprint (in progress).** First of the deferred v0.10.0
+items — per-provider visibility — landed; date range picker + export
++ compare still to come.
+
+### Added
+
+- **Per-provider visibility filter** (Providers tab). A chip row above
+  the provider cards lets users mute providers they don't track; a
+  muted (line-through) chip hides that card. The choice persists to
+  `localStorage` under `cli-pulse.hidden-providers` as the *hidden*
+  set — a provider that only starts reporting usage later defaults to
+  visible rather than being silently filtered out. The cost bars
+  rescale to the visible set, and an "all hidden" state offers a
+  one-click "Show all" back. The filter row only appears when there's
+  more than one provider to choose between.
+- **`src/lib/providerVisibility.ts`** new module — `loadHiddenProviders`
+  / `saveHiddenProviders` / `toggleHiddenProvider`. Load fails open
+  (missing key, malformed JSON, non-array payload, or non-string
+  entries all collapse to an empty set); save is best-effort
+  (quota / privacy-mode denials are swallowed). 10 unit tests in
+  `providerVisibility.test.ts`.
+- **5 i18n keys × 3 langs** (`providers.visibility_label`,
+  `visibility_show_all`, `visibility_hide_tooltip`,
+  `visibility_show_tooltip`, `all_hidden`) — all pinned in
+  `i18n.test.ts`'s critical-labels gate.
+
 ## [0.10.0] — 2026-05-09
 
 **Stability sprint #5 — keyboard shortcuts.** Power users have asked

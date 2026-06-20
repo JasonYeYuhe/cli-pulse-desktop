@@ -85,6 +85,15 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",
+    // v0.10.1 — per-provider visibility filter on the Providers tab.
+    // A missing label would render a blank filter chip / hint, which
+    // silently miscommunicates which provider a chip controls. Pin
+    // every key in all 3 languages.
+    "providers.visibility_label",
+    "providers.visibility_show_all",
+    "providers.visibility_hide_tooltip",
+    "providers.visibility_show_tooltip",
+    "providers.all_hidden",
     // v0.4.22 — Sentry diagnostic emit button in Settings → About.
     "settings.about_sentry_test_button",
     "settings.about_sentry_test_sending",
