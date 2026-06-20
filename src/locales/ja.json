@@ -165,7 +165,21 @@
     "active": "{{count}} 件のアクティブ通知",
     "active_plural": "{{count}} 件のアクティブ通知",
     "empty_title": "静かなもの 🌙",
-    "empty_body": "日次/週次の予算を超えた場合、または単一の AI CLI プロセスの CPU が急上昇した場合に通知が発生します。<strong>設定 → 予算</strong>で予算を設定できます。"
+    "empty_body": "日次/週次の予算を超えた場合、または単一の AI CLI プロセスの CPU が急上昇した場合に通知が発生します。<strong>設定 → 予算</strong>で予算を設定できます。",
+    "filter_open": "未対応",
+    "filter_resolved": "対応済み",
+    "filter_all": "すべて",
+    "resolve_all": "すべて解決",
+    "all_clear": "問題なし",
+    "all_clear_hint": "未対応のアラートはありません。",
+    "no_matching": "該当するアラートなし",
+    "load_failed": "アラートを読み込めませんでした — 接続を確認してください。",
+    "action_ack": "確認",
+    "action_resolve": "解決",
+    "action_snooze": "スヌーズ",
+    "resolved_label": "解決済み",
+    "severity_critical": "{{count}} 重大",
+    "severity_warning": "{{count}} 警告"
   },
   "settings": {
     "account_heading": "アカウント",

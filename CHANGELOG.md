@@ -11,6 +11,23 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Alert lifecycle** (macOS parity — ports `AlertsTab.swift`). When
+  paired, the Alerts tab now shows persisted SERVER alerts with an
+  Open / Resolved / All filter, severity summary badges, a Resolve-all
+  button, and per-row Acknowledge / Resolve / Snooze (15/30/60/120 min)
+  actions — replacing the read-only client-computed preview for signed-in
+  users. Unpaired users keep the local-preview path unchanged (those
+  alerts aren't persisted, so there's nothing to act on). Snoozed alerts
+  drop out of the Open filter until their snooze expires.
+  - **Rust**: `list_alerts` (fetches open + resolved) plus
+    `resolve_alert` / `acknowledge_alert` / `snooze_alert` commands —
+    direct PostgREST PATCH to the `alerts` table (RLS-scoped), mirroring
+    the Mac's `APIClient`. `ServerAlert` gains `acknowledged_at` /
+    `snoozed_until` (serde-default, back-compatible with the v0.5.3
+    unresolved fetch).
+  - **Frontend**: new `ServerAlertsPanel` + `ServerAlertCard`, reusing
+    the SVG `SeverityIcon` and brand-color provider chips. 14 alert
+    i18n keys × 3 langs; critical labels pinned in the gate.
 - **Swarm tab** (macOS/iOS parity — ports `SwarmTab.swift`). New 6th
   tab: a live, attention-sorted grid of every parallel agent swarm the
   user's paired devices are heart-beating (blocked-first, then by agent

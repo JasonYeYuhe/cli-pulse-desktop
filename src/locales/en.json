@@ -171,7 +171,21 @@
     "active": "{{count}} active alert",
     "active_plural": "{{count}} active alerts",
     "empty_title": "All quiet 🌙",
-    "empty_body": "Alerts fire when daily / weekly budgets are exceeded or when a single AI CLI process hits a CPU spike. Set your budget in <strong>Settings → Budget</strong>."
+    "empty_body": "Alerts fire when daily / weekly budgets are exceeded or when a single AI CLI process hits a CPU spike. Set your budget in <strong>Settings → Budget</strong>.",
+    "filter_open": "Open",
+    "filter_resolved": "Resolved",
+    "filter_all": "All",
+    "resolve_all": "Resolve all",
+    "all_clear": "All clear",
+    "all_clear_hint": "No open alerts.",
+    "no_matching": "No matching alerts",
+    "load_failed": "Couldn't load alerts — check your connection.",
+    "action_ack": "Acknowledge",
+    "action_resolve": "Resolve",
+    "action_snooze": "Snooze",
+    "resolved_label": "Resolved",
+    "severity_critical": "{{count}} critical",
+    "severity_warning": "{{count}} warning"
   },
   "settings": {
     "account_heading": "Account",

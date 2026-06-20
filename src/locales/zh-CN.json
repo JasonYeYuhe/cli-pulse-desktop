@@ -165,7 +165,21 @@
     "active": "{{count}} 条活跃通知",
     "active_plural": "{{count}} 条活跃通知",
     "empty_title": "一片安静 🌙",
-    "empty_body": "当每日/每周预算被突破,或某个 AI CLI 进程 CPU 飙升时会触发通知。请在<strong>设置 → 预算</strong>中设定阈值。"
+    "empty_body": "当每日/每周预算被突破,或某个 AI CLI 进程 CPU 飙升时会触发通知。请在<strong>设置 → 预算</strong>中设定阈值。",
+    "filter_open": "未解决",
+    "filter_resolved": "已解决",
+    "filter_all": "全部",
+    "resolve_all": "全部解决",
+    "all_clear": "一切正常",
+    "all_clear_hint": "没有未解决的提醒。",
+    "no_matching": "没有匹配的提醒",
+    "load_failed": "无法加载提醒 — 请检查网络连接。",
+    "action_ack": "确认",
+    "action_resolve": "解决",
+    "action_snooze": "暂停",
+    "resolved_label": "已解决",
+    "severity_critical": "{{count}} 严重",
+    "severity_warning": "{{count}} 警告"
   },
   "settings": {
     "account_heading": "账户",

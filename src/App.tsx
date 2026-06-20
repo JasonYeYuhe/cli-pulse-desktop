@@ -693,7 +693,12 @@ export default function App() {
           />
         )}
         {tab === "alerts" && (
-          <Alerts alerts={alerts} loading={alertsLoading} onRefresh={refreshAlerts} />
+          <Alerts
+            alerts={alerts}
+            loading={alertsLoading}
+            onRefresh={refreshAlerts}
+            paired={!!config?.paired}
+          />
         )}
         {tab === "settings" && (
           <Settings
@@ -887,6 +892,9 @@ type ServerAlert = {
   related_device_name: string | null;
   is_read: boolean | null;
   is_resolved: boolean | null;
+  // v0.10.1 — alert lifecycle (macOS parity).
+  acknowledged_at?: string | null;
+  snoozed_until?: string | null;
 };
 
 const UNKNOWN_PROJECT = "<unknown>";
@@ -5858,12 +5866,21 @@ function Alerts({
   alerts,
   loading,
   onRefresh,
+  paired,
 }: {
   alerts: Alert[] | null;
   loading: boolean;
   onRefresh: () => void;
+  paired: boolean;
 }) {
   const { t } = useTranslation();
+  // v0.10.1 — when paired, show persisted SERVER alerts with full
+  // lifecycle (resolve / acknowledge / snooze + Open/Resolved/All
+  // filter), ported from the macOS AlertsTab. The local-preview path
+  // below stays for unpaired users: those alerts are client-computed
+  // from the local scan each tick, not persisted, so they have no
+  // lifecycle to act on.
+  if (paired) return <ServerAlertsPanel />;
   if (!alerts && loading) return <Skeleton />;
   if (!alerts) return null;
 
@@ -5898,6 +5915,285 @@ function Alerts({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// v0.10.1 — paired-mode Alerts panel (macOS AlertsTab parity). Reads
+// persisted server alerts (incl. resolved) via `list_alerts`, with an
+// Open / Resolved / All filter, severity summary badges, Resolve-All,
+// and per-row Acknowledge / Resolve / Snooze actions. Self-polls 30 s.
+type ServerAlertFilter = "open" | "resolved" | "all";
+
+function ServerAlertsPanel() {
+  const { t } = useTranslation();
+  const [alerts, setAlerts] = useState<ServerAlert[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ServerAlertFilter>("open");
+  const [busy, setBusy] = useState<Set<string>>(new Set());
+
+  const refresh = useCallback(async () => {
+    try {
+      const a = await invoke<ServerAlert[]>("list_alerts");
+      setAlerts(a);
+      setError(null);
+    } catch (e: any) {
+      setError(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const now = Date.now();
+  const isSnoozed = (a: ServerAlert) =>
+    a.snoozed_until != null && Date.parse(a.snoozed_until) > now;
+
+  const open = (alerts ?? []).filter((a) => !a.is_resolved && !isSnoozed(a));
+  const resolved = (alerts ?? []).filter((a) => a.is_resolved);
+  const visible =
+    filter === "open" ? open : filter === "resolved" ? resolved : alerts ?? [];
+
+  const rank = (s: string) => (s === "Critical" ? 0 : s === "Warning" ? 1 : 2);
+  const sorted = [...visible].sort(
+    (a, b) =>
+      rank(a.severity) - rank(b.severity) || b.created_at.localeCompare(a.created_at),
+  );
+
+  const critical = open.filter((a) => a.severity === "Critical").length;
+  const warning = open.filter((a) => a.severity === "Warning").length;
+
+  async function act(id: string, fn: () => Promise<unknown>) {
+    setBusy((b) => new Set(b).add(id));
+    try {
+      await fn();
+      await refresh();
+    } catch (e: any) {
+      setError(String(e));
+    } finally {
+      setBusy((b) => {
+        const n = new Set(b);
+        n.delete(id);
+        return n;
+      });
+    }
+  }
+
+  async function resolveAll() {
+    for (const a of open) {
+      try {
+        await invoke("resolve_alert", { id: a.id });
+      } catch (e: any) {
+        setError(String(e));
+      }
+    }
+    await refresh();
+  }
+
+  const filterBtn = (f: ServerAlertFilter, label: string) => (
+    <button
+      type="button"
+      onClick={() => setFilter(f)}
+      className={`px-3 py-1 text-xs rounded-md border ${
+        filter === f
+          ? "border-emerald-600 bg-emerald-950/50 text-emerald-200"
+          : "border-neutral-700 text-neutral-400 hover:bg-neutral-800"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {filterBtn("open", t("alerts.filter_open"))}
+          {filterBtn("resolved", t("alerts.filter_resolved"))}
+          {filterBtn("all", t("alerts.filter_all"))}
+        </div>
+        <div className="flex items-center gap-2">
+          {critical > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-red-950/60 border border-red-800 text-red-300">
+              {t("alerts.severity_critical", { count: critical })}
+            </span>
+          )}
+          {warning > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded-full bg-amber-950/60 border border-amber-800 text-amber-300">
+              {t("alerts.severity_warning", { count: warning })}
+            </span>
+          )}
+          {filter === "open" && open.length > 0 && (
+            <button
+              type="button"
+              onClick={resolveAll}
+              className="px-2.5 py-1 text-xs rounded-md border border-emerald-700 text-emerald-300 hover:bg-emerald-900/40"
+            >
+              {t("alerts.resolve_all")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error && !alerts && (
+        <div className="flex items-center gap-2 text-xs text-amber-400/90 p-3 rounded-lg border border-amber-900/60 bg-amber-950/20">
+          <SeverityIcon severity="Warning" />
+          <span>{t("alerts.load_failed")}</span>
+        </div>
+      )}
+
+      {alerts && sorted.length === 0 ? (
+        filter === "open" ? (
+          <SwarmEmpty title={t("alerts.all_clear")} subtitle={t("alerts.all_clear_hint")} />
+        ) : (
+          <SwarmEmpty title={t("alerts.no_matching")} subtitle="" />
+        )
+      ) : (
+        <div className="space-y-2">
+          {sorted.map((a) => (
+            <ServerAlertCard
+              key={a.id}
+              alert={a}
+              busy={busy.has(a.id)}
+              onAck={() => act(a.id, () => invoke("acknowledge_alert", { id: a.id }))}
+              onResolve={() => act(a.id, () => invoke("resolve_alert", { id: a.id }))}
+              onSnooze={(m) =>
+                act(a.id, () => invoke("snooze_alert", { id: a.id, minutes: m }))
+              }
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServerAlertCard({
+  alert,
+  busy,
+  onAck,
+  onResolve,
+  onSnooze,
+}: {
+  alert: ServerAlert;
+  busy: boolean;
+  onAck: () => void;
+  onResolve: () => void;
+  onSnooze: (minutes: number) => void;
+}) {
+  const { t } = useTranslation();
+  const [showSnooze, setShowSnooze] = useState(false);
+  const sev = alert.severity as Alert["severity"];
+  const accent =
+    alert.severity === "Critical"
+      ? "border-red-800 bg-red-950/40"
+      : alert.severity === "Warning"
+      ? "border-amber-800 bg-amber-950/30"
+      : "border-neutral-800 bg-neutral-900/40";
+  const chip =
+    "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-neutral-700/70 bg-neutral-800/40 text-neutral-300";
+  const actionBtn = "px-2 py-0.5 text-[11px] rounded-full border disabled:opacity-50";
+  return (
+    <div
+      className={`p-4 rounded-lg border ${
+        alert.is_resolved ? "border-neutral-800 bg-neutral-900/20 opacity-70" : accent
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <SeverityIcon severity={sev} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{alert.title}</span>
+            <span className="text-xs text-neutral-500 font-mono">{alert.type}</span>
+          </div>
+          {alert.message && (
+            <div className="text-sm text-neutral-300 mt-1">{alert.message}</div>
+          )}
+          <div className="text-xs mt-2 flex flex-wrap items-center gap-2">
+            {alert.related_provider && (
+              <span className={chip}>
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: providerColor(alert.related_provider) }}
+                />
+                {alert.related_provider}
+              </span>
+            )}
+            {alert.related_project_name && (
+              <span className={chip}>
+                {t("misc.project_label", { name: alert.related_project_name })}
+              </span>
+            )}
+            {alert.related_session_name && (
+              <span className={chip}>
+                {t("misc.session_label", { name: alert.related_session_name })}
+              </span>
+            )}
+            {alert.related_device_name && (
+              <span className={chip}>
+                {t("misc.device_label", { name: alert.related_device_name })}
+              </span>
+            )}
+            <span className="text-neutral-500">
+              {new Date(alert.created_at).toLocaleString()}
+            </span>
+          </div>
+
+          {alert.is_resolved ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-400">
+              <SeverityIcon severity="Info" intent="ok" />
+              {t("alerts.resolved_label")}
+            </div>
+          ) : (
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              {!alert.is_read && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={onAck}
+                  className={`${actionBtn} border-sky-800 text-sky-300 hover:bg-sky-900/40`}
+                >
+                  {t("alerts.action_ack")}
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onResolve}
+                className={`${actionBtn} border-emerald-800 text-emerald-300 hover:bg-emerald-900/40`}
+              >
+                {t("alerts.action_resolve")}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setShowSnooze((v) => !v)}
+                className={`${actionBtn} border-amber-800 text-amber-300 hover:bg-amber-900/40`}
+              >
+                {showSnooze ? t("action.cancel") : t("alerts.action_snooze")}
+              </button>
+              {showSnooze &&
+                [15, 30, 60, 120].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      onSnooze(m);
+                      setShowSnooze(false);
+                    }}
+                    className={`${actionBtn} border-neutral-700 text-neutral-300 hover:bg-neutral-800`}
+                  >
+                    {m}m
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

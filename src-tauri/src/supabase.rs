@@ -638,6 +638,13 @@ pub struct ServerAlert {
     pub related_device_name: Option<String>,
     pub is_read: Option<bool>,
     pub is_resolved: Option<bool>,
+    // v0.10.1 — alert lifecycle (macOS parity). Present in the `alerts`
+    // table; `serde(default)` so the v0.5.3 unresolved fetch (which
+    // doesn't select them) still decodes cleanly.
+    #[serde(default)]
+    pub acknowledged_at: Option<String>,
+    #[serde(default)]
+    pub snoozed_until: Option<String>,
 }
 
 /// Fetch unresolved alerts for the given user. Direct PostgREST GET
@@ -679,6 +686,108 @@ pub async fn get_unresolved_alerts(
         return Ok(vec![]);
     }
     Ok(serde_json::from_str(&text)?)
+}
+
+// ========================================================================
+// Alert lifecycle (v0.10.1 — macOS parity)
+// ========================================================================
+//
+// The macOS app mutates the `alerts` table via direct PostgREST PATCH
+// (APIClient.acknowledgeAlert/resolveAlert/snoozeAlert). RLS policy
+// "Users can manage own alerts" (auth.uid() = user_id) scopes a
+// JWT-authed PATCH to the caller's own rows, so we filter by `id` and
+// rely on RLS for the user gate. `return=minimal` saves bandwidth.
+
+/// Fetch ALL alerts (resolved + open) for the Alerts tab's Open /
+/// Resolved / All filter. Like `get_unresolved_alerts` but without the
+/// `is_resolved=eq.false` filter, and selects the lifecycle columns.
+pub async fn list_alerts(user_id: &str, user_jwt: &str) -> SupabaseResult<Vec<ServerAlert>> {
+    const LIMIT: u32 = 200;
+    let url = format!("{}/rest/v1/alerts", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .get(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .query(&[
+            ("user_id", format!("eq.{user_id}")),
+            (
+                "select",
+                "id,type,severity,title,message,created_at,related_project_id,\
+                 related_project_name,related_session_id,related_session_name,\
+                 related_provider,related_device_name,is_read,is_resolved,\
+                 acknowledged_at,snoozed_until"
+                    .to_string(),
+            ),
+            ("order", "created_at.desc".to_string()),
+            ("limit", LIMIT.to_string()),
+        ])
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await?;
+    if !(200..300).contains(&status) {
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
+/// Shared PATCH against a single `alerts` row (filtered by `id`,
+/// RLS-scoped to the caller). Used by resolve / acknowledge / snooze.
+async fn patch_alert(id: &str, body: serde_json::Value, user_jwt: &str) -> SupabaseResult<()> {
+    let url = format!("{}/rest/v1/alerts", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .patch(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=minimal")
+        .query(&[("id", format!("eq.{id}"))])
+        .json(&body)
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        let text = resp.text().await?;
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    Ok(())
+}
+
+/// Mark an alert resolved (`is_resolved = true`). Mirrors the macOS
+/// `APIClient.resolveAlert`.
+pub async fn resolve_alert(id: &str, user_jwt: &str) -> SupabaseResult<()> {
+    patch_alert(id, serde_json::json!({ "is_resolved": true }), user_jwt).await
+}
+
+/// Mark an alert acknowledged/read (`is_read = true` + `acknowledged_at`).
+/// `acknowledged_at` is an RFC3339 timestamp computed by the caller.
+pub async fn acknowledge_alert(
+    id: &str,
+    acknowledged_at: &str,
+    user_jwt: &str,
+) -> SupabaseResult<()> {
+    patch_alert(
+        id,
+        serde_json::json!({ "is_read": true, "acknowledged_at": acknowledged_at }),
+        user_jwt,
+    )
+    .await
+}
+
+/// Snooze an alert until `snoozed_until` (RFC3339, computed by the
+/// caller). Mirrors the macOS `APIClient.snoozeAlert`.
+pub async fn snooze_alert(id: &str, snoozed_until: &str, user_jwt: &str) -> SupabaseResult<()> {
+    patch_alert(
+        id,
+        serde_json::json!({ "snoozed_until": snoozed_until }),
+        user_jwt,
+    )
+    .await
 }
 
 // ========================================================================

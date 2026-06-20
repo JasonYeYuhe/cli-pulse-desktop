@@ -950,6 +950,54 @@ async fn get_server_alerts() -> Result<Vec<supabase::ServerAlert>, String> {
     .await
 }
 
+/// v0.10.1 — all alerts (open + resolved) for the Alerts tab's
+/// Open/Resolved/All filter. Empty for unpaired users.
+#[tauri::command]
+async fn list_alerts() -> Result<Vec<supabase::ServerAlert>, String> {
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    let user_id = cfg.user_id.clone();
+    with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::list_alerts(&user_id, &jwt).await }
+    })
+    .await
+}
+
+/// v0.10.1 — alert lifecycle actions (macOS parity). Each PATCHes the
+/// `alerts` row (RLS-scoped to the caller).
+#[tauri::command]
+async fn resolve_alert(id: String) -> Result<(), String> {
+    with_user_jwt(move |jwt| {
+        let id = id.clone();
+        async move { supabase::resolve_alert(&id, &jwt).await }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn acknowledge_alert(id: String) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    with_user_jwt(move |jwt| {
+        let id = id.clone();
+        let now = now.clone();
+        async move { supabase::acknowledge_alert(&id, &now, &jwt).await }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn snooze_alert(id: String, minutes: i64) -> Result<(), String> {
+    let until = (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339();
+    with_user_jwt(move |jwt| {
+        let id = id.clone();
+        let until = until.clone();
+        async move { supabase::snooze_alert(&id, &until, &jwt).await }
+    })
+    .await
+}
+
 /// v0.5.5 — Activity Timeline data source. Returns session rows from
 /// the `sessions` table (cross-device historical view, RLS-scoped to
 /// this user) for the last `hours` hours, capped at 1 000 rows.
@@ -2587,6 +2635,10 @@ pub fn run() {
             decide_remote_approval,
             list_remote_sessions,
             remote_list_swarms,
+            list_alerts,
+            resolve_alert,
+            acknowledge_alert,
+            snooze_alert,
             get_remote_control_setting,
             set_remote_control_setting,
             // v0.6.2 — Send / Stop / Interrupt managed sessions
