@@ -11,6 +11,7 @@ import {
   formatRelativeShortParts,
   isStaleProviderRow,
   rowsToCsv,
+  secondsToShortParts,
 } from "./lib/format";
 import {
   loadHiddenProviders,
@@ -145,7 +146,30 @@ type RemoteSession = {
   last_event_at: string | null;
 };
 
-type TabKey = "overview" | "providers" | "sessions" | "alerts" | "settings";
+// v0.10.1 — Swarm View wire shapes (macOS/iOS parity). Mirror the Rust
+// supabase::RemoteSwarm / RemoteSwarmDevice (which mirror the Mac
+// Models.swift). `handle` is the opaque `swarm-<6hex>`; no repo/branch
+// name ever crosses the wire.
+type RemoteSwarm = {
+  swarm_key: string;
+  handle: string;
+  is_linked_worktree: boolean;
+  providers: string[];
+  agents: number;
+  blocked: number;
+  oldest_blocked_age_s: number;
+  last_seen_s_ago: number;
+};
+
+type RemoteSwarmDevice = {
+  device_id: string;
+  updated_at: string;
+  age_s: number;
+  stale: boolean;
+  swarms: RemoteSwarm[];
+};
+
+type TabKey = "overview" | "providers" | "sessions" | "swarm" | "alerts" | "settings";
 
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
 
@@ -155,6 +179,7 @@ export default function App() {
     { key: "overview", label: t("tab.overview") },
     { key: "providers", label: t("tab.providers") },
     { key: "sessions", label: t("tab.sessions") },
+    { key: "swarm", label: t("tab.swarm") },
     { key: "alerts", label: t("tab.alerts") },
     { key: "settings", label: t("tab.settings") },
   ];
@@ -391,12 +416,13 @@ export default function App() {
         return;
       }
       // Ctrl/Cmd + 1..5 — tab switch. Skip when typing.
-      if (!inEditableField && /^[1-5]$/.test(e.key)) {
+      if (!inEditableField && /^[1-6]$/.test(e.key)) {
         e.preventDefault();
         const tabsByIndex: TabKey[] = [
           "overview",
           "providers",
           "sessions",
+          "swarm",
           "alerts",
           "settings",
         ];
@@ -660,6 +686,12 @@ export default function App() {
             onRemoteSessionAction={refreshRemoteState}
           />
         )}
+        {tab === "swarm" && (
+          <Swarm
+            paired={!!config?.paired}
+            remoteControlEnabled={remoteControlEnabled === true}
+          />
+        )}
         {tab === "alerts" && (
           <Alerts alerts={alerts} loading={alertsLoading} onRefresh={refreshAlerts} />
         )}
@@ -735,8 +767,9 @@ function ShortcutHelpOverlay({ onClose }: { onClose: () => void }) {
     { keys: `${mod}+1`, label: t("shortcuts.tab_overview") },
     { keys: `${mod}+2`, label: t("shortcuts.tab_providers") },
     { keys: `${mod}+3`, label: t("shortcuts.tab_sessions") },
-    { keys: `${mod}+4`, label: t("shortcuts.tab_alerts") },
-    { keys: `${mod}+5`, label: t("shortcuts.tab_settings") },
+    { keys: `${mod}+4`, label: t("shortcuts.tab_swarm") },
+    { keys: `${mod}+5`, label: t("shortcuts.tab_alerts") },
+    { keys: `${mod}+6`, label: t("shortcuts.tab_settings") },
     { keys: `${mod}+Shift+/`, label: t("shortcuts.toggle_help") },
     { keys: "Esc", label: t("shortcuts.close_modal") },
   ];
@@ -5628,6 +5661,196 @@ function ConfidenceDot({ c }: { c: "high" | "medium" | "low" }) {
       <span className={`w-1.5 h-1.5 rounded-full ${color}`} />
       {t(`sessions.confidence_${c}`)}
     </span>
+  );
+}
+
+// v0.10.1 — Swarm View (macOS/iOS parity, ports SwarmTab.swift). A live
+// grid of every parallel agent swarm the user's paired devices observe,
+// attention-sorted so the swarm that needs a human is on top. Self-polls
+// every 10 s while paired (matches the Mac cadence). All data is opaque
+// (handle = `swarm-<6hex>`); no repo/branch name crosses the wire.
+function Swarm({
+  paired,
+  remoteControlEnabled,
+}: {
+  paired: boolean;
+  remoteControlEnabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const [devices, setDevices] = useState<RemoteSwarmDevice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!paired) {
+      setDevices(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const d = await invoke<RemoteSwarmDevice[]>("remote_list_swarms");
+        if (cancelled) return;
+        setDevices(d);
+        setError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(String(e));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [paired]);
+
+  // Flatten device × swarm, attention-sorted: live before stale, then
+  // blocked desc, agents desc, handle asc (verbatim port of the macOS
+  // SwarmTab comparator).
+  const entries = useMemo(() => {
+    const out: { device: RemoteSwarmDevice; swarm: RemoteSwarm }[] = [];
+    for (const d of devices ?? []) {
+      for (const s of d.swarms) out.push({ device: d, swarm: s });
+    }
+    return out.sort((a, b) => {
+      if (a.device.stale !== b.device.stale) return a.device.stale ? 1 : -1;
+      if (a.swarm.blocked !== b.swarm.blocked) return b.swarm.blocked - a.swarm.blocked;
+      if (a.swarm.agents !== b.swarm.agents) return b.swarm.agents - a.swarm.agents;
+      return a.swarm.handle.localeCompare(b.swarm.handle);
+    });
+  }, [devices]);
+
+  const age = (s: number) => {
+    const p = secondsToShortParts(s);
+    return t(`time.unit_${p.unit}`, { count: p.value });
+  };
+
+  const totalAgents = entries.reduce((n, e) => n + e.swarm.agents, 0);
+  const totalBlocked = entries.reduce((n, e) => n + e.swarm.blocked, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-neutral-300">{t("swarm.title")}</h2>
+        {entries.length > 0 && (
+          <span
+            className={`text-xs ${totalBlocked > 0 ? "text-amber-400" : "text-neutral-500"}`}
+          >
+            {t("swarm.summary", {
+              swarms: entries.length,
+              agents: totalAgents,
+              blocked: totalBlocked,
+            })}
+          </span>
+        )}
+      </div>
+
+      {!paired ? (
+        <SwarmEmpty title={t("swarm.title")} subtitle={t("swarm.not_paired_hint")} />
+      ) : !remoteControlEnabled ? (
+        <SwarmEmpty title={t("swarm.title")} subtitle={t("swarm.disabled_hint")} />
+      ) : error && entries.length === 0 ? (
+        <div className="flex items-start gap-2 text-xs text-amber-400/90 p-3 rounded-lg border border-amber-900/60 bg-amber-950/20">
+          <SeverityIcon severity="Warning" />
+          <span>{t("swarm.load_failed")}</span>
+        </div>
+      ) : entries.length === 0 ? (
+        <SwarmEmpty title={t("swarm.no_swarms")} subtitle={t("swarm.empty_hint")} />
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-3">
+          {entries.map(({ device, swarm }) => {
+            const blocked = swarm.blocked > 0;
+            const stale = device.stale;
+            return (
+              <div
+                key={device.device_id + "/" + swarm.swarm_key}
+                className={`rounded-lg border p-3 space-y-2 ${
+                  blocked && !stale
+                    ? "border-amber-700/60 bg-amber-950/10"
+                    : "border-neutral-800 bg-neutral-900/40"
+                } ${stale ? "opacity-70" : ""}`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="font-mono text-sm font-medium truncate"
+                    title={swarm.handle}
+                  >
+                    {swarm.handle}
+                  </span>
+                  {swarm.is_linked_worktree && (
+                    <span className="px-1.5 py-0.5 text-[9px] rounded-full border border-neutral-700 text-neutral-400">
+                      {t("swarm.worktree")}
+                    </span>
+                  )}
+                  <span className="flex-1" />
+                  {blocked && (
+                    <span
+                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                        stale ? "bg-neutral-700 text-neutral-300" : "bg-amber-600 text-amber-50"
+                      }`}
+                    >
+                      {t("swarm.blocked_badge")}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-400">
+                  <span>{t("swarm.agents", { count: swarm.agents })}</span>
+                  {blocked && (
+                    <>
+                      <span className="text-neutral-600">·</span>
+                      <span className={stale ? "text-neutral-400" : "text-amber-400"}>
+                        {t("swarm.blocked_count", { count: swarm.blocked })}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {blocked && swarm.oldest_blocked_age_s > 0 && (
+                  <div className="text-[11px] text-neutral-500">
+                    {t("swarm.oldest_blocked", { age: age(swarm.oldest_blocked_age_s) })}
+                  </div>
+                )}
+                {swarm.providers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {swarm.providers.map((p) => {
+                      const c = providerColor(p);
+                      return (
+                        <span
+                          key={p}
+                          className="px-1.5 py-0.5 text-[10px] rounded-full"
+                          style={{
+                            backgroundColor: `${c}22`,
+                            color: c,
+                            border: `1px solid ${c}55`,
+                          }}
+                        >
+                          {p}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {stale && (
+                  <div className="text-[10px] text-neutral-500">
+                    {t("swarm.stale")} · {t("swarm.last_seen", { age: age(device.age_s) })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SwarmEmpty({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="text-center py-12 px-4">
+      <div className="text-sm font-medium text-neutral-300">{title}</div>
+      <div className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">{subtitle}</div>
+    </div>
   );
 }
 

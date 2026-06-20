@@ -154,3 +154,23 @@ export function formatRelativeShort(updated_at: string): string {
   if (!parts) return updated_at;
   return `${parts.value} ${parts.unit}`;
 }
+
+/**
+ * v0.10.1 — decompose a raw *seconds* duration into a `{value, unit}`
+ * pair for i18n composition via the `time.unit_<unit>` keys. Sibling of
+ * `formatRelativeShortParts` but takes a number of seconds (as the Swarm
+ * RPC emits `age_s` / `oldest_blocked_age_s` / `last_seen_s_ago`) rather
+ * than a timestamp string. Negative / NaN clamp to `{0, "s"}`.
+ */
+export function secondsToShortParts(seconds: number): {
+  value: number;
+  unit: RelativeUnit;
+} {
+  const s = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  if (s < 60) return { value: s, unit: "s" };
+  const minutes = Math.floor(s / 60);
+  if (minutes < 60) return { value: minutes, unit: "min" };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { value: hours, unit: "hr" };
+  return { value: Math.floor(hours / 24), unit: "d" };
+}

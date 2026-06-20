@@ -99,6 +99,23 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "misc.device_label",
     // v0.10.1 — Overview provider-usage breakdown section title.
     "overview.provider_usage_title",
+    // v0.10.1 — Swarm tab (macOS/iOS parity). Pin tab label, state
+    // hints, and card chrome. Plural keys (agents/blocked_count) are
+    // exercised separately and intentionally omitted here.
+    "tab.swarm",
+    "shortcuts.tab_swarm",
+    "swarm.title",
+    "swarm.summary",
+    "swarm.not_paired_hint",
+    "swarm.disabled_hint",
+    "swarm.load_failed",
+    "swarm.no_swarms",
+    "swarm.empty_hint",
+    "swarm.blocked_badge",
+    "swarm.oldest_blocked",
+    "swarm.stale",
+    "swarm.last_seen",
+    "swarm.worktree",
     // v0.4.22 — Sentry diagnostic emit button in Settings → About.
     "settings.about_sentry_test_button",
     "settings.about_sentry_test_sending",

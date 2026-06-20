@@ -33,6 +33,7 @@
     "tab_overview": "Switch to Overview",
     "tab_providers": "Switch to Providers",
     "tab_sessions": "Switch to Sessions",
+    "tab_swarm": "Switch to Swarm",
     "tab_alerts": "Switch to Alerts",
     "tab_settings": "Switch to Settings",
     "toggle_help": "Toggle this help",
@@ -42,6 +43,7 @@
     "overview": "Overview",
     "providers": "Providers",
     "sessions": "Sessions",
+    "swarm": "Swarm",
     "alerts": "Alerts",
     "settings": "Settings"
   },
@@ -145,6 +147,24 @@
     "timeline_other_lane": "Other",
     "timeline_x_now": "now",
     "timeline_x_now_minus": "−{{hours}}h"
+  },
+  "swarm": {
+    "title": "Agent swarms",
+    "summary": "{{swarms}} swarms · {{agents}} agents · {{blocked}} blocked",
+    "not_paired_hint": "Sign in (Settings → Account) to see agent swarms across your devices.",
+    "disabled_hint": "Remote Control is off. Enable it in Settings → Privacy.",
+    "load_failed": "Couldn't load swarms — check your connection.",
+    "no_swarms": "No active swarms",
+    "empty_hint": "Swarms appear here when your paired devices run parallel agents in sibling git worktrees.",
+    "blocked_badge": "BLOCKED",
+    "agents_one": "{{count}} agent",
+    "agents_other": "{{count}} agents",
+    "blocked_count_one": "{{count}} blocked",
+    "blocked_count_other": "{{count}} blocked",
+    "oldest_blocked": "oldest blocked {{age}} ago",
+    "stale": "stale",
+    "last_seen": "last seen {{age}} ago",
+    "worktree": "worktree"
   },
   "alerts": {
     "nothing": "Nothing pressing — no active alerts.",

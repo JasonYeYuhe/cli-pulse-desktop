@@ -6,10 +6,29 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 **v0.10.1 sprint (in progress).** Two threads: the deferred v0.10.0
 items (per-provider visibility done; date range picker + export +
-compare still to come) and a macOS/iOS visual-parity pass driven by a
-gap audit against the Mac app (v1.28).
+compare still to come) and a macOS/iOS parity pass driven by a gap
+audit against the Mac app (v1.28).
 
 ### Added
+
+- **Swarm tab** (macOS/iOS parity — ports `SwarmTab.swift`). New 6th
+  tab: a live, attention-sorted grid of every parallel agent swarm the
+  user's paired devices are heart-beating (blocked-first, then by agent
+  count). Each card shows the opaque `swarm-<6hex>` handle, agent /
+  blocked counts, oldest-blocked age, brand-colored provider chips, a
+  worktree marker, and a stale "last seen" line; the header rolls up
+  "N swarms · N agents · N blocked" (amber when any are blocked).
+  Self-polls every 10 s while paired. Distinct empty states for
+  not-paired / Remote-Control-off / no-swarms / load-error.
+  - **Rust**: `remote_list_swarms` `#[tauri::command]` + `RemoteSwarm`
+    / `RemoteSwarmDevice` serde structs wrapping the existing
+    `remote_app_list_swarms` RPC (no Supabase change). 2 round-trip
+    unit tests. No repo/branch name crosses the wire (handle is an
+    opaque HMAC) — privacy posture matches the Mac.
+  - **Frontend**: `secondsToShortParts` helper added to `format.ts`
+    (3 tests) for localized age strings; keyboard shortcut `Ctrl/Cmd+4`
+    now selects Swarm (Alerts→5, Settings→6). 16 swarm i18n keys × 3
+    langs; critical labels pinned in the gate.
 
 - **Per-provider visibility filter** (Providers tab). A chip row above
   the provider cards lets users mute providers they don't track; a

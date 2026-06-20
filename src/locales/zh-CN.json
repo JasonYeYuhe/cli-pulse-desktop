@@ -33,6 +33,7 @@
     "tab_overview": "切换到概览",
     "tab_providers": "切换到服务商",
     "tab_sessions": "切换到会话",
+    "tab_swarm": "切换到集群",
     "tab_alerts": "切换到提醒",
     "tab_settings": "切换到设置",
     "toggle_help": "显示/隐藏此帮助",
@@ -42,6 +43,7 @@
     "overview": "概览",
     "providers": "服务商",
     "sessions": "会话",
+    "swarm": "集群",
     "alerts": "通知",
     "settings": "设置"
   },
@@ -141,6 +143,22 @@
     "timeline_other_lane": "其他",
     "timeline_x_now": "现在",
     "timeline_x_now_minus": "−{{hours}}小时"
+  },
+  "swarm": {
+    "title": "智能体集群",
+    "summary": "{{swarms}} 个集群 · {{agents}} 个智能体 · {{blocked}} 个受阻",
+    "not_paired_hint": "登录(设置 → 账户)后可查看你各设备上的智能体集群。",
+    "disabled_hint": "远程控制已关闭。请在 设置 → 隐私 中开启。",
+    "load_failed": "无法加载集群 — 请检查网络连接。",
+    "no_swarms": "暂无活跃集群",
+    "empty_hint": "当你配对的设备在同仓库的多个 git worktree 中并行运行智能体时,集群会显示在这里。",
+    "blocked_badge": "受阻",
+    "agents_other": "{{count}} 个智能体",
+    "blocked_count_other": "{{count}} 个受阻",
+    "oldest_blocked": "最久受阻 {{age}}前",
+    "stale": "已过期",
+    "last_seen": "最后在线 {{age}}前",
+    "worktree": "worktree"
   },
   "alerts": {
     "nothing": "没什么紧急的 —— 无活跃通知。",

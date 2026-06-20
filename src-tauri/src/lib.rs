@@ -1119,6 +1119,18 @@ async fn list_remote_sessions() -> Result<Vec<supabase::RemoteSession>, String> 
     with_user_jwt(|jwt| async move { supabase::remote_list_sessions(&jwt).await }).await
 }
 
+/// v0.10.1 — Swarm View (macOS/iOS parity). Lists every agent swarm the
+/// user's paired devices are heart-beating, via `remote_app_list_swarms`
+/// (RC-gated server-side → `[]` when Remote Control is off). Returns an
+/// empty list when this device isn't paired.
+#[tauri::command]
+async fn remote_list_swarms() -> Result<Vec<supabase::RemoteSwarmDevice>, String> {
+    let Some(_cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    with_user_jwt(|jwt| async move { supabase::remote_list_swarms(&jwt).await }).await
+}
+
 /// v0.7.0 — One-click install of the CLI Pulse remote-approval hook
 /// into Claude Code's `~/.claude/settings.json`. Wraps
 /// `install_hook::install` with the currently-running binary's
@@ -2574,6 +2586,7 @@ pub fn run() {
             get_remote_pending_approvals,
             decide_remote_approval,
             list_remote_sessions,
+            remote_list_swarms,
             get_remote_control_setting,
             set_remote_control_setting,
             // v0.6.2 — Send / Stop / Interrupt managed sessions

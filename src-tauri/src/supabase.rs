@@ -1031,6 +1031,67 @@ pub async fn remote_list_sessions(user_jwt: &str) -> SupabaseResult<Vec<RemoteSe
     Ok(serde_json::from_value(v)?)
 }
 
+// ========================================================================
+// Swarm View (v0.10.1 — macOS/iOS parity)
+// ========================================================================
+
+/// One swarm (a git repo+branch grouping of sibling agents) within a
+/// device heartbeat. Mirrors the macOS `RemoteSwarm` (Models.swift) and
+/// the per-element shape stored in `remote_swarms.swarms` (backend
+/// migrate_v0.48). `handle` is the opaque `swarm-<6hex>` and `swarm_key`
+/// is an account-scoped HMAC — NO repo path or branch name crosses the
+/// wire. P0 carries no `$`/token figure; the headline is agents/blocked.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemoteSwarm {
+    pub swarm_key: String,
+    pub handle: String,
+    #[serde(default)]
+    pub is_linked_worktree: bool,
+    #[serde(default)]
+    pub providers: Vec<String>,
+    #[serde(default)]
+    pub agents: i64,
+    #[serde(default)]
+    pub blocked: i64,
+    #[serde(default)]
+    pub oldest_blocked_age_s: f64,
+    #[serde(default)]
+    pub last_seen_s_ago: f64,
+}
+
+/// One device's swarm heartbeat. Mirrors the macOS `RemoteSwarmDevice`
+/// and the object shape returned by `remote_app_list_swarms()`. `stale`
+/// is set server-side when the device is past the 90s live-TTL (the UI
+/// greys it and shows "last seen" rather than dropping it).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemoteSwarmDevice {
+    pub device_id: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub age_s: f64,
+    #[serde(default)]
+    pub stale: bool,
+    #[serde(default)]
+    pub swarms: Vec<RemoteSwarm>,
+}
+
+/// Wraps `remote_app_list_swarms()` — JWT-authenticated, RLS-scoped to
+/// the user, and remote-control-gated server-side (returns `[]` when
+/// the user's `remote_control_enabled` is false). Surfaces swarms from
+/// EVERY paired device the user owns. Mirrors the macOS
+/// `APIClient.remoteListSwarms()`.
+pub async fn remote_list_swarms(user_jwt: &str) -> SupabaseResult<Vec<RemoteSwarmDevice>> {
+    let v = rpc_with_auth(
+        "remote_app_list_swarms",
+        &serde_json::json!({}),
+        Some(user_jwt),
+    )
+    .await?;
+    check_rpc_error(&v)?;
+    // RPC returns a JSON array directly (empty when RC is off).
+    Ok(serde_json::from_value(v)?)
+}
+
 /// Read `user_settings.remote_control_enabled` for the authenticated
 /// user. Direct PostgREST GET — same pattern as v0.5.2 sessions read
 /// and v0.5.3 alerts read. Returns `false` when no row exists yet
@@ -1543,6 +1604,61 @@ mod tests {
         assert_eq!(s.cwd_hmac, None);
         assert_eq!(s.client_label, None);
         assert_eq!(s.last_event_at, None);
+    }
+
+    #[test]
+    fn remote_swarm_list_round_trips_full_shape() {
+        // Mirrors the `remote_app_list_swarms()` output (migrate_v0.48):
+        // an array of device objects, each with a nested `swarms` array.
+        let body = json!([{
+            "device_id": "33333333-3333-3333-3333-333333333333",
+            "updated_at": "2026-06-21T00:00:00+00:00",
+            "age_s": 12.3,
+            "stale": false,
+            "swarms": [{
+                "swarm_key": "abc123hmac",
+                "handle": "swarm-1a2b3c",
+                "is_linked_worktree": true,
+                "providers": ["Claude", "Codex"],
+                "agents": 4,
+                "blocked": 1,
+                "oldest_blocked_age_s": 95.0,
+                "last_seen_s_ago": 8.0
+            }]
+        }]);
+        let devices: Vec<RemoteSwarmDevice> = serde_json::from_value(body).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert!(!devices[0].stale);
+        assert_eq!(devices[0].swarms.len(), 1);
+        let s = &devices[0].swarms[0];
+        assert_eq!(s.handle, "swarm-1a2b3c");
+        assert_eq!(s.agents, 4);
+        assert_eq!(s.blocked, 1);
+        assert!(s.is_linked_worktree);
+        assert_eq!(s.providers, vec!["Claude", "Codex"]);
+    }
+
+    #[test]
+    fn remote_swarm_handles_empty_and_missing_optionals() {
+        // RC-off / no devices → empty array decodes to empty Vec.
+        let empty: Vec<RemoteSwarmDevice> = serde_json::from_value(json!([])).unwrap();
+        assert!(empty.is_empty());
+        // A device with no swarms and a swarm missing optional fields
+        // (only the two required keys) must still decode via serde
+        // defaults — matches the "drift posture" of the other wire types.
+        let body = json!([{
+            "device_id": "d1",
+            "updated_at": "2026-06-21T00:00:00+00:00",
+            "swarms": [{ "swarm_key": "k", "handle": "swarm-000000" }]
+        }]);
+        let devices: Vec<RemoteSwarmDevice> = serde_json::from_value(body).unwrap();
+        assert_eq!(devices[0].age_s, 0.0);
+        assert!(!devices[0].stale);
+        let s = &devices[0].swarms[0];
+        assert_eq!(s.agents, 0);
+        assert_eq!(s.blocked, 0);
+        assert!(s.providers.is_empty());
+        assert!(!s.is_linked_worktree);
     }
 
     // v0.8.0 introduced PulledCommand wire-shape tests; v0.8.1 removes

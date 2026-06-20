@@ -33,6 +33,7 @@
     "tab_overview": "概要に切り替え",
     "tab_providers": "プロバイダーに切り替え",
     "tab_sessions": "セッションに切り替え",
+    "tab_swarm": "スウォームに切り替え",
     "tab_alerts": "アラートに切り替え",
     "tab_settings": "設定に切り替え",
     "toggle_help": "このヘルプを表示/非表示",
@@ -42,6 +43,7 @@
     "overview": "概要",
     "providers": "プロバイダ",
     "sessions": "セッション",
+    "swarm": "スウォーム",
     "alerts": "通知",
     "settings": "設定"
   },
@@ -141,6 +143,22 @@
     "timeline_other_lane": "その他",
     "timeline_x_now": "現在",
     "timeline_x_now_minus": "−{{hours}}時間"
+  },
+  "swarm": {
+    "title": "エージェント スウォーム",
+    "summary": "{{swarms}} スウォーム · {{agents}} エージェント · {{blocked}} ブロック",
+    "not_paired_hint": "サインイン(設定 → アカウント)すると、各デバイスのエージェント スウォームが表示されます。",
+    "disabled_hint": "リモートコントロールはオフです。設定 → プライバシー で有効にしてください。",
+    "load_failed": "スウォームを読み込めませんでした — 接続を確認してください。",
+    "no_swarms": "アクティブなスウォームはありません",
+    "empty_hint": "ペアリング済みデバイスが兄弟 git worktree で並列エージェントを実行すると、ここに表示されます。",
+    "blocked_badge": "ブロック",
+    "agents_other": "{{count}} エージェント",
+    "blocked_count_other": "{{count}} ブロック",
+    "oldest_blocked": "最古のブロックは {{age}}前",
+    "stale": "古い",
+    "last_seen": "最終確認 {{age}}前",
+    "worktree": "worktree"
   },
   "alerts": {
     "nothing": "特に問題ありません — アクティブな通知はありません。",

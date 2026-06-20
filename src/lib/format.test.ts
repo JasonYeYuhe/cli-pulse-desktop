@@ -8,8 +8,25 @@ import {
   formatUSD,
   isStaleProviderRow,
   rowsToCsv,
+  secondsToShortParts,
   STALE_THRESHOLD_MS,
 } from "./format";
+
+describe("secondsToShortParts", () => {
+  it("buckets sub-minute as seconds", () => {
+    expect(secondsToShortParts(0)).toEqual({ value: 0, unit: "s" });
+    expect(secondsToShortParts(45)).toEqual({ value: 45, unit: "s" });
+  });
+  it("buckets minutes / hours / days", () => {
+    expect(secondsToShortParts(90)).toEqual({ value: 1, unit: "min" });
+    expect(secondsToShortParts(3 * 3600)).toEqual({ value: 3, unit: "hr" });
+    expect(secondsToShortParts(2 * 86400)).toEqual({ value: 2, unit: "d" });
+  });
+  it("clamps negative / NaN to zero seconds", () => {
+    expect(secondsToShortParts(-10)).toEqual({ value: 0, unit: "s" });
+    expect(secondsToShortParts(NaN)).toEqual({ value: 0, unit: "s" });
+  });
+});
 
 describe("formatUSD", () => {
   it("renders zero as $0.00", () => {
