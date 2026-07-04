@@ -309,6 +309,22 @@ export default function App() {
     }
   }, []);
 
+  // v0.11.0 — headless launch-smoke marker. On mount (i.e. the React
+  // tree actually rendered inside WebView2/WebKitGTK) tell the backend
+  // to drop a `frontend-ready` marker file. In production this is a
+  // no-op: the Rust command only writes when CLI_PULSE_SMOKE_MARKER is
+  // set in the environment (the CI launch-smoke job sets it). This is
+  // the signal that catches the v0.2.11 white-screen class — if React
+  // never mounts (bundle fails to load, JS throws before commit,
+  // WebView2 fails to render), this effect never runs, the marker is
+  // never written, and the CI smoke job fails. One extra IPC call on
+  // mount; negligible cost when the env var is absent.
+  useEffect(() => {
+    invoke("smoke_mark_frontend_ready").catch(() => {
+      // Non-fatal and expected to be a cheap no-op in production.
+    });
+  }, []);
+
   useEffect(() => {
     refreshConfig();
     runScan();

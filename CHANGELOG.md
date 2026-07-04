@@ -94,6 +94,32 @@ audit against the Mac app (v1.28).
   cost is $0 — still shows a meaningful breakdown. 1 new i18n key
   (`overview.provider_usage_title`) × 3 langs, pinned.
 
+### CI / Infra
+
+- **Automated GUI launch-smoke** (`smoke-launch-windows` hard gate +
+  `smoke-launch-linux` advisory, `.github/workflows/ci.yml`). Builds a
+  **release** binary (`--no-bundle`) and launches it headlessly in smoke
+  mode, asserting **process-alive** (catches crash-on-launch, v0.8.0 BEX64)
+  and a **`frontend-ready` marker** (the React tree actually mounted inside
+  WebView2/WebKitGTK — catches white-screen, v0.2.11), plus a soft
+  window/screenshot check. The enabling task for developing without a
+  Windows machine: the crash/white-screen incident classes are now caught in
+  CI instead of on a VM. (Wrong-binary class stays covered by `release.yml`'s
+  bundle check.) Windows blocks; Linux is advisory until WebKitGTK-under-xvfb
+  render is proven.
+  - **`smoke_mark_frontend_ready` command + `src-tauri/src/smoke.rs`** —
+    env-gated marker write (`CLI_PULSE_SMOKE_MARKER`); a pure no-op in
+    production (no file, one cheap IPC on mount). React calls it from a
+    one-shot on-mount effect. 4 unit tests (env gating + write + overwrite,
+    no global-env / host-TZ dependency).
+  - **`scripts/ci-smoke-launch.{ps1,sh}`** — the launch-smoke drivers
+    (`EnumWindows`/`xdotool` + `CopyFromScreen`/`import` screenshot),
+    also runnable locally / on the VM.
+- **ci.yml ARM matrix** left as-is — investigated as a possible cost leak
+  and it is **not** one: this repo is public, and standard `windows-11-arm` /
+  `ubuntu-24.04-arm` runners are free on public repos since GA 2025-08-07
+  (the old "$11/mo" was the release matrix, removed 2026-05-04).
+
 ## [0.10.0] — 2026-05-09
 
 **Stability sprint #5 — keyboard shortcuts.** Power users have asked

@@ -124,3 +124,99 @@ jobs:
 
       - name: Tauri build (debug, skip bundle)
         run: npx tauri build --debug --no-bundle
+
+  # ---------------------------------------------------------------------------
+  # v0.11.0 — Automated GUI launch-smoke. The enabling task for "no Windows PC"
+  # development: an in-CI launch-survival gate that catches the two historical
+  # launch-incident classes without a human on a VM:
+  #   * crash-on-launch (v0.8.0 BEX64) — process dies before frontend-ready
+  #   * white-screen    (v0.2.11)      — React never mounts, marker never written
+  # (The wrong-binary class, v0.2.10, is guarded by release.yml's bundle check.)
+  #
+  # Builds a RELEASE binary (crash/panic behaviour is release-specific:
+  # windows_subsystem="windows", no console attached) with --no-bundle, launches
+  # it in smoke mode (CLI_PULSE_SMOKE_MARKER set → the on-mount frontend effect
+  # writes the marker), and asserts process-alive + marker + (soft) window +
+  # screenshot. See scripts/ci-smoke-launch.{ps1,sh}.
+  smoke-launch-windows:
+    name: GUI launch-smoke (windows)
+    runs-on: windows-latest
+    needs: [rust-test, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: smoke-windows
+      - run: npm ci
+      - name: Build release (no bundle)
+        run: npx tauri build --no-bundle
+      - name: Launch-smoke
+        shell: pwsh
+        run: ./scripts/ci-smoke-launch.ps1
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-smoke-windows
+          path: smoke-artifacts/
+          if-no-files-found: ignore
+
+  smoke-launch-linux:
+    name: GUI launch-smoke (linux)
+    runs-on: ubuntu-latest
+    needs: [rust-test, frontend]
+    # Advisory for the first ship: WebKitGTK render under xvfb on ubuntu-latest
+    # is unproven headlessly (the web process can fail to paint even with the
+    # sandbox disabled). Windows is the hard gate; promote Linux to blocking
+    # once a few runs confirm the marker reliably lands.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri runtime + smoke deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            xdg-utils \
+            xvfb \
+            xdotool \
+            imagemagick
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: smoke-linux
+      - run: npm ci
+      - name: Build release (no bundle)
+        run: npx tauri build --no-bundle
+      - name: Launch-smoke (xvfb)
+        # WebKitGTK on Ubuntu 24.04 headless: disable the web-process sandbox +
+        # compositing so the WebView renders under xvfb instead of crashing the
+        # web process (a well-known Tauri-on-CI gotcha).
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+        run: xvfb-run -a --server-args="-screen 0 1280x800x24" bash scripts/ci-smoke-launch.sh
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-smoke-linux
+          path: smoke-artifacts/
+          if-no-files-found: ignore

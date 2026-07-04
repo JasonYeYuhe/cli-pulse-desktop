@@ -32,6 +32,7 @@ pub mod risk;
 pub mod scanner;
 pub mod sentry_init;
 pub mod sessions;
+pub mod smoke;
 pub mod supabase;
 pub mod top_projects;
 pub mod tray;
@@ -214,6 +215,21 @@ impl ConfigView {
 fn get_config() -> Result<ConfigView, String> {
     let cfg = config::load().map_err(|e| e.to_string())?;
     Ok(ConfigView::from_optional(cfg.as_ref()))
+}
+
+/// v0.11.0 — headless launch-smoke marker. The frontend calls this once
+/// on mount; in production (no `CLI_PULSE_SMOKE_MARKER` env) it is a pure
+/// no-op. The CI launch-smoke job sets the env and polls for the file to
+/// prove the app launched AND the React tree actually mounted. See
+/// `smoke` module docs.
+#[tauri::command]
+fn smoke_mark_frontend_ready() -> Result<(), String> {
+    match smoke::write_ready_marker() {
+        Ok(true) => log::info!("launch-smoke: frontend-ready marker written"),
+        Ok(false) => {} // production no-op — env var absent
+        Err(e) => log::warn!("launch-smoke: failed to write marker: {e}"),
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2590,6 +2606,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
+            // v0.11.0 — headless launch-smoke frontend-ready marker
+            smoke_mark_frontend_ready,
             scan_usage,
             list_sessions,
             pair_device,
