@@ -37,6 +37,19 @@ pub fn write_ready_marker() -> io::Result<bool> {
     write_ready_marker_to(std::env::var_os(SMOKE_MARKER_ENV))
 }
 
+/// True when the launch-smoke env is active (marker path set + non-empty).
+/// Lets the frontend decide to run its extra tab-traversal render pass
+/// before signalling ready — so a per-tab render crash (the v0.2.11 class)
+/// surfaces in CI, not just a blank mount.
+pub fn is_smoke_active() -> bool {
+    marker_env_active(std::env::var_os(SMOKE_MARKER_ENV))
+}
+
+/// Pure core (no global-env read) so it's unit-testable.
+fn marker_env_active(target: Option<OsString>) -> bool {
+    target.is_some_and(|v| !v.is_empty())
+}
+
 /// Pure core, split out so tests exercise the gating + write without
 /// mutating the process-global environment (parallel tests + the repo's
 /// "never depend on ambient process state" discipline).
@@ -65,6 +78,13 @@ mod tests {
     /// test execution never collides — and no global env is touched.
     fn temp_marker(unique: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("clipulse_smoke_test_{unique}.marker"))
+    }
+
+    #[test]
+    fn marker_env_active_reflects_presence() {
+        assert!(!marker_env_active(None));
+        assert!(!marker_env_active(Some(OsString::from(""))));
+        assert!(marker_env_active(Some(OsString::from("/tmp/x.marker"))));
     }
 
     #[test]

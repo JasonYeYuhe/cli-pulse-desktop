@@ -233,6 +233,15 @@ fn smoke_mark_frontend_ready() -> Result<(), String> {
     Ok(())
 }
 
+/// v0.11.x — is the launch-smoke env active? The frontend uses this to run a
+/// one-shot tab-traversal render pass in smoke mode before it writes the
+/// ready marker, so a per-tab render crash (v0.2.11 class) fails CI instead
+/// of only a blank mount. Always `false` in production.
+#[tauri::command]
+fn smoke_is_active() -> bool {
+    smoke::is_smoke_active()
+}
+
 #[tauri::command]
 fn scan_usage(days: Option<u32>) -> Result<ScanResult, String> {
     let days = days.unwrap_or(30).clamp(1, 180);
@@ -2619,6 +2628,7 @@ pub fn run() {
             get_config,
             // v0.11.0 — headless launch-smoke frontend-ready marker
             smoke_mark_frontend_ready,
+            smoke_is_active,
             scan_usage,
             list_sessions,
             // System Monitor "Machine" tab (local CPU/mem + top-N processes)

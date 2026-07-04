@@ -179,6 +179,18 @@ type TabKey =
   | "alerts"
   | "settings";
 
+// Canonical tab order — drives Ctrl/Cmd+1..N switching and the smoke-mode
+// tab-traversal render pass. Keep in sync with the `tabs` array below.
+const ALL_TAB_KEYS: TabKey[] = [
+  "overview",
+  "providers",
+  "sessions",
+  "machine",
+  "swarm",
+  "alerts",
+  "settings",
+];
+
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
 
 export default function App() {
@@ -329,9 +341,36 @@ export default function App() {
   // never written, and the CI smoke job fails. One extra IPC call on
   // mount; negligible cost when the env var is absent.
   useEffect(() => {
-    invoke("smoke_mark_frontend_ready").catch(() => {
-      // Non-fatal and expected to be a cheap no-op in production.
-    });
+    let cancelled = false;
+    (async () => {
+      let active = false;
+      try {
+        active = await invoke<boolean>("smoke_is_active");
+      } catch {
+        // treat as not-smoke (production path)
+      }
+      if (active && !cancelled) {
+        // Smoke mode: render EVERY tab once before signalling ready. If any
+        // tab throws during render, the ErrorBoundary unmounts <App/> and
+        // the marker below is never written → the CI launch-smoke fails.
+        // This extends the mount-only gate to catch the v0.2.11 tab-crash
+        // class for every tab, not just the default one.
+        for (const k of ALL_TAB_KEYS) {
+          if (cancelled) return;
+          setTab(k);
+          // Let React commit + run the tab's initial effects before moving on.
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        if (cancelled) return;
+        setTab("overview");
+      }
+      // Marker write is a no-op in production (env unset); in smoke mode it
+      // is the "frontend mounted (+ all tabs rendered)" signal CI polls for.
+      invoke("smoke_mark_frontend_ready").catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -443,17 +482,8 @@ export default function App() {
       // Ctrl/Cmd + 1..5 — tab switch. Skip when typing.
       if (!inEditableField && /^[1-7]$/.test(e.key)) {
         e.preventDefault();
-        const tabsByIndex: TabKey[] = [
-          "overview",
-          "providers",
-          "sessions",
-          "machine",
-          "swarm",
-          "alerts",
-          "settings",
-        ];
         const idx = parseInt(e.key, 10) - 1;
-        if (tabsByIndex[idx]) setTab(tabsByIndex[idx]);
+        if (ALL_TAB_KEYS[idx]) setTab(ALL_TAB_KEYS[idx]);
         return;
       }
     };

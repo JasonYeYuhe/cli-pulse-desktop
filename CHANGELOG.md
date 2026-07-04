@@ -159,6 +159,14 @@ audit against the Mac app (v1.28).
   - **`scripts/ci-smoke-launch.{ps1,sh}`** — the launch-smoke drivers
     (`EnumWindows`/`xdotool` + `CopyFromScreen`/`import` screenshot),
     also runnable locally / on the VM.
+  - **Tab-traversal render pass** (`smoke_is_active` command + smoke-mode
+    effect). In smoke mode the frontend renders **every tab** once before
+    writing the marker — if any tab throws during render, the ErrorBoundary
+    unmounts `<App/>` and the marker never appears → CI fails. This extends
+    the mount-only gate to catch the v0.2.11 tab-crash class for **every**
+    tab (not just the default one), so a broken tab — the Machine tab above,
+    or any future UI slice — can't reach Latest. Zero production cost
+    (`smoke_is_active` returns false → no cycle). +1 unit test.
 - **ci.yml ARM matrix** left as-is — investigated as a possible cost leak
   and it is **not** one: this repo is public, and standard `windows-11-arm` /
   `ubuntu-24.04-arm` runners are free on public repos since GA 2025-08-07
