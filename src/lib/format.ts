@@ -29,6 +29,24 @@ export function formatInt(n: number): string {
 }
 
 /**
+ * Human-readable byte size (1024-based). Used by the Machine tab for
+ * memory. Defensive: non-finite or negative → "—" (never renders NaN).
+ * Examples: 512 → "512 B", 1536 → "1.5 KB", 3_400_000_000 → "3.2 GB".
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  const digits = i === 0 ? 0 : v < 10 ? 1 : 0;
+  return `${v.toFixed(digits)} ${units[i]}`;
+}
+
+/**
  * RFC 4180 CSV cell escaper. Handles:
  * - null / undefined → empty cell
  * - cells containing a comma, quote, CR, or LF are wrapped in quotes

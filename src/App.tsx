@@ -5,6 +5,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { useTranslation } from "react-i18next";
 import { SUPPORTED_LANGS, setLang, type LangCode } from "./i18n";
 import {
+  formatBytes,
   formatInt,
   formatUSD,
   formatRelativeMinutes,
@@ -169,7 +170,14 @@ type RemoteSwarmDevice = {
   swarms: RemoteSwarm[];
 };
 
-type TabKey = "overview" | "providers" | "sessions" | "swarm" | "alerts" | "settings";
+type TabKey =
+  | "overview"
+  | "providers"
+  | "sessions"
+  | "machine"
+  | "swarm"
+  | "alerts"
+  | "settings";
 
 const CLAUDE_MSG_BUCKET = "__claude_msg__";
 
@@ -179,6 +187,7 @@ export default function App() {
     { key: "overview", label: t("tab.overview") },
     { key: "providers", label: t("tab.providers") },
     { key: "sessions", label: t("tab.sessions") },
+    { key: "machine", label: t("tab.machine") },
     { key: "swarm", label: t("tab.swarm") },
     { key: "alerts", label: t("tab.alerts") },
     { key: "settings", label: t("tab.settings") },
@@ -432,12 +441,13 @@ export default function App() {
         return;
       }
       // Ctrl/Cmd + 1..5 — tab switch. Skip when typing.
-      if (!inEditableField && /^[1-6]$/.test(e.key)) {
+      if (!inEditableField && /^[1-7]$/.test(e.key)) {
         e.preventDefault();
         const tabsByIndex: TabKey[] = [
           "overview",
           "providers",
           "sessions",
+          "machine",
           "swarm",
           "alerts",
           "settings",
@@ -702,6 +712,7 @@ export default function App() {
             onRemoteSessionAction={refreshRemoteState}
           />
         )}
+        {tab === "machine" && <MachineTab />}
         {tab === "swarm" && (
           <Swarm
             paired={!!config?.paired}
@@ -788,9 +799,10 @@ function ShortcutHelpOverlay({ onClose }: { onClose: () => void }) {
     { keys: `${mod}+1`, label: t("shortcuts.tab_overview") },
     { keys: `${mod}+2`, label: t("shortcuts.tab_providers") },
     { keys: `${mod}+3`, label: t("shortcuts.tab_sessions") },
-    { keys: `${mod}+4`, label: t("shortcuts.tab_swarm") },
-    { keys: `${mod}+5`, label: t("shortcuts.tab_alerts") },
-    { keys: `${mod}+6`, label: t("shortcuts.tab_settings") },
+    { keys: `${mod}+4`, label: t("shortcuts.tab_machine") },
+    { keys: `${mod}+5`, label: t("shortcuts.tab_swarm") },
+    { keys: `${mod}+6`, label: t("shortcuts.tab_alerts") },
+    { keys: `${mod}+7`, label: t("shortcuts.tab_settings") },
     { keys: `${mod}+Shift+/`, label: t("shortcuts.toggle_help") },
     { keys: "Esc", label: t("shortcuts.close_modal") },
   ];
@@ -5693,6 +5705,183 @@ function ConfidenceDot({ c }: { c: "high" | "medium" | "low" }) {
 // attention-sorted so the swarm that needs a human is on top. Self-polls
 // every 10 s while paired (matches the Mac cadence). All data is opaque
 // (handle = `swarm-<6hex>`); no repo/branch name crosses the wire.
+// ---- System Monitor "Machine" tab (v1.38 parity — LOCAL only) ----
+
+type MachineProcess = {
+  pid: number;
+  name: string;
+  cpu_percent: number;
+  mem_bytes: number;
+};
+
+type MachineSnapshot = {
+  cpu_percent: number;
+  cpu_core_count: number;
+  mem_total_bytes: number;
+  mem_used_bytes: number;
+  mem_percent: number;
+  process_count: number;
+  top_processes: MachineProcess[];
+  collected_at: string;
+};
+
+// Green < 70% ≤ amber < 90% ≤ red. Same thresholds for CPU + memory.
+function loadColor(pct: number): string {
+  if (pct >= 90) return "#f87171";
+  if (pct >= 70) return "#fbbf24";
+  return "#34d399";
+}
+
+function MachineGauge({
+  label,
+  percent,
+  detail,
+}: {
+  label: string;
+  percent: number;
+  detail: string;
+}) {
+  const pct = Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
+  const color = loadColor(pct);
+  return (
+    <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-xs text-neutral-400">{label}</span>
+        <span className="text-lg font-semibold tabular-nums" style={{ color }}>
+          {pct.toFixed(0)}%
+        </span>
+      </div>
+      <div
+        className="h-2 rounded-full bg-neutral-800 overflow-hidden"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div
+          className="h-full rounded-full transition-[width] duration-500"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
+      </div>
+      <div className="mt-2 text-xs text-neutral-500 tabular-nums">{detail}</div>
+    </div>
+  );
+}
+
+function MachineTab() {
+  const { t } = useTranslation();
+  const [snap, setSnap] = useState<MachineSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Self-poll every 2s while mounted; independent of the app's other
+  // pollers. Local-only, so it works whether or not the device is paired.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await invoke<MachineSnapshot>("get_machine_snapshot");
+        if (cancelled) return;
+        setSnap(s);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setError(String(e));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  if (error && !snap) {
+    return (
+      <div className="flex items-start gap-2 text-xs text-amber-400/90 p-3 rounded-lg border border-amber-900/60 bg-amber-950/20">
+        <SeverityIcon severity="Warning" />
+        <span>{t("machine.load_failed")}</span>
+      </div>
+    );
+  }
+  if (!snap) {
+    return <div className="text-xs text-neutral-500">{t("machine.loading")}</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-neutral-300">{t("machine.title")}</h2>
+        <span className="text-xs text-neutral-500 tabular-nums">
+          {t("machine.process_count", { count: snap.process_count })}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <MachineGauge
+          label={t("machine.cpu")}
+          percent={snap.cpu_percent}
+          detail={t("machine.cpu_cores", { count: snap.cpu_core_count })}
+        />
+        <MachineGauge
+          label={t("machine.memory")}
+          percent={snap.mem_percent}
+          detail={`${formatBytes(snap.mem_used_bytes)} / ${formatBytes(snap.mem_total_bytes)}`}
+        />
+      </div>
+
+      <div>
+        <h3 className="text-xs font-semibold text-neutral-400 mb-2">
+          {t("machine.top_processes")}
+        </h3>
+        {snap.top_processes.length === 0 ? (
+          <div className="text-xs text-neutral-500">{t("machine.no_processes")}</div>
+        ) : (
+          <div className="rounded-lg border border-neutral-800 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-neutral-500 bg-neutral-900/60">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">
+                    {t("machine.col_process")}
+                  </th>
+                  <th className="text-right font-medium px-3 py-2">{t("machine.col_pid")}</th>
+                  <th className="text-right font-medium px-3 py-2">{t("machine.col_cpu")}</th>
+                  <th className="text-right font-medium px-3 py-2">{t("machine.col_mem")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snap.top_processes.map((p) => (
+                  <tr key={p.pid} className="border-t border-neutral-800/70">
+                    <td
+                      className="px-3 py-1.5 text-neutral-300 truncate max-w-[16rem]"
+                      title={p.name}
+                    >
+                      {p.name || "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-neutral-500 tabular-nums">
+                      {p.pid}
+                    </td>
+                    <td
+                      className="px-3 py-1.5 text-right tabular-nums"
+                      style={{ color: (p.cpu_percent ?? 0) >= 25 ? "#fbbf24" : undefined }}
+                    >
+                      {(p.cpu_percent ?? 0).toFixed(1)}%
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-neutral-400 tabular-nums">
+                      {formatBytes(p.mem_bytes)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-neutral-600">{t("machine.local_note")}</p>
+      </div>
+    </div>
+  );
+}
+
 function Swarm({
   paired,
   remoteControlEnabled,

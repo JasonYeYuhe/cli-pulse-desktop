@@ -33,6 +33,7 @@
     "tab_overview": "概要に切り替え",
     "tab_providers": "プロバイダーに切り替え",
     "tab_sessions": "セッションに切り替え",
+    "tab_machine": "マシンに切り替え",
     "tab_swarm": "スウォームに切り替え",
     "tab_alerts": "アラートに切り替え",
     "tab_settings": "設定に切り替え",
@@ -43,6 +44,7 @@
     "overview": "概要",
     "providers": "プロバイダ",
     "sessions": "セッション",
+    "machine": "マシン",
     "swarm": "スウォーム",
     "alerts": "通知",
     "settings": "設定"
@@ -143,6 +145,22 @@
     "timeline_other_lane": "その他",
     "timeline_x_now": "現在",
     "timeline_x_now_minus": "−{{hours}}時間"
+  },
+  "machine": {
+    "title": "マシンの状態",
+    "load_failed": "マシンの指標を読み取れませんでした。",
+    "loading": "マシンの指標を読み取り中…",
+    "process_count": "{{count}} プロセス",
+    "cpu": "CPU",
+    "cpu_cores": "{{count}} コア",
+    "memory": "メモリ",
+    "top_processes": "上位のプロセス",
+    "no_processes": "表示するプロセスがありません。",
+    "col_process": "プロセス",
+    "col_pid": "PID",
+    "col_cpu": "CPU",
+    "col_mem": "メモリ",
+    "local_note": "プロセスごとのデータはこの端末内に留まり、アップロードされません。"
   },
   "swarm": {
     "title": "エージェント スウォーム",

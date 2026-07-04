@@ -15,6 +15,7 @@ pub mod cwd_hmac;
 pub mod diagnostic_bundle;
 pub mod install_hook;
 pub mod keychain;
+pub mod machine;
 pub mod notify;
 pub mod paths;
 pub mod pricing;
@@ -243,6 +244,16 @@ async fn list_sessions() -> Result<sessions::SessionsSnapshot, String> {
     async_runtime::spawn_blocking(sessions::collect_sessions)
         .await
         .map_err(|e| format!("sessions join error: {e}"))
+}
+
+/// System Monitor "Machine" tab — whole-machine CPU/mem + top-N process
+/// table. LOCAL only (nothing synced). `spawn_blocking` because the sysinfo
+/// two-sample refresh sleeps ~250ms.
+#[tauri::command]
+async fn get_machine_snapshot() -> Result<machine::MachineSnapshot, String> {
+    async_runtime::spawn_blocking(machine::collect_machine_snapshot)
+        .await
+        .map_err(|e| format!("machine snapshot join error: {e}"))
 }
 
 /// Return the user's current alert thresholds (budget etc.). Never fails —
@@ -2610,6 +2621,8 @@ pub fn run() {
             smoke_mark_frontend_ready,
             scan_usage,
             list_sessions,
+            // System Monitor "Machine" tab (local CPU/mem + top-N processes)
+            get_machine_snapshot,
             pair_device,
             unpair_device,
             sync_now,

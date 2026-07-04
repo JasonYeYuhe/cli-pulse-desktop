@@ -33,6 +33,7 @@
     "tab_overview": "切换到概览",
     "tab_providers": "切换到服务商",
     "tab_sessions": "切换到会话",
+    "tab_machine": "切换到机器",
     "tab_swarm": "切换到集群",
     "tab_alerts": "切换到提醒",
     "tab_settings": "切换到设置",
@@ -43,6 +44,7 @@
     "overview": "概览",
     "providers": "服务商",
     "sessions": "会话",
+    "machine": "机器",
     "swarm": "集群",
     "alerts": "通知",
     "settings": "设置"
@@ -143,6 +145,22 @@
     "timeline_other_lane": "其他",
     "timeline_x_now": "现在",
     "timeline_x_now_minus": "−{{hours}}小时"
+  },
+  "machine": {
+    "title": "机器健康",
+    "load_failed": "无法读取机器指标。",
+    "loading": "正在读取机器指标…",
+    "process_count": "{{count}} 个进程",
+    "cpu": "CPU",
+    "cpu_cores": "{{count}} 核",
+    "memory": "内存",
+    "top_processes": "占用最高的进程",
+    "no_processes": "没有可显示的进程。",
+    "col_process": "进程",
+    "col_pid": "PID",
+    "col_cpu": "CPU",
+    "col_mem": "内存",
+    "local_note": "逐进程数据仅保留在本机 —— 绝不上传。"
   },
   "swarm": {
     "title": "智能体集群",

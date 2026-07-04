@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   csvEscape,
+  formatBytes,
   formatInt,
   formatRelativeMinutes,
   formatRelativeShort,
@@ -344,5 +345,23 @@ describe("formatRelativeShortParts", () => {
     // displaying "synced bad-string ago".
     expect(formatRelativeShortParts("not-a-date")).toBeNull();
     expect(formatRelativeShortParts("")).toBeNull();
+  });
+});
+
+describe("formatBytes", () => {
+  it("formats byte magnitudes 1024-based", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(1536)).toBe("1.5 KB");
+    expect(formatBytes(1024 * 1024)).toBe("1.0 MB");
+    expect(formatBytes(3.4 * 1024 * 1024 * 1024)).toBe("3.4 GB");
+    // ≥10 in a unit drops the decimal.
+    expect(formatBytes(16 * 1024 * 1024 * 1024)).toBe("16 GB");
+  });
+
+  it("guards non-finite / negative to em-dash (never NaN)", () => {
+    expect(formatBytes(NaN)).toBe("—");
+    expect(formatBytes(Infinity)).toBe("—");
+    expect(formatBytes(-1)).toBe("—");
   });
 });

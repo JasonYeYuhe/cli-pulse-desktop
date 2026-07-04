@@ -33,6 +33,7 @@
     "tab_overview": "Switch to Overview",
     "tab_providers": "Switch to Providers",
     "tab_sessions": "Switch to Sessions",
+    "tab_machine": "Switch to Machine",
     "tab_swarm": "Switch to Swarm",
     "tab_alerts": "Switch to Alerts",
     "tab_settings": "Switch to Settings",
@@ -43,6 +44,7 @@
     "overview": "Overview",
     "providers": "Providers",
     "sessions": "Sessions",
+    "machine": "Machine",
     "swarm": "Swarm",
     "alerts": "Alerts",
     "settings": "Settings"
@@ -147,6 +149,22 @@
     "timeline_other_lane": "Other",
     "timeline_x_now": "now",
     "timeline_x_now_minus": "−{{hours}}h"
+  },
+  "machine": {
+    "title": "Machine health",
+    "load_failed": "Couldn't read machine metrics.",
+    "loading": "Reading machine metrics…",
+    "process_count": "{{count}} processes",
+    "cpu": "CPU",
+    "cpu_cores": "{{count}} cores",
+    "memory": "Memory",
+    "top_processes": "Top processes",
+    "no_processes": "No processes to show.",
+    "col_process": "Process",
+    "col_pid": "PID",
+    "col_cpu": "CPU",
+    "col_mem": "Memory",
+    "local_note": "Per-process data stays on this device — it is never uploaded."
   },
   "swarm": {
     "title": "Agent swarms",

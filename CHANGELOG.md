@@ -93,6 +93,33 @@ audit against the Mac app (v1.28).
   Ranks by tokens (not cost) so flat-rate subscription usage — where
   cost is $0 — still shows a meaningful breakdown. 1 new i18n key
   (`overview.provider_usage_title`) × 3 langs, pinned.
+- **System Monitor — "Machine" tab** (v1.38 parity, macOS System Monitor
+  Phase 1). A new 4th tab (after Sessions) with an Activity-Monitor-style
+  local cockpit: whole-machine **CPU** and **memory** gauges plus a live
+  **top-N process table** (name / PID / CPU% / memory), refreshed every 2s.
+  - **First principles:** the Mac reads Apple-only SMC / IOReport / HID for
+    temps / fans / power; the portable subset Windows *and* Linux can always
+    read without privileges is CPU / memory / per-process, so that's this
+    slice. Temperatures + battery (`sysinfo` `Components` / a battery crate)
+    are a capability-gated follow-up — this reports only what the platform
+    can truthfully read, no fabricated sensor values.
+  - **`src-tauri/src/machine.rs`** + `get_machine_snapshot` command (via
+    `sysinfo`, already a dep — no new crates, no privileges). Per-process
+    CPU% is normalized to share-of-machine (÷ core count) so it shares the
+    0–100 scale with the gauge. Every percentage is NaN/Inf-scrubbed +
+    clamped in Rust so a bad sample can't render `undefined` (the v0.2.11
+    lesson). +4 Rust tests.
+  - **LOCAL only** — per-process rows are **never** synced to Supabase
+    (privacy + volume); there is no wire path here, unlike sessions /
+    heartbeat.
+  - **`formatBytes`** helper added to `format.ts` (+2 tests). Keyboard
+    shortcut `Ctrl/Cmd+4` now selects Machine (Swarm→5, Alerts→6,
+    Settings→7); shortcut help overlay updated. 15 i18n keys × 3 langs
+    (`tab.machine`, `shortcuts.tab_machine`, `machine.*`), pinned in the
+    critical-labels gate.
+  - **Verification note:** unit + typecheck + build + launch-smoke green;
+    the tab's rendered UI still wants an on-device / VM pass (the launch
+    smoke asserts mount, not per-tab navigation).
 
 ### Fixed
 
