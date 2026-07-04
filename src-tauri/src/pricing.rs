@@ -299,6 +299,11 @@ static CLAUDE_MODELS: Lazy<HashMap<&'static str, ClaudeModel>> = Lazy::new(|| {
 static CODEX_DATED_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-\d{4}-\d{2}-\d{2}$").unwrap());
 static CLAUDE_DATED_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-\d{8}$").unwrap());
 static CLAUDE_BEDROCK_VER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-v\d+:\d+$").unwrap());
+// Major+minor family form Claude Code emits for a released model
+// (dates already stripped by the time we test this). Drives the
+// family fallback so a not-yet-tabled minor doesn't price to $0.
+static CLAUDE_FAMILY_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^claude-(opus|sonnet|haiku)-\d+-\d+$").unwrap());
 
 pub fn normalize_codex_model(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -340,7 +345,64 @@ pub fn normalize_claude_model(raw: &str) -> String {
             return base.to_string();
         }
     }
+    // Exact match MUST precede the family fallback so a real key is never
+    // shadowed by a sibling.
+    if CLAUDE_MODELS.contains_key(trimmed.as_str()) {
+        return trimmed;
+    }
+    // Claude family fallback (Swift parity —
+    // CostUsageScanner.Pricing.familyFallback). When a freshly-released
+    // minor (e.g. claude-opus-4-8) isn't priced yet, resolve to the
+    // highest-numbered priced sibling in the same
+    // claude-(opus|sonnet|haiku)-N-M family so Today/Week cost + charts
+    // don't silently regress to $0 the day the model ships. This is
+    // exactly how the missing claude-opus-4-7 entry was caught upstream.
+    if let Some(fallback) = claude_family_fallback(&trimmed) {
+        return fallback;
+    }
     trimmed
+}
+
+/// Resolve an unknown `claude-(opus|sonnet|haiku)-N-Y` model to the
+/// highest-numbered priced sibling `claude-(opus|sonnet|haiku)-N-X` in the
+/// same family. Returns `None` if the stem doesn't parse or no sibling is
+/// priced. Mirrors Swift `CostUsageScanner.Pricing.familyFallback` so the
+/// desktop and Mac agree byte-for-byte on any not-yet-tabled minor —
+/// both tables carry identical family keys.
+///
+/// The `minor < 100` cap keeps a legacy dated row like
+/// `claude-opus-4-20250514` (where `20250514` is a date masquerading as a
+/// minor) from beating real minors like 5 / 6 / 7.
+fn claude_family_fallback(model: &str) -> Option<String> {
+    if !CLAUDE_FAMILY_RE.is_match(model) {
+        return None;
+    }
+    // Regex guarantees the `claude-<fam>-<gen>-<minor>` shape → 4 parts.
+    let parts: Vec<&str> = model.split('-').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    let family = format!("claude-{}-{}-", parts[1], parts[2]);
+    let mut best_key: Option<&'static str> = None;
+    let mut best_minor: i64 = -1;
+    for &key in CLAUDE_MODELS.keys() {
+        let Some(tail) = key.strip_prefix(family.as_str()) else {
+            continue;
+        };
+        // Only bare numeric minors are siblings; dated rows
+        // (`5-20251101`) fail this parse and are skipped.
+        let Ok(minor) = tail.parse::<i64>() else {
+            continue;
+        };
+        if minor >= 100 {
+            continue; // date-masquerade guard
+        }
+        if minor > best_minor {
+            best_minor = minor;
+            best_key = Some(key);
+        }
+    }
+    best_key.map(|k| k.to_string())
 }
 
 pub fn codex_cost_usd(
@@ -474,5 +536,67 @@ mod tests {
     fn unknown_model_returns_none() {
         assert!(codex_cost_usd("gpt-42-unicorn", 1000, 0, 0).is_none());
         assert!(claude_cost_usd("claude-opus-99", 1000, 0, 0, 0).is_none());
+    }
+
+    // ---- Claude family fallback (Swift-parity; guards $0-on-new-minor) ----
+
+    #[test]
+    fn family_fallback_unknown_minor_resolves_to_latest_sibling() {
+        // claude-opus-4-8 isn't tabled → highest priced opus-4-* sibling is 4-7.
+        assert_eq!(normalize_claude_model("claude-opus-4-8"), "claude-opus-4-7");
+        // Still 4-7 for an even-higher unseen minor (7 is the max known).
+        assert_eq!(normalize_claude_model("claude-opus-4-9"), "claude-opus-4-7");
+    }
+
+    #[test]
+    fn family_fallback_prices_new_minor_like_sibling_not_zero() {
+        // THE regression this fixes: a fresh minor must NOT collapse to $0.
+        // 1M input @ $5/M + 100K output @ $25/M = $7.50 (same as opus 4.7).
+        let c = claude_cost_usd("claude-opus-4-8", 1_000_000, 0, 0, 100_000)
+            .expect("unknown opus minor must price via family fallback, not None");
+        assert!((c - 7.50).abs() < 1e-9, "expected 7.50, got {c}");
+        // Byte-identical to the resolved sibling (the wire invariant).
+        let sib = claude_cost_usd("claude-opus-4-7", 1_000_000, 0, 0, 100_000).unwrap();
+        assert!((c - sib).abs() < 1e-12);
+    }
+
+    #[test]
+    fn family_fallback_sonnet_carries_tiered_fields() {
+        // Highest bare-minor sonnet-4-* sibling is 4-6 (tiered above 200K).
+        assert_eq!(
+            normalize_claude_model("claude-sonnet-4-9"),
+            "claude-sonnet-4-6"
+        );
+        // 300K input: 200K @ $3/M + 100K @ $6/M = $1.20 — proves the sibling's
+        // threshold/above fields carried through the fallback.
+        let c = claude_cost_usd("claude-sonnet-4-9", 300_000, 0, 0, 0).unwrap();
+        assert!((c - 1.20).abs() < 1e-9, "expected 1.20 (tiered), got {c}");
+    }
+
+    #[test]
+    fn family_fallback_exact_match_takes_precedence() {
+        // A real key must resolve to itself, never a higher sibling.
+        assert_eq!(normalize_claude_model("claude-opus-4-6"), "claude-opus-4-6");
+        assert_eq!(normalize_claude_model("claude-opus-4-5"), "claude-opus-4-5");
+    }
+
+    #[test]
+    fn family_fallback_new_generation_has_no_sibling() {
+        // A brand-new GENERATION (no opus-5-* priced) can't fall back →
+        // returns itself → still None cost (matches Mac; acceptable).
+        assert_eq!(normalize_claude_model("claude-opus-5-0"), "claude-opus-5-0");
+        assert!(claude_cost_usd("claude-opus-5-0", 1000, 0, 0, 0).is_none());
+    }
+
+    #[test]
+    fn family_fallback_ignores_date_masquerade_sibling() {
+        // The minor<100 cap: claude-opus-4-8 must resolve to 4-7, NOT the
+        // dated claude-opus-4-20250514 (where 20250514 parses as a huge minor).
+        assert_ne!(
+            normalize_claude_model("claude-opus-4-8"),
+            "claude-opus-4-20250514"
+        );
+        // And a single-number form (not major-minor) never fallback-matches.
+        assert_eq!(normalize_claude_model("claude-opus-99"), "claude-opus-99");
     }
 }

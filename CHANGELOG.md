@@ -94,6 +94,23 @@ audit against the Mac app (v1.28).
   cost is $0 — still shows a meaningful breakdown. 1 new i18n key
   (`overview.provider_usage_title`) × 3 langs, pinned.
 
+### Fixed
+
+- **Claude family-fallback pricing** (`pricing.rs`) — a Claude model id
+  not in the pricing table (e.g. a freshly-released minor like
+  `claude-opus-4-8`) priced to **$0**, silently collapsing Today/Week cost
+  and every cost chart the day the model ships. `normalize_claude_model`
+  now resolves an unknown `claude-(opus|sonnet|haiku)-N-M` to the
+  highest-numbered priced sibling in the same family (e.g.
+  `claude-opus-4-8` → `claude-opus-4-7`), mirroring Swift
+  `CostUsageScanner.Pricing.familyFallback` byte-for-byte (both tables
+  carry identical family keys). Exact matches still take precedence; a
+  `minor < 100` cap stops a legacy dated row (`claude-opus-4-20250514`)
+  from masquerading as a high minor; a brand-new *generation* with no
+  priced sibling still returns `None` (unchanged, matches Mac). +6 unit
+  tests. This is the exact class of bug that hid the missing
+  `claude-opus-4-7` entry back in v0.2.11.
+
 ### CI / Infra
 
 - **Automated GUI launch-smoke** (`smoke-launch-windows` hard gate +
