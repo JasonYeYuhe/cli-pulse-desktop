@@ -12,6 +12,30 @@ corrections to the raw synthesis / to the handoff's own assumptions.
 
 ---
 
+## Status log
+
+**2026-07-05 — full takeover + parallel-work reconciliation.** The repo was NOT frozen at v0.10.0
+(the handoff was stale): a **parallel `v0.10.1` sprint** driven by an earlier
+`PROJECT_DEV_PLAN_2026-06-20_macos_parity.md` (a v1.28-era 109-gap audit) landed concurrently. Jason
+confirmed **I now own the whole desktop track** — this doc is the **governing forward roadmap**; the
+2026-06-20 doc is prior/superseded. Reconciliation of what that sprint already shipped vs this plan:
+
+- ✅ **Done by v0.10.1** (skip — do NOT re-do): Swarm tab (my v0.19.0 swarm viewer), provider usage
+  breakdown on Overview, per-provider visibility filter, per-provider brand colors/avatars, provider
+  colors on Sessions, alert lifecycle (resolve/ack/snooze — beyond this plan's scope), severity/entity
+  chips on alerts.
+- 🔜 **Still open from the 2026-06-20 doc** (fold into my sequence): per-provider 30-day mini
+  bar-chart (= my v0.13.0), cost summary strip, inline approve on session rows, cost-forecast
+  day-progress, metric-tile theming, tier "resets X" bars, onboarding wizard, live tray status,
+  service-status badges (= my v0.14.0).
+- **Shipped by me this session:** launch-smoke CI gate (`0fe2e14`, CI-verified both platforms) +
+  Claude family-fallback pricing (`9eaf078`). Both landed **additively under `[Unreleased]`, no
+  version bump**, to respect the v0.10.1 release cadence.
+- **Next:** System Monitor local "Machine" tab (v0.18.0 — flagship v1.38, entirely mine, not in the
+  v1.28 doc), then the remaining v1.38-depth items.
+
+---
+
 ## 0. Where the desktop actually stands (v0.10.0, verified 2026-07-04)
 
 The stale memory (`reference_desktop_repo`, 56 days old) undersold the current state. Verified today:
