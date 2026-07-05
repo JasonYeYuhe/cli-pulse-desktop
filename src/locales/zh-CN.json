@@ -160,7 +160,14 @@
     "col_pid": "PID",
     "col_cpu": "CPU",
     "col_mem": "内存",
-    "local_note": "逐进程数据仅保留在本机 —— 绝不上传。"
+    "local_note": "逐进程数据仅保留在本机 —— 绝不上传。",
+    "battery": "电池",
+    "batt_charging": "充电中",
+    "batt_discharging": "使用电池",
+    "batt_full": "已充满",
+    "batt_empty": "电量耗尽",
+    "batt_unknown": "未知",
+    "temperatures": "温度"
   },
   "swarm": {
     "title": "智能体集群",

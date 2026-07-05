@@ -54,6 +54,12 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 uuid = { version = "1", features = ["v4"] }
 sysinfo = "0.32"
+# System Monitor "Machine" tab — battery health/state. sysinfo doesn't do
+# batteries; starship-battery is the maintained, pure-Rust, no-privilege
+# cross-platform reader (Linux /sys/class/power_supply, Windows power API,
+# macOS IOKit) used by the `starship` prompt. Desktops with no battery
+# return an empty iterator (→ None, not an error).
+starship-battery = "0.10"
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 # v0.3.0 — direct email OTP sign-in. keyring stores the refresh token in
 # the OS-native credential store; whoami suggests a default device name

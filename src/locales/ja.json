@@ -160,7 +160,14 @@
     "col_pid": "PID",
     "col_cpu": "CPU",
     "col_mem": "メモリ",
-    "local_note": "プロセスごとのデータはこの端末内に留まり、アップロードされません。"
+    "local_note": "プロセスごとのデータはこの端末内に留まり、アップロードされません。",
+    "battery": "バッテリー",
+    "batt_charging": "充電中",
+    "batt_discharging": "バッテリー使用中",
+    "batt_full": "満充電",
+    "batt_empty": "残量なし",
+    "batt_unknown": "不明",
+    "temperatures": "温度"
   },
   "swarm": {
     "title": "エージェント スウォーム",

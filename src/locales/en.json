@@ -164,7 +164,14 @@
     "col_pid": "PID",
     "col_cpu": "CPU",
     "col_mem": "Memory",
-    "local_note": "Per-process data stays on this device — it is never uploaded."
+    "local_note": "Per-process data stays on this device — it is never uploaded.",
+    "battery": "Battery",
+    "batt_charging": "Charging",
+    "batt_discharging": "On battery",
+    "batt_full": "Full",
+    "batt_empty": "Empty",
+    "batt_unknown": "Unknown",
+    "temperatures": "Temperatures"
   },
   "swarm": {
     "title": "Agent swarms",

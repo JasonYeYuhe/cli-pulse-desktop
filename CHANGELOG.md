@@ -117,9 +117,19 @@ audit against the Mac app (v1.28).
     Settings→7); shortcut help overlay updated. 15 i18n keys × 3 langs
     (`tab.machine`, `shortcuts.tab_machine`, `machine.*`), pinned in the
     critical-labels gate.
-  - **Verification note:** unit + typecheck + build + launch-smoke green;
-    the tab's rendered UI still wants an on-device / VM pass (the launch
-    smoke asserts mount, not per-tab navigation).
+  - **Temperatures + battery** (capability-gated). Temps via `sysinfo`
+    `Components` (Linux hwmon / Windows WMI / macOS SMC — no new dep);
+    battery via `starship-battery` (pure-Rust, no privileges; the only new
+    crate). Both are **truthful**: a temp is shown only if it reads finite +
+    in `-40..150 °C`, the temps section is hidden when the platform exposes
+    none (common on Windows consumer HW / VMs), and battery is `null` (card
+    hidden) when there's no battery — never a fabricated reading. Battery
+    colour is inverted (low charge = danger; charging = green); temps use a
+    warm palette. 7 more i18n keys × 3 langs, pinned.
+  - **Verification:** the tab-traversal smoke below renders every tab in CI,
+    so the Machine tab's render path is exercised headlessly on
+    Windows + Linux (no VM needed for a render-crash regression). On-device
+    sensor *values* (real temps/battery) still warrant a laptop pass.
 
 ### Fixed
 

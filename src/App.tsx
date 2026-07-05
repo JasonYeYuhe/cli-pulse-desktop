@@ -5744,6 +5744,9 @@ type MachineProcess = {
   mem_bytes: number;
 };
 
+type MachineTemp = { label: string; celsius: number };
+type MachineBattery = { percent: number; state: string };
+
 type MachineSnapshot = {
   cpu_percent: number;
   cpu_core_count: number;
@@ -5752,6 +5755,8 @@ type MachineSnapshot = {
   mem_percent: number;
   process_count: number;
   top_processes: MachineProcess[];
+  temperatures: MachineTemp[];
+  battery: MachineBattery | null;
   collected_at: string;
 };
 
@@ -5759,6 +5764,22 @@ type MachineSnapshot = {
 function loadColor(pct: number): string {
   if (pct >= 90) return "#f87171";
   if (pct >= 70) return "#fbbf24";
+  return "#34d399";
+}
+
+// Battery colour is INVERTED vs load: low charge is the danger. Charging is
+// always green regardless of level.
+function batteryColor(b: MachineBattery): string {
+  if (b.state === "charging" || b.state === "full") return "#34d399";
+  if (b.percent < 20) return "#f87171";
+  if (b.percent < 40) return "#fbbf24";
+  return "#34d399";
+}
+
+// Warm palette for temperatures (°C): <60 green, <80 amber, else red.
+function tempColor(celsius: number): string {
+  if (celsius >= 80) return "#f87171";
+  if (celsius >= 60) return "#fbbf24";
   return "#34d399";
 }
 
@@ -5847,7 +5868,7 @@ function MachineTab() {
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <MachineGauge
           label={t("machine.cpu")}
           percent={snap.cpu_percent}
@@ -5858,7 +5879,54 @@ function MachineTab() {
           percent={snap.mem_percent}
           detail={`${formatBytes(snap.mem_used_bytes)} / ${formatBytes(snap.mem_total_bytes)}`}
         />
+        {snap.battery && (
+          <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="text-xs text-neutral-400">{t("machine.battery")}</span>
+              <span
+                className="text-lg font-semibold tabular-nums"
+                style={{ color: batteryColor(snap.battery) }}
+              >
+                {Math.round(Math.max(0, Math.min(100, snap.battery.percent)))}%
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-neutral-800 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-[width] duration-500"
+                style={{
+                  width: `${Math.max(0, Math.min(100, snap.battery.percent))}%`,
+                  backgroundColor: batteryColor(snap.battery),
+                }}
+              />
+            </div>
+            <div className="mt-2 text-xs text-neutral-500">
+              {t(`machine.batt_${snap.battery.state}`, {
+                defaultValue: t("machine.batt_unknown"),
+              })}
+            </div>
+          </div>
+        )}
       </div>
+
+      {snap.temperatures.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-neutral-400 mb-2">
+            {t("machine.temperatures")}
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {snap.temperatures.map((tp, i) => (
+              <span
+                key={`${tp.label}-${i}`}
+                className="px-2.5 py-1 text-xs rounded-md border border-neutral-800 bg-neutral-900/40 tabular-nums"
+                title={tp.label}
+              >
+                <span className="text-neutral-400">{tp.label || "—"}</span>{" "}
+                <span style={{ color: tempColor(tp.celsius) }}>{tp.celsius.toFixed(0)}°C</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <h3 className="text-xs font-semibold text-neutral-400 mb-2">

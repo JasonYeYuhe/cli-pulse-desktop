@@ -134,6 +134,14 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "machine.col_cpu",
     "machine.col_mem",
     "machine.local_note",
+    // Capability-gated sensors (temps + battery).
+    "machine.battery",
+    "machine.batt_charging",
+    "machine.batt_discharging",
+    "machine.batt_full",
+    "machine.batt_empty",
+    "machine.batt_unknown",
+    "machine.temperatures",
     // v0.10.1 — Alert lifecycle (macOS parity): filter, actions, states.
     "alerts.filter_open",
     "alerts.filter_resolved",
