@@ -138,15 +138,25 @@ audit against the Mac app (v1.28).
   wrapper; **no schema change** (the RPC + columns are already live in prod —
   signature verified directly against prod, not the repo `.sql`).
   - `machine::collect_load` — a light global CPU%/mem% read (no process
-    enumeration / sensors) for the heartbeat; `HelperHeartbeatRequest` gains
+    enumeration) for the heartbeat; `HelperHeartbeatRequest` gains
     `p_provider_plan_status` + `p_metrics` as `Option` with
-    `skip_serializing_if=None` (forward-compat for the sensor-sync slice),
-    both `None` here so the server's per-field **coalesce preserves last-known**
-    (never clobbers a phone's off-plan warning on a transient blip).
+    `skip_serializing_if=None`. `p_provider_plan_status` is `None` (the desktop
+    isn't a managed on-plan host yet); when a param is `None` it's dropped so
+    the server's per-field **coalesce preserves last-known** (never clobbers a
+    phone's off-plan warning on a transient blip).
+  - **Sensor sync into `p_metrics`** (temps + battery → the phone). Maps the
+    Machine tab's sensors to the v0.63 `device_sensors` keys the RPC whitelists:
+    temps by heuristic label (`cpu_temp_c`/`gpu_temp_c`/`battery_temp_c`, hottest
+    match), `battery_charge_pct`, and `battery_state` mapped onto the server's
+    vocabulary (`full`→`charged`, `empty`→`unknown`) — plus a `capability{}` map
+    so the phone knows what this device *can* read vs. a momentary gap. Omitted
+    entirely when nothing is readable (coalesce preserves). Blob is far under the
+    v0.64 8192-byte guard. Pure mapping is unit-tested (label heuristics + state
+    whitelist) with no hardware.
   - Best-effort + last in the tick (a heartbeat failure never fails the sync);
     rides the existing 120s cadence. `helper_sync` already marks the device
     Online — heartbeat adds cpu/mem/session-count (a benign double `now()`
-    write). +3 tests (wire-shape omit/include + load range).
+    write). +7 tests (wire-shape, load range, sensor mapping).
 
 ### Fixed
 

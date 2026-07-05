@@ -12,10 +12,14 @@
 //! capability-gated follow-up — and this module deliberately reports only
 //! what the platform can truthfully read (no fabricated sensor values).
 //!
-//! Per-process rows NEVER leave the device (privacy + volume) — there is
-//! no Supabase write on this path, unlike `sessions` / heartbeat.
+//! Per-process rows NEVER leave the device (privacy + volume). The aggregate
+//! machine-health metrics (whole-device CPU/mem via `collect_load`, and the
+//! temps/battery `p_metrics` blob via `collect_sensor_metrics`) DO sync to the
+//! `devices` row through the heartbeat — but only the coarse, capability-gated
+//! values, never the process table.
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use sysinfo::{
     Components, CpuRefreshKind, MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate,
     RefreshKind, System,
@@ -194,6 +198,101 @@ fn collect_battery() -> Option<MachineBattery> {
     Some(MachineBattery { percent, state })
 }
 
+/// Build the heartbeat `p_metrics` blob (temps + battery, mapped to the v0.63
+/// `device_sensors` keys) from a fresh sensor read, or `None` when the
+/// platform exposes nothing syncable — in which case the heartbeat OMITS
+/// `p_metrics` so the server's coalesce preserves last-known rather than
+/// clobbering (the Mac's `machine_collector` discipline). Blob stays far
+/// under the 8192-byte guard.
+pub fn collect_sensor_metrics() -> Option<Value> {
+    let temps = collect_temperatures();
+    let battery = collect_battery();
+    build_metrics_json(&temps, battery.as_ref())
+}
+
+/// Pure mapping (no I/O) so the label heuristics + state whitelist are
+/// unit-tested without hardware. `None` when there's nothing to send.
+fn build_metrics_json(temps: &[MachineTemp], battery: Option<&MachineBattery>) -> Option<Value> {
+    let mut m = Map::new();
+    let mut cap = Map::new();
+
+    // Temps: heuristic label → schema key (only cpu/gpu/battery temps exist
+    // in the schema; hwmon/WMI labels vary wildly). Hottest match wins.
+    let cpu_t = pick_temp(
+        temps,
+        &[
+            "cpu", "core", "package", "tctl", "tdie", "coretemp", "k10temp",
+        ],
+    );
+    let gpu_t = pick_temp(
+        temps,
+        &["gpu", "edge", "junction", "amdgpu", "nouveau", "radeon"],
+    );
+    let bat_t = pick_temp(temps, &["batt"]);
+    if let Some(t) = cpu_t {
+        m.insert("cpu_temp_c".into(), json!(t));
+    }
+    if let Some(t) = gpu_t {
+        m.insert("gpu_temp_c".into(), json!(t));
+    }
+    if let Some(t) = bat_t {
+        m.insert("battery_temp_c".into(), json!(t));
+    }
+    cap.insert("cpu_temp".into(), json!(cpu_t.is_some()));
+    cap.insert("gpu_temp".into(), json!(gpu_t.is_some()));
+
+    // Battery: percent + wire-whitelisted state.
+    if let Some(b) = battery {
+        m.insert(
+            "battery_charge_pct".into(),
+            json!(b.percent.round().clamp(0.0, 100.0) as i64),
+        );
+        if let Some(ws) = battery_state_wire(&b.state) {
+            m.insert("battery_state".into(), json!(ws));
+        }
+        cap.insert("battery".into(), json!(true));
+    } else {
+        cap.insert("battery".into(), json!(false));
+    }
+
+    // Nothing readable → omit p_metrics entirely (preserve last-known).
+    if m.is_empty() {
+        return None;
+    }
+    m.insert("capability".into(), Value::Object(cap));
+    Some(Value::Object(m))
+}
+
+/// The RPC whitelists `battery_state ∈ {charging,discharging,charged,none,
+/// unknown}`. Map our local vocab (`full`/`empty` from the battery crate)
+/// onto it; anything unmappable → `None` (dropped, coalesce preserves).
+fn battery_state_wire(state: &str) -> Option<&'static str> {
+    match state {
+        "charging" => Some("charging"),
+        "discharging" => Some("discharging"),
+        "full" => Some("charged"),
+        "empty" => Some("unknown"), // rare; not a wire value, don't clobber
+        "unknown" => Some("unknown"),
+        _ => None,
+    }
+}
+
+/// Hottest temperature whose label matches any of `patterns` (case-insensitive
+/// substring), or `None`.
+fn pick_temp(temps: &[MachineTemp], patterns: &[&str]) -> Option<f32> {
+    temps
+        .iter()
+        .filter(|t| {
+            let l = t.label.to_lowercase();
+            patterns.iter().any(|p| l.contains(p))
+        })
+        .map(|t| t.celsius)
+        .fold(None, |acc, c| match acc {
+            Some(a) if a >= c => Some(a),
+            _ => Some(c),
+        })
+}
+
 /// Lightweight whole-device load for the cross-device heartbeat: global
 /// CPU% + memory% as `i32` 0..=100. Cheaper than `collect_machine_snapshot`
 /// (no process enumeration, no Components, no battery), but still needs the
@@ -308,5 +407,69 @@ mod tests {
         let (cpu, mem) = collect_load();
         assert!((0..=100).contains(&cpu), "cpu {cpu}");
         assert!((0..=100).contains(&mem), "mem {mem}");
+    }
+
+    // ---- p_metrics sensor mapping (pure; no hardware) ----
+
+    #[test]
+    fn battery_state_maps_to_wire_whitelist() {
+        assert_eq!(battery_state_wire("full"), Some("charged"));
+        assert_eq!(battery_state_wire("empty"), Some("unknown"));
+        assert_eq!(battery_state_wire("charging"), Some("charging"));
+        assert_eq!(battery_state_wire("discharging"), Some("discharging"));
+        assert_eq!(battery_state_wire("unknown"), Some("unknown"));
+        assert_eq!(battery_state_wire("nonsense"), None);
+    }
+
+    #[test]
+    fn pick_temp_returns_hottest_match() {
+        let temps = vec![
+            MachineTemp {
+                label: "Core 0".into(),
+                celsius: 50.0,
+            },
+            MachineTemp {
+                label: "Package id 0".into(),
+                celsius: 70.0,
+            },
+            MachineTemp {
+                label: "acpitz".into(),
+                celsius: 40.0,
+            },
+        ];
+        assert_eq!(pick_temp(&temps, &["core", "package"]), Some(70.0));
+        assert_eq!(pick_temp(&temps, &["gpu"]), None);
+    }
+
+    #[test]
+    fn build_metrics_maps_temps_and_battery() {
+        let temps = vec![MachineTemp {
+            label: "CPU".into(),
+            celsius: 55.0,
+        }];
+        let bat = MachineBattery {
+            percent: 83.4,
+            state: "full".into(),
+        };
+        let v = build_metrics_json(&temps, Some(&bat)).unwrap();
+        assert_eq!(v["cpu_temp_c"], 55.0);
+        assert_eq!(v["battery_charge_pct"], 83); // rounded to int
+        assert_eq!(v["battery_state"], "charged"); // full → charged (whitelist)
+        assert_eq!(v["capability"]["cpu_temp"], true);
+        assert_eq!(v["capability"]["battery"], true);
+        // Under the server's 8192-byte guard by a wide margin.
+        assert!(serde_json::to_string(&v).unwrap().len() < 8192);
+    }
+
+    #[test]
+    fn build_metrics_none_when_nothing_readable() {
+        // No battery, and the only temp is an unmappable ambient sensor → None
+        // (heartbeat omits p_metrics → server preserves last-known).
+        let temps = vec![MachineTemp {
+            label: "acpitz".into(),
+            celsius: 40.0,
+        }];
+        assert!(build_metrics_json(&temps, None).is_none());
+        assert!(build_metrics_json(&[], None).is_none());
     }
 }
