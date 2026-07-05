@@ -157,6 +157,20 @@ audit against the Mac app (v1.28).
     rides the existing 120s cadence. `helper_sync` already marks the device
     Online — heartbeat adds cpu/mem/session-count (a benign double `now()`
     write). +7 tests (wire-shape, load range, sensor mapping).
+- **Quota-bar warning-threshold ticks** (v1.30 F2a parity — CodexBar
+  `MenuCardQuotaWarningMarkers`). The per-provider quota/tier bars now show
+  subtle reference ticks at the warning thresholds (80% / 95% used). Because
+  the bars render **remaining**, an "80% used" tick sits at `left:20%`
+  (`1−f`), matching the Mac `QuotaBarMarkers.place(onRemainingBar:true)` so a
+  paired account reads identically on both platforms. Ported the pure marker
+  math to `src/lib/quotaMarkers.ts` (`warningFractions` + `placeOnRemainingBar`,
+  5 tests); tooltip `providers.warn_threshold` × 3 langs, pinned.
+  - **Deferred (gated):** the *expected-pace* marker + pace text ("12% in
+    deficit · runs out in 3d") need per-tier `windowMinutes`, which the
+    desktop's `TierEntry` doesn't carry yet (the Mac sets it per-collector).
+    That's a follow-up under plan §5 — either add `windowMinutes` to the
+    collectors (PATH A, couples to provider-window constants) or the
+    server-side `window_minutes` plumbing (an ask-first shared-schema change).
 
 ### Fixed
 

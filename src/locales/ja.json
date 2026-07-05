@@ -121,7 +121,8 @@
     "col_model": "モデル",
     "col_input": "入力",
     "col_output": "出力",
-    "col_cost": "費用"
+    "col_cost": "費用",
+    "warn_threshold": "{{pct}}% 使用で警告"
   },
   "sessions": {
     "header": "{{active}} アクティブ · {{total}} プロセス走査 · 更新 {{time}}",

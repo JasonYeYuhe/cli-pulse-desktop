@@ -94,6 +94,8 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "providers.visibility_hide_tooltip",
     "providers.visibility_show_tooltip",
     "providers.all_hidden",
+    // v1.30 F2a — quota-bar warning-threshold tick tooltip.
+    "providers.warn_threshold",
     // v0.10.1 — alert related-entity chips (session + device), macOS parity.
     "misc.session_label",
     "misc.device_label",

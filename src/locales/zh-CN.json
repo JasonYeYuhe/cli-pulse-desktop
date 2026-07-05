@@ -121,7 +121,8 @@
     "col_model": "模型",
     "col_input": "输入",
     "col_output": "输出",
-    "col_cost": "费用"
+    "col_cost": "费用",
+    "warn_threshold": "使用达 {{pct}}% 时警告"
   },
   "sessions": {
     "header": "{{active}} 活跃 · 扫描 {{total}} 个进程 · 刷新于 {{time}}",

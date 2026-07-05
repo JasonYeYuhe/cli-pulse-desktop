@@ -125,7 +125,8 @@
     "col_model": "Model",
     "col_input": "Input",
     "col_output": "Output",
-    "col_cost": "Cost"
+    "col_cost": "Cost",
+    "warn_threshold": "Warning at {{pct}}% used"
   },
   "sessions": {
     "header": "{{active}} active · {{total}} processes scanned · refreshed {{time}}",

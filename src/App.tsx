@@ -20,6 +20,11 @@ import {
   toggleHiddenProvider,
 } from "./lib/providerVisibility";
 import { providerColor, providerMonogram } from "./lib/providerTheme";
+import {
+  DEFAULT_WARN_THRESHOLDS,
+  warningFractions,
+  placeOnRemainingBar,
+} from "./lib/quotaMarkers";
 import appIcon from "./assets/app-icon.png";
 import "./App.css";
 
@@ -1872,6 +1877,30 @@ type CollectorStatus = {
   error: string | null;
 };
 
+// v1.30 F2a — warning-threshold ticks overlaid on a REMAINING-oriented quota
+// bar. An "80% used" tick sits at left:20% (1−f), matching the Mac's
+// QuotaBarMarkers.place(onRemainingBar:true). Render inside a `relative` bar
+// container, after the fill. (The expected-pace marker needs per-tier
+// windowMinutes the desktop doesn't carry yet — a gated follow-up.)
+function QuotaBarTicks({ thresholds = DEFAULT_WARN_THRESHOLDS }: { thresholds?: number[] }) {
+  const { t } = useTranslation();
+  const fracs = warningFractions(thresholds);
+  if (fracs.length === 0) return null;
+  return (
+    <>
+      {fracs.map((f) => (
+        <div
+          key={f}
+          className="absolute top-0 bottom-0 w-px bg-neutral-200/60"
+          style={{ left: `${placeOnRemainingBar(f) * 100}%` }}
+          title={t("providers.warn_threshold", { pct: Math.round(f * 100) })}
+          aria-hidden="true"
+        />
+      ))}
+    </>
+  );
+}
+
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -2365,11 +2394,12 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                               })}
                             </span>
                           </div>
-                          <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
+                          <div className="relative h-1.5 bg-neutral-800 rounded overflow-hidden">
                             <div
                               className={`h-full bg-gradient-to-r ${color}`}
                               style={{ width: `${Math.min(100, remainingPct)}%` }}
                             />
+                            <QuotaBarTicks />
                           </div>
                         </div>
                       );
@@ -2398,11 +2428,12 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                             })}
                           </span>
                         </div>
-                        <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
+                        <div className="relative h-1.5 bg-neutral-800 rounded overflow-hidden">
                           <div
                             className={`h-full bg-gradient-to-r ${color}`}
                             style={{ width: `${Math.min(100, remainingPct)}%` }}
                           />
+                          <QuotaBarTicks />
                         </div>
                       </div>
                     );
