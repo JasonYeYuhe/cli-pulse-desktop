@@ -1325,9 +1325,24 @@ pub async fn delete_user_account(user_jwt: &str) -> SupabaseResult<()> {
 pub struct HelperHeartbeatRequest<'a> {
     pub p_device_id: &'a str,
     pub p_helper_secret: &'a str,
+    /// Whole-device CPU utilisation, integer 0..=100.
     pub p_cpu_usage: i32,
+    /// Whole-device memory utilisation, integer 0..=100.
     pub p_memory_usage: i32,
     pub p_active_session_count: i32,
+    /// Per-provider managed-session plan map (`{"codex":"off_plan",…}`).
+    /// **Omit** (None) unless the desktop is actually a managed on-plan host
+    /// — the server coalesces NULL to the last-known value, so sending `{}`
+    /// on a transient failure would wrongly clear a phone's off-plan warning.
+    /// `skip_serializing_if` drops it from the JSON so the RPC default fires.
+    /// (Kept BEFORE `p_metrics` to mirror the SQL signature order.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p_provider_plan_status: Option<serde_json::Value>,
+    /// Machine-health metrics blob (v0.63 `device_sensors` keys, ≤8192 B).
+    /// Same omit-preserves-last-known discipline; populated by the sensor
+    /// sync slice, `None` here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p_metrics: Option<serde_json::Value>,
 }
 
 pub async fn helper_heartbeat(req: &HelperHeartbeatRequest<'_>) -> SupabaseResult<()> {
@@ -1797,5 +1812,47 @@ mod tests {
         assert_eq!(rows[0].estimated_cost, None);
         assert_eq!(rows[0].total_usage, None);
         assert_eq!(rows[0].requests, None);
+    }
+
+    #[test]
+    fn heartbeat_request_omits_none_coalesce_params() {
+        // v0.17.0 sends CPU/mem only; plan_status + metrics are None and MUST
+        // be dropped from the JSON so the RPC default (NULL) fires and the
+        // server's coalesce preserves any last-known values.
+        let req = HelperHeartbeatRequest {
+            p_device_id: "dev",
+            p_helper_secret: "secret",
+            p_cpu_usage: 42,
+            p_memory_usage: 71,
+            p_active_session_count: 3,
+            p_provider_plan_status: None,
+            p_metrics: None,
+        };
+        let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(v["p_cpu_usage"], 42);
+        assert_eq!(v["p_memory_usage"], 71);
+        assert_eq!(v["p_active_session_count"], 3);
+        let obj = v.as_object().unwrap();
+        assert!(
+            !obj.contains_key("p_provider_plan_status"),
+            "None must be omitted"
+        );
+        assert!(!obj.contains_key("p_metrics"), "None must be omitted");
+    }
+
+    #[test]
+    fn heartbeat_request_includes_some_coalesce_params() {
+        let req = HelperHeartbeatRequest {
+            p_device_id: "dev",
+            p_helper_secret: "secret",
+            p_cpu_usage: 0,
+            p_memory_usage: 0,
+            p_active_session_count: 0,
+            p_provider_plan_status: Some(json!({ "codex": "off_plan" })),
+            p_metrics: Some(json!({ "cpu_temp_c": 55 })),
+        };
+        let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(v["p_provider_plan_status"]["codex"], "off_plan");
+        assert_eq!(v["p_metrics"]["cpu_temp_c"], 55);
     }
 }

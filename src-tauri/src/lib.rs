@@ -1830,6 +1830,33 @@ async fn perform_sync(app: tauri::AppHandle) -> Result<SyncReport, String> {
     // focused on the sync orchestration.
     record_local_tray_snapshot(&scan);
 
+    // v0.17.0 — cross-device heartbeat. Report whole-device CPU%/mem% +
+    // active-session count to the `devices` row so the user's OTHER devices
+    // (phone / Mac) can show this machine's health. Best-effort and last:
+    // a heartbeat failure must NOT fail the sync (sessions / alerts / usage
+    // already landed). Rides the same 120s tick. `helper_sync` already marks
+    // the device Online; heartbeat adds cpu / mem / session-count — a benign
+    // double status-write (both set `now()`). `provider_plan_status` +
+    // `metrics` are None (the desktop isn't a managed on-plan host yet, and
+    // sensor sync is a later slice) → the server's coalesce preserves any
+    // last-known values rather than clobbering them.
+    let (cpu_pct, mem_pct) = async_runtime::spawn_blocking(machine::collect_load)
+        .await
+        .unwrap_or((0, 0));
+    if let Err(e) = supabase::helper_heartbeat(&supabase::HelperHeartbeatRequest {
+        p_device_id: &cfg.device_id,
+        p_helper_secret: &cfg.helper_secret,
+        p_cpu_usage: cpu_pct,
+        p_memory_usage: mem_pct,
+        p_active_session_count: snapshot.sessions.len() as i32,
+        p_provider_plan_status: None,
+        p_metrics: None,
+    })
+    .await
+    {
+        log::warn!("helper_heartbeat failed (non-fatal): {}", friendly(e));
+    }
+
     Ok(SyncReport {
         sessions_synced: hs.sessions_synced,
         alerts_synced: hs.alerts_synced,

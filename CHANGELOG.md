@@ -130,6 +130,23 @@ audit against the Mac app (v1.28).
     so the Machine tab's render path is exercised headlessly on
     Windows + Linux (no VM needed for a render-crash regression). On-device
     sensor *values* (real temps/battery) still warrant a laptop pass.
+- **Cross-device heartbeat** (`helper_heartbeat`, macOS/mobile parity). The
+  120s sync tick now reports this machine's **whole-device CPU% / memory% +
+  active-session count** to the `devices` row, so the user's **other** devices
+  (phone / Mac) can show this desktop's health — the "device health" pillar,
+  now populated from Windows/Linux. Wires the previously-dead `helper_heartbeat`
+  wrapper; **no schema change** (the RPC + columns are already live in prod —
+  signature verified directly against prod, not the repo `.sql`).
+  - `machine::collect_load` — a light global CPU%/mem% read (no process
+    enumeration / sensors) for the heartbeat; `HelperHeartbeatRequest` gains
+    `p_provider_plan_status` + `p_metrics` as `Option` with
+    `skip_serializing_if=None` (forward-compat for the sensor-sync slice),
+    both `None` here so the server's per-field **coalesce preserves last-known**
+    (never clobbers a phone's off-plan warning on a transient blip).
+  - Best-effort + last in the tick (a heartbeat failure never fails the sync);
+    rides the existing 120s cadence. `helper_sync` already marks the device
+    Online — heartbeat adds cpu/mem/session-count (a benign double `now()`
+    write). +3 tests (wire-shape omit/include + load range).
 
 ### Fixed
 

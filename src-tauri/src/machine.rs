@@ -194,6 +194,33 @@ fn collect_battery() -> Option<MachineBattery> {
     Some(MachineBattery { percent, state })
 }
 
+/// Lightweight whole-device load for the cross-device heartbeat: global
+/// CPU% + memory% as `i32` 0..=100. Cheaper than `collect_machine_snapshot`
+/// (no process enumeration, no Components, no battery), but still needs the
+/// two-sample CPU delay. Used by the 120s sync tick to populate
+/// `devices.cpu_usage` / `memory_usage` so the user's OTHER devices can show
+/// this machine's health.
+pub fn collect_load() -> (i32, i32) {
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
+    sys.refresh_cpu_specifics(CpuRefreshKind::everything());
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    sys.refresh_cpu_specifics(CpuRefreshKind::everything());
+    sys.refresh_memory();
+
+    let cpu = clamp_pct(sys.global_cpu_usage()).round() as i32;
+    let mem_total = sys.total_memory();
+    let mem = if mem_total > 0 {
+        clamp_pct((sys.used_memory() as f64 / mem_total as f64 * 100.0) as f32).round() as i32
+    } else {
+        0
+    };
+    (cpu.clamp(0, 100), mem.clamp(0, 100))
+}
+
 /// Clamp a percentage into 0..=100 and scrub NaN / Inf → 0. Defensive: a
 /// bad sysinfo sample serialized as NaN would break Tauri IPC (serde_json
 /// can't encode NaN) or render `undefined` in the UI — the v0.2.11
@@ -274,5 +301,12 @@ mod tests {
     fn top_n_is_respected() {
         let s = collect_machine_snapshot_top_n(3);
         assert!(s.top_processes.len() <= 3);
+    }
+
+    #[test]
+    fn collect_load_is_in_range() {
+        let (cpu, mem) = collect_load();
+        assert!((0..=100).contains(&cpu), "cpu {cpu}");
+        assert!((0..=100).contains(&mem), "mem {mem}");
     }
 }
