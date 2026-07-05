@@ -11,6 +11,7 @@ import {
   formatRelativeMinutes,
   formatRelativeShortParts,
   isStaleProviderRow,
+  lastNLocalDates,
   rowsToCsv,
   secondsToShortParts,
 } from "./lib/format";
@@ -1877,6 +1878,70 @@ type CollectorStatus = {
   error: string | null;
 };
 
+type DailyUsageRow = {
+  metric_date: string;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  cached_tokens: number;
+  output_tokens: number;
+  cost: number;
+};
+
+// v0.13.0 — per-provider 30-day I/O token history (macOS ProviderUsageHistory
+// parity). ioTokens = input + output EXCLUDING cached (the invariant); bars are
+// gap-filled over the last 30 LOCAL days so a paired account's chart matches the
+// Mac's. Server data (get_daily_usage) — empty state when not signed in / no
+// history rather than a fake chart.
+function ProviderUsageChart({
+  bars,
+  color,
+}: {
+  bars: { date: string; io: number }[];
+  color: string;
+}) {
+  const { t } = useTranslation();
+  const total = bars.reduce((s, b) => s + b.io, 0);
+  if (bars.length === 0 || total === 0) {
+    return <div className="text-xs text-neutral-500">{t("providers.chart_no_history")}</div>;
+  }
+  const max = Math.max(...bars.map((b) => b.io), 1);
+  const W = 100;
+  const H = 30;
+  const gap = 0.6;
+  const bw = (W - gap * (bars.length - 1)) / bars.length;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-xs text-neutral-400">{t("providers.chart_title")}</span>
+        <span className="text-[10px] text-neutral-600 tabular-nums">
+          {t("providers.chart_io_total", { value: formatInt(total) })}
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full h-10"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={t("providers.chart_title")}
+      >
+        {bars.map((b, i) => {
+          const h = b.io > 0 ? Math.max(0.75, (b.io / max) * H) : 0;
+          return (
+            <rect key={b.date} x={i * (bw + gap)} y={H - h} width={bw} height={h} fill={color} opacity={0.85}>
+              <title>{`${b.date}: ${formatInt(b.io)}`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+      <div className="flex justify-between text-[10px] text-neutral-600 mt-0.5 tabular-nums">
+        <span>{bars[0]?.date}</span>
+        <span>{bars[bars.length - 1]?.date}</span>
+      </div>
+    </div>
+  );
+}
+
 // v1.30 F2a — warning-threshold ticks overlaid on a REMAINING-oriented quota
 // bar. An "80% used" tick sits at left:20% (1−f), matching the Mac's
 // QuotaBarMarkers.place(onRemainingBar:true). Render inside a `relative` bar
@@ -1904,6 +1969,52 @@ function QuotaBarTicks({ thresholds = DEFAULT_WARN_THRESHOLDS }: { thresholds?: 
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // v0.13.0 — per-provider 30-day usage history (server read; sign-in
+  // required). Fetched once when paired; the chart renders in each provider's
+  // expanded section. null = not yet loaded / not paired.
+  const [dailyUsage, setDailyUsage] = useState<DailyUsageRow[] | null>(null);
+  useEffect(() => {
+    if (!paired) {
+      setDailyUsage(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<DailyUsageRow[]>("get_daily_usage", { days: 30 })
+      .then((rows) => {
+        if (!cancelled) setDailyUsage(rows);
+      })
+      .catch(() => {
+        // Non-fatal (offline / not signed in) — show the empty state.
+        if (!cancelled) setDailyUsage([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [paired]);
+  // Aggregate to per-provider gap-filled 30-day I/O bars. ioTokens =
+  // input + output EXCLUDING cached (the cross-platform invariant); bucket on
+  // the LOCAL metric_date (the server already buckets by user-local day).
+  const chartByProvider = useMemo(() => {
+    const dates = lastNLocalDates(30);
+    const idx = new Map(dates.map((d, i) => [d, i]));
+    const perProvider = new Map<string, number[]>();
+    for (const r of dailyUsage ?? []) {
+      const i = idx.get(r.metric_date);
+      if (i === undefined) continue;
+      const io = (r.input_tokens || 0) + (r.output_tokens || 0);
+      const arr = perProvider.get(r.provider) ?? new Array(30).fill(0);
+      arr[i] += io;
+      perProvider.set(r.provider, arr);
+    }
+    const out = new Map<string, { date: string; io: number }[]>();
+    for (const [prov, arr] of perProvider) {
+      out.set(
+        prov,
+        arr.map((io, i) => ({ date: dates[i], io })),
+      );
+    }
+    return out;
+  }, [dailyUsage]);
   // v0.10.1 — per-provider visibility filter. Users with several paired
   // providers can mute the ones they don't track. Persisted to
   // localStorage as the HIDDEN set (so a provider that only starts
@@ -2470,6 +2581,12 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {isOpen && (
+              <div className="px-4 pb-4 pt-1 border-t border-neutral-800/50">
+                <ProviderUsageChart bars={chartByProvider.get(v.provider) ?? []} color={color} />
               </div>
             )}
           </div>

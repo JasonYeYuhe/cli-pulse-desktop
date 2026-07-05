@@ -96,6 +96,10 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "providers.all_hidden",
     // v1.30 F2a — quota-bar warning-threshold tick tooltip.
     "providers.warn_threshold",
+    // v0.13.0 — per-provider 30-day usage chart.
+    "providers.chart_title",
+    "providers.chart_no_history",
+    "providers.chart_io_total",
     // v0.10.1 — alert related-entity chips (session + device), macOS parity.
     "misc.session_label",
     "misc.device_label",

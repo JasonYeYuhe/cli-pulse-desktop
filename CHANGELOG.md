@@ -171,6 +171,20 @@ audit against the Mac app (v1.28).
     That's a follow-up under plan §5 — either add `windowMinutes` to the
     collectors (PATH A, couples to provider-window constants) or the
     server-side `window_minutes` plumbing (an ask-first shared-schema change).
+- **Per-provider 30-day usage chart** (macOS `ProviderUsageHistory` parity).
+  Expanding a provider card now shows a **30-day I/O-token history** mini
+  bar-chart (gap-filled, brand-colored, per-day tooltip). Data from the
+  already-wired `get_daily_usage(30)` server read; first frontend consumer.
+  - **Wire invariant:** `ioTokens = input + output` **EXCLUDING `cached_tokens`**
+    (add cache reads and the magnitudes diverge from Mac); buckets on the
+    **LOCAL** `metric_date` via `lastNLocalDates` (the server buckets by the
+    user's local day — using UTC here is the recurring "today invisible for
+    hours" TZ trap). Honest empty state ("Not enough history yet.") when not
+    signed in or no history — never a fabricated chart.
+  - `localYMD` + `lastNLocalDates` helpers added to `format.ts` (+3 TZ-safe
+    tests — injectable `from` date so they don't depend on the runner's
+    timezone). `ProviderUsageChart` SVG component; 3 i18n keys × 3 langs,
+    pinned. 87 frontend tests; no backend change.
 
 ### Fixed
 

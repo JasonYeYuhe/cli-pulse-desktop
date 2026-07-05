@@ -3,6 +3,8 @@ import {
   csvEscape,
   formatBytes,
   formatInt,
+  lastNLocalDates,
+  localYMD,
   formatRelativeMinutes,
   formatRelativeShort,
   formatRelativeShortParts,
@@ -363,5 +365,30 @@ describe("formatBytes", () => {
     expect(formatBytes(NaN)).toBe("—");
     expect(formatBytes(Infinity)).toBe("—");
     expect(formatBytes(-1)).toBe("—");
+  });
+});
+
+describe("localYMD / lastNLocalDates", () => {
+  // TZ-independent: constructing a LOCAL Date and reading local components
+  // round-trips regardless of the runner's timezone.
+  it("localYMD zero-pads month/day in local time", () => {
+    expect(localYMD(new Date(2026, 0, 5))).toBe("2026-01-05");
+    expect(localYMD(new Date(2026, 11, 31))).toBe("2026-12-31");
+  });
+
+  it("lastNLocalDates returns n ascending dates ending at `from`", () => {
+    expect(lastNLocalDates(3, new Date(2026, 0, 5))).toEqual([
+      "2026-01-03",
+      "2026-01-04",
+      "2026-01-05",
+    ]);
+  });
+
+  it("lastNLocalDates crosses a month boundary correctly (2026 not leap)", () => {
+    expect(lastNLocalDates(3, new Date(2026, 2, 1))).toEqual([
+      "2026-02-27",
+      "2026-02-28",
+      "2026-03-01",
+    ]);
   });
 });

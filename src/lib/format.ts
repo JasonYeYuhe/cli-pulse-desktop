@@ -47,6 +47,32 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * `yyyy-MM-dd` in the LOCAL timezone (not UTC). The server buckets
+ * `daily_usage.metric_date` by the user's local day, so any client-side
+ * gap-fill MUST bucket the same way — using UTC here is the recurring
+ * "today's data invisible for hours" dashboard TZ bug.
+ */
+export function localYMD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * The last `n` local dates ending at `from` (inclusive), ascending. `from`
+ * defaults to now; it's injectable so tests stay timezone-independent
+ * (constructing a local `Date` and reading local components round-trips).
+ */
+export function lastNLocalDates(n: number, from: Date = new Date()): string[] {
+  const out: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    out.push(localYMD(new Date(from.getFullYear(), from.getMonth(), from.getDate() - i)));
+  }
+  return out;
+}
+
+/**
  * RFC 4180 CSV cell escaper. Handles:
  * - null / undefined → empty cell
  * - cells containing a comma, quote, CR, or LF are wrapped in quotes

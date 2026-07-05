@@ -126,7 +126,10 @@
     "col_input": "Input",
     "col_output": "Output",
     "col_cost": "Cost",
-    "warn_threshold": "Warning at {{pct}}% used"
+    "warn_threshold": "Warning at {{pct}}% used",
+    "chart_title": "30-day usage",
+    "chart_no_history": "Not enough history yet.",
+    "chart_io_total": "{{value}} I/O tokens"
   },
   "sessions": {
     "header": "{{active}} active · {{total}} processes scanned · refreshed {{time}}",
