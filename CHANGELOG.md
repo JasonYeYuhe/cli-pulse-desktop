@@ -305,6 +305,29 @@ audit against the Mac app (v1.28).
     MiniMax key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
     collector. Configure a key in Settings to exercise it live.
 
+- **Moonshot (Kimi platform) balance collector** (v0.15 provider batch #5 — port of macOS
+  `MoonshotCollector`). Adds Moonshot as an 11th provider: reads the api-key (Settings →
+  Integrations, or env `MOONSHOT_API_KEY`), fetches `GET {base}/v1/users/me/balance`, and
+  maps the developer-platform USD balance to tiers. This is the **developer-platform**
+  balance (api-key), distinct from the consumer Kimi chat app. Pure uncapped balance (like
+  DeepSeek): the available balance drives a full-bar gauge; positive voucher/cash components
+  are informational full tiers (negative cash/deficit skipped). Base overridable via env
+  `MOONSHOT_API_BASE` (default `api.moonshot.ai`; China: `api.moonshot.cn`). Honors the
+  Chinese-API success gate (`code == 0 && status == true`).
+  - **Unit scale — `× 100_000`, not cents.** The Mac Moonshot collector encodes USD as
+    `round(usd × 100_000)` on the shared `(user_id, "Moonshot")` row; the desktop mirrors that
+    exact scale so a dual-writer (Mac + desktop, same key) converges instead of flip-flopping
+    the balance 1000× per sync. (Each desktop collector matches its own Mac twin's scale —
+    DeepSeek↔cents, Moonshot↔units.)
+  - `src-tauri/src/quota/moonshot.rs` (6 gate/scale/tier unit tests) + `collect_all` wiring +
+    `PROVIDER_MOONSHOT = "Moonshot"` (validated against the Mac `ProviderKind` snapshot).
+    `moonshot_api_key` added through `provider_creds` (OS-keychain + file + migration + wipe)
+    and a new **Settings → Integrations** input row (+2 i18n keys × 3). Provider literal
+    `"Moonshot"` matches the Mac rawValue so the dual-writer converges on one row.
+  - **Verification posture:** parse/gate/scale fully unit-tested; the **live fetch needs a
+    real Moonshot key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 ### Internal
 
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**

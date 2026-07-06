@@ -303,7 +303,9 @@
       "crof_api_key_label": "Crof API 密钥",
       "crof_api_key_help": "来自 crof.ai 的 Bearer 密钥(CROF_API_KEY)—— 显示请求配额与余额。",
       "minimax_api_key_label": "MiniMax API 密钥",
-      "minimax_api_key_help": "来自 MiniMax 的 Bearer 密钥(MINIMAX_API_KEY)—— 显示你的编程套餐配额。"
+      "minimax_api_key_help": "来自 MiniMax 的 Bearer 密钥(MINIMAX_API_KEY)—— 显示你的编程套餐配额。",
+      "moonshot_api_key_label": "Moonshot API 密钥",
+      "moonshot_api_key_help": "来自 Moonshot / Kimi 开放平台的 Bearer 密钥(MOONSHOT_API_KEY)—— 显示你的余额。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

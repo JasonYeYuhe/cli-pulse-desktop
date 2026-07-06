@@ -1587,6 +1587,7 @@ struct ProviderCredsView {
     zai_api_key_set: bool,
     crof_api_key_set: bool,
     minimax_api_key_set: bool,
+    moonshot_api_key_set: bool,
     /// Optional override for OpenRouter's API URL — NOT secret, returned
     /// plaintext so the Settings UI can show the current custom endpoint
     /// (or empty if using default openrouter.ai).
@@ -1605,6 +1606,7 @@ struct ProviderCredsView {
     env_override_zai: bool,
     env_override_crof: bool,
     env_override_minimax: bool,
+    env_override_moonshot: bool,
     /// v0.4.20 — surface the active storage backend ("os_keychain" or
     /// "file") inside the Settings → Integrations panel itself. v0.4.16
     /// already exposed this on `DiagnosticSnapshot`, but a Linux user
@@ -1628,6 +1630,7 @@ struct ProviderCredsUpdate {
     zai_api_key: Option<String>,
     crof_api_key: Option<String>,
     minimax_api_key: Option<String>,
+    moonshot_api_key: Option<String>,
 }
 
 fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
@@ -1643,6 +1646,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         zai_api_key_set: c.zai_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         crof_api_key_set: c.crof_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         minimax_api_key_set: c.minimax_api_key.as_deref().is_some_and(|s| !s.is_empty()),
+        moonshot_api_key_set: c.moonshot_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         openrouter_base_url: c.openrouter_base_url.clone(),
         env_override_cursor: env_set("CURSOR_COOKIE"),
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
@@ -1652,6 +1656,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         env_override_zai: env_set("Z_AI_API_KEY"),
         env_override_crof: env_set("CROF_API_KEY"),
         env_override_minimax: env_set("MINIMAX_API_KEY"),
+        env_override_moonshot: env_set("MOONSHOT_API_KEY"),
         storage_backend: provider_creds::current_backend(),
     }
 }
@@ -1693,6 +1698,9 @@ async fn set_provider_creds(
     }
     if let Some(v) = update.minimax_api_key {
         current.minimax_api_key = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.moonshot_api_key {
+        current.moonshot_api_key = if v.is_empty() { None } else { Some(v) };
     }
     provider_creds::save(&current).map_err(|e| e.to_string())?;
     // Emit event so the background sync loop (or any other listener) can
