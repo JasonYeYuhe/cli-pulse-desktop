@@ -254,20 +254,65 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
 mod tests {
     use super::*;
 
-    /// Snapshot of `cli pulse/CLI Pulse Bar/CLIPulseCore/Sources/CLIPulseCore/Models.swift:10-37`
-    /// captured 2026-05-02. Re-sync this manually when Mac adds a new
-    /// provider that Win/Linux ships — there is no compile-time link
-    /// between the Swift enum and these Rust constants. The contract
-    /// test below catches the case where the Rust constants drift
-    /// from this snapshot, but does NOT catch a Mac-side rename
-    /// (that's caught by users seeing duplicate rows and reporting it).
+    /// Snapshot of the Mac `ProviderKind` provider rawValues
+    /// (`cli pulse/CLI Pulse Bar/CLIPulseCore/Sources/CLIPulseCore/Models.swift`).
+    /// **Refreshed 2026-07-06 to the FULL provider set** (Codex P2) — the
+    /// STATUS/session-state cases (`Running`/`Idle`/`Online`/`Degraded`/…)
+    /// are deliberately excluded (they aren't providers). There's no
+    /// compile-time link between the Swift enum and these Rust constants;
+    /// the contract test below catches a Rust-constant drift, and pre-loading
+    /// the full set means each new collector's literal is validated against
+    /// the real Mac contract rather than a stale 6-entry list — so the
+    /// dual-writer never forks the `(user_id, provider)` PK. Re-sync when
+    /// Mac adds a provider that Win/Linux ships.
     const MAC_PROVIDER_KIND_SNAPSHOT: &[(&str, &str)] = &[
         ("codex", "Codex"),
         ("gemini", "Gemini"),
         ("claude", "Claude"),
         ("cursor", "Cursor"),
+        ("openCode", "OpenCode"),
+        ("droid", "Droid"),
+        ("antigravity", "Antigravity"),
         ("copilot", "Copilot"),
+        ("zai", "z.ai"),
+        ("minimax", "MiniMax"),
+        ("augment", "Augment"),
+        ("jetbrainsAI", "JetBrains AI"),
+        ("amp", "Amp"),
+        ("synthetic", "Synthetic"),
+        ("warp", "Warp"),
+        ("kilo", "Kilo"),
+        ("ollama", "Ollama"),
         ("openRouter", "OpenRouter"),
+        ("alibaba", "Alibaba"),
+        ("kimi", "Kimi"),
+        ("kiro", "Kiro"),
+        ("vertexAI", "Vertex AI"),
+        ("perplexity", "Perplexity"),
+        ("volcanoEngine", "Volcano Engine"),
+        ("glm", "GLM"),
+        ("crof", "Crof"),
+        ("deepseek", "DeepSeek"),
+        ("elevenLabs", "ElevenLabs"),
+        ("venice", "Venice"),
+        ("azureOpenAI", "Azure OpenAI"),
+        ("codebuff", "Codebuff"),
+        ("deepgram", "Deepgram"),
+        ("manus", "Manus"),
+        ("abacus", "Abacus AI"),
+        ("mistral", "Mistral"),
+        ("commandCode", "Command Code"),
+        ("groq", "Groq"),
+        ("moonshot", "Moonshot"),
+        ("llmProxy", "LLM Proxy"),
+        ("openaiAdmin", "OpenAI Admin"),
+        ("stepfun", "StepFun"),
+        ("mimo", "MiMo"),
+        ("bedrock", "AWS Bedrock"),
+        ("alibabaTokenPlan", "Alibaba Token Plan"),
+        ("windsurf", "Windsurf"),
+        ("openCodeGo", "OpenCode Go"),
+        ("grok", "Grok"),
     ];
 
     #[test]
@@ -291,6 +336,32 @@ mod tests {
                  ProviderKind raw value is `{}` — dual-writer would land on \
                  different (user_id, provider) PKs",
                 mac_entry.1
+            );
+        }
+    }
+
+    #[test]
+    fn mac_snapshot_is_unique_and_covers_implemented() {
+        // Catch a hand-transcription duplicate in the full 47-provider set.
+        let mut seen = std::collections::HashSet::new();
+        for (case, name) in MAC_PROVIDER_KIND_SNAPSHOT {
+            assert!(seen.insert(*name), "duplicate rawValue in snapshot: {name}");
+            // rawValues are non-empty and case ids are non-empty.
+            assert!(!name.is_empty() && !case.is_empty());
+        }
+        // Every currently-shipped collector's literal must be in the snapshot
+        // (so a future refresh can't silently drop one we rely on).
+        for want in [
+            PROVIDER_CLAUDE,
+            PROVIDER_CODEX,
+            PROVIDER_CURSOR,
+            PROVIDER_GEMINI,
+            PROVIDER_COPILOT,
+            PROVIDER_OPENROUTER,
+        ] {
+            assert!(
+                MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),
+                "implemented provider `{want}` missing from Mac snapshot"
             );
         }
     }

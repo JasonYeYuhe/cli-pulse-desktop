@@ -206,6 +206,17 @@ audit against the Mac app (v1.28).
     `get_devices` mirrors the `get_sessions_history` GET. 4 fleet i18n keys +
     states × 3 langs, pinned. +1 Rust test.
 
+### Internal
+
+- **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
+  (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
+  stale 6-entry list; it now mirrors the whole Mac provider enum (status/session
+  cases excluded) so each *future* quota collector's provider literal is
+  validated against the real contract — a hard guard against a dual-writer
+  forking the `(user_id, provider)` PK on a casing/spacing typo (`z.ai`,
+  `Vertex AI`, `Abacus AI`, `AWS Bedrock`…). +1 uniqueness/coverage test. This
+  is the prep step before the provider-expansion batch (v0.15+).
+
 ### Fixed
 
 - **Claude family-fallback pricing** (`pricing.rs`) — a Claude model id
