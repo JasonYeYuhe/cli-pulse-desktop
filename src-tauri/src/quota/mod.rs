@@ -34,6 +34,7 @@ pub mod cursor;
 pub mod deepseek;
 pub mod gemini;
 pub mod gemini_refresh;
+pub mod minimax;
 pub mod openrouter;
 pub mod zai;
 
@@ -55,6 +56,7 @@ pub const PROVIDER_OPENROUTER: &str = "OpenRouter";
 pub const PROVIDER_DEEPSEEK: &str = "DeepSeek";
 pub const PROVIDER_ZAI: &str = "z.ai";
 pub const PROVIDER_CROF: &str = "Crof";
+pub const PROVIDER_MINIMAX: &str = "MiniMax";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -199,6 +201,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_DEEPSEEK, tokio::spawn(deepseek::collect())), // @allow tokio-spawn
         (PROVIDER_ZAI, tokio::spawn(zai::collect())),       // @allow tokio-spawn
         (PROVIDER_CROF, tokio::spawn(crof::collect())),     // @allow tokio-spawn
+        (PROVIDER_MINIMAX, tokio::spawn(minimax::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -336,6 +339,7 @@ mod tests {
             ("deepseek", PROVIDER_DEEPSEEK),
             ("zai", PROVIDER_ZAI),
             ("crof", PROVIDER_CROF),
+            ("minimax", PROVIDER_MINIMAX),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -373,6 +377,7 @@ mod tests {
             PROVIDER_DEEPSEEK,
             PROVIDER_ZAI,
             PROVIDER_CROF,
+            PROVIDER_MINIMAX,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

@@ -283,6 +283,28 @@ audit against the Mac app (v1.28).
     endpoint/auth ported from the proven Mac collector. Configure a key in Settings to
     exercise it live.
 
+- **MiniMax quota collector** (v0.15 provider batch #4 — port of macOS `MiniMaxCollector`).
+  Adds MiniMax as a 10th provider: reads the api-key (Settings → Integrations, or env
+  `MINIMAX_API_KEY`), fetches `GET api.minimax.io/v1/coding_plan/remains`, and maps the
+  flat `{model_remains, total, end_time|remains_time}` to a single **Coding Plan** tier
+  (`quota = total`, `remaining = model_remains`, reset passed through verbatim — `end_time`
+  wins over `remains_time`, matching the Mac). Host overridable via env `MINIMAX_HOST`, or
+  the whole URL via `MINIMAX_REMAINS_URL`.
+  - **API-token path only.** The Mac collector also has a cookie-auth fallback, but its own
+    docs call cookie auth "less reliable (MiniMax often returns HTTP 1004 with cookies
+    alone)" and the desktop credential model is api-key-based — so we carry over the
+    preferred, most-stable token path. Sends the Mac's `MM-API-Source` client-attribution
+    header verbatim to avoid any source-based surprise.
+  - `src-tauri/src/quota/minimax.rs` (5 parse/coalesce/floor/URL unit tests) + `collect_all`
+    wiring + `PROVIDER_MINIMAX = "MiniMax"` (validated against the Mac `ProviderKind`
+    snapshot). `minimax_api_key` added through `provider_creds` (OS-keychain + file +
+    migration + wipe) and a new **Settings → Integrations** input row (+2 i18n keys × 3).
+    Provider literal `"MiniMax"` matches the Mac rawValue so the dual-writer converges on
+    one `(user_id, provider)` row.
+  - **Verification posture:** parse/mapping fully unit-tested; the **live fetch needs a real
+    MiniMax key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 ### Internal
 
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**

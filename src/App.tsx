@@ -3202,6 +3202,7 @@ type ProviderCredsView = {
   deepseek_api_key_set: boolean;
   zai_api_key_set: boolean;
   crof_api_key_set: boolean;
+  minimax_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3210,6 +3211,7 @@ type ProviderCredsView = {
   env_override_deepseek: boolean;
   env_override_zai: boolean;
   env_override_crof: boolean;
+  env_override_minimax: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3225,7 +3227,8 @@ type ProviderCredsUpdateKey =
   | "openrouter_base_url"
   | "deepseek_api_key"
   | "zai_api_key"
-  | "crof_api_key";
+  | "crof_api_key"
+  | "minimax_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3341,6 +3344,15 @@ function IntegrationsSection() {
       isSet: view.crof_api_key_set,
       envOverride: view.env_override_crof,
       envVar: "CROF_API_KEY",
+    },
+    {
+      provider: "MiniMax",
+      key: "minimax_api_key",
+      labelKey: "settings.integrations.minimax_api_key_label",
+      helpKey: "settings.integrations.minimax_api_key_help",
+      isSet: view.minimax_api_key_set,
+      envOverride: view.env_override_minimax,
+      envVar: "MINIMAX_API_KEY",
     },
   ];
 
