@@ -468,6 +468,35 @@ audit against the Mac app (v1.28).
     fetch needs a real `kimi-auth` token so it can't be CI-verified** — endpoint/auth ported from the
     proven Mac collector. Paste a token in Settings to exercise it live.
 
+- **Grok usage collector** (v0.16 — gRPC-web, port of macOS `GrokCollector`). Adds Grok as a 20th
+  provider — and the first **gRPC-web + protobuf** collector. `POST`s an empty gRPC-web frame to
+  `grok.com/…/GetGrokCreditsConfig` with a session cookie (Settings paste / env `GROK_COOKIE`) or a
+  Bearer token (env `GROK_TOKEN`), then heuristically scans the **schema-less protobuf** response: the
+  used-percent is the `fixed32`/Float whose field path ends in `1` (0…100, shallowest then earliest);
+  the reset is a future unix-timestamp varint (seconds or millis), preferring path `[1,5,1]`. Maps to a
+  Credits `%`-gauge (`.quota`); degrades to a 0/0 "connected" snapshot if no percent is found. gRPC-web
+  framing, the recursive protobuf wire scanner, and the field-path heuristics are ported **verbatim**
+  from the proven Mac collector, and grpc-status is validated from both HTTP headers and trailer frames.
+  - `src-tauri/src/quota/grok.rs` (9 unit tests over synthetic gRPC-web/protobuf frames: percent extract,
+    reset at `[1,5,1]`, millis division, no-usage-yet, combined→tier, status-only degrade, frame
+    splitting, grpc-status rejection, empty-payload) + `collect_all` wiring + `PROVIDER_GROK = "Grok"`.
+    New `grok_cookie` cred through `provider_creds` (OS-keychain + file + migration + wipe) and a
+    **Settings → Integrations** cookie-paste row (+2 i18n keys × 3).
+  - **Verification posture:** the byte-level scanner + framing are exhaustively unit-tested against
+    synthetic frames, but the **schema-less field-path heuristics were reverse-engineered against real
+    Grok responses that CI can't reach** — a live grok.com cookie is the only true end-to-end check
+    (same caveat as every collector, amplified by the schema-less parse). Paste a cookie in Settings to
+    exercise it live.
+
+### Provider coverage note
+
+With Grok, **every Mac `ProviderKind` case that maps to the desktop's tier-based `QuotaSnapshot` is now
+ported** — 14 net-new collectors this cycle (DeepSeek, z.ai, Crof, MiniMax, Moonshot, Venice, Kimi K2,
+Augment, Perplexity, T3 Chat, StepFun, Warp, Kimi, Grok) across api-key REST, cookie-session, JSON
+connect-RPC, GraphQL, and gRPC-web transports. The only remaining Mac collectors are the
+**`statusOnly`** ones (GLM, Volcano Engine, Groq, Mistral, Deepgram) — deferred until the desktop
+`QuotaSnapshot` gains a `status_text` concept, since they carry no numeric gauge to render.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session

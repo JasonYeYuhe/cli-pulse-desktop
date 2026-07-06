@@ -72,6 +72,7 @@ const ACCT_T3CHAT: &str = "t3chat-cookie";
 const ACCT_STEPFUN: &str = "stepfun-cookie";
 const ACCT_WARP: &str = "warp-api-key";
 const ACCT_KIMI: &str = "kimi-auth-token";
+const ACCT_GROK: &str = "grok-cookie";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -134,6 +135,10 @@ pub struct ProviderCreds {
     /// masked in `ProviderCredsView`.
     #[serde(default)]
     pub kimi_auth_token: Option<String>,
+    /// Grok (grok.com) session cookie (not an api-key). Secret — masked in
+    /// `ProviderCredsView`.
+    #[serde(default)]
+    pub grok_cookie: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -161,6 +166,7 @@ impl Default for ProviderCreds {
             stepfun_cookie: None,
             warp_api_key: None,
             kimi_auth_token: None,
+            grok_cookie: None,
         }
     }
 }
@@ -275,6 +281,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         stepfun_cookie: keychain::read_at(ACCT_STEPFUN).ok().flatten(),
         warp_api_key: keychain::read_at(ACCT_WARP).ok().flatten(),
         kimi_auth_token: keychain::read_at(ACCT_KIMI).ok().flatten(),
+        grok_cookie: keychain::read_at(ACCT_GROK).ok().flatten(),
     })
 }
 
@@ -322,6 +329,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_STEPFUN, creds.stepfun_cookie.as_deref())?;
     set_or_clear_keychain(ACCT_WARP, creds.warp_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_KIMI, creds.kimi_auth_token.as_deref())?;
+    set_or_clear_keychain(ACCT_GROK, creds.grok_cookie.as_deref())?;
     Ok(())
 }
 
@@ -414,6 +422,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_STEPFUN,
         ACCT_WARP,
         ACCT_KIMI,
+        ACCT_GROK,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -524,6 +533,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.stepfun_cookie.as_deref(),
             v1.warp_api_key.as_deref(),
             v1.kimi_auth_token.as_deref(),
+            v1.grok_cookie.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -554,6 +564,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         stepfun_cookie: None,
         warp_api_key: None,
         kimi_auth_token: None,
+        grok_cookie: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -600,6 +611,7 @@ mod tests {
             stepfun_cookie: None,
             warp_api_key: None,
             kimi_auth_token: None,
+            grok_cookie: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -685,6 +697,7 @@ mod tests {
             stepfun_cookie: None,
             warp_api_key: None,
             kimi_auth_token: None,
+            grok_cookie: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -745,6 +758,7 @@ mod tests {
                 stepfun_cookie: None,
                 warp_api_key: None,
                 kimi_auth_token: None,
+                grok_cookie: None,
             },
         );
         assert!(path.exists());
@@ -780,6 +794,7 @@ mod tests {
                 stepfun_cookie: None,
                 warp_api_key: None,
                 kimi_auth_token: None,
+                grok_cookie: None,
             },
         );
         assert!(path.exists());
@@ -831,6 +846,7 @@ mod tests {
                 stepfun_cookie: None,
                 warp_api_key: None,
                 kimi_auth_token: None,
+                grok_cookie: None,
             },
         );
         assert!(path_v1.exists());

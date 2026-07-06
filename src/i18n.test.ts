@@ -121,6 +121,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Kimi collector (v0.16 — connect-JSON token) — Settings input row.
     "settings.integrations.kimi_auth_token_label",
     "settings.integrations.kimi_auth_token_help",
+    // Grok collector (v0.16 — gRPC-web cookie) — Settings cookie-paste row.
+    "settings.integrations.grok_cookie_label",
+    "settings.integrations.grok_cookie_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",
