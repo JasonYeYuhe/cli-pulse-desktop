@@ -88,6 +88,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // z.ai collector (v0.15 provider batch) — Settings input row.
     "settings.integrations.zai_api_key_label",
     "settings.integrations.zai_api_key_help",
+    // Crof collector (v0.15 provider batch) — Settings input row.
+    "settings.integrations.crof_api_key_label",
+    "settings.integrations.crof_api_key_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

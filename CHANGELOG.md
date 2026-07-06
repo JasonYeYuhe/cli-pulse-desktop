@@ -261,6 +261,28 @@ audit against the Mac app (v1.28).
     are ported from the proven Mac collector. Configure a key in Settings to
     exercise it live.
 
+- **Crof quota collector** (v0.15 provider batch #3 — port of macOS `CrofCollector`,
+  itself from steipete/CodexBar MIT). Adds Crof as a 9th provider: reads the api-key
+  (Settings → Integrations, or env `CROF_API_KEY`), fetches `GET crof.ai/usage_api/`,
+  and maps `{credits, requests_plan, usable_requests}` to tiers. Requests are the real
+  **depleting quota** (`quota = requests_plan`, `remaining = clamp(usable_requests, 0,
+  plan)`), resetting at the next **America/Chicago local midnight** (DST-safe). The
+  uncapped credit balance — which the Mac surfaces in a `status_text` the desktop
+  snapshot doesn't have — is surfaced as a second full **Credits** tier
+  (`quota == remaining`), the same convention DeepSeek uses for pure balances.
+  - `src-tauri/src/quota/crof.rs` (6 parse/clamp/reset unit tests, `now` injectable so
+    the Chicago-midnight reset is deterministic — mirrors the Mac's Gemini-C1 fix) +
+    `collect_all` wiring + `PROVIDER_CROF = "Crof"` (validated against the Mac
+    `ProviderKind` snapshot). New **`chrono-tz`** dep (pure-Rust IANA tz data,
+    `default-features=false`, no system libs) for the DST-safe reset. `crof_api_key`
+    added through `provider_creds` (OS-keychain + file + migration + wipe) and a new
+    **Settings → Integrations** input row (+2 i18n keys × 3). Provider literal `"Crof"`
+    matches the Mac rawValue so the dual-writer converges on one `(user_id, provider)` row.
+  - **Verification posture:** parse/clamp/reset fully unit-tested (incl. CDT & CST reset
+    instants); the **live fetch needs a real Crof key so it can't be CI-verified** —
+    endpoint/auth ported from the proven Mac collector. Configure a key in Settings to
+    exercise it live.
+
 ### Internal
 
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**

@@ -299,7 +299,9 @@
       "deepseek_api_key_label": "DeepSeek API 密钥",
       "deepseek_api_key_help": "来自 platform.deepseek.com 的 Bearer 密钥 —— 显示你的余额。",
       "zai_api_key_label": "z.ai API 密钥",
-      "zai_api_key_help": "来自 z.ai 的 Bearer 密钥(Z_AI_API_KEY)—— 显示你的配额。"
+      "zai_api_key_help": "来自 z.ai 的 Bearer 密钥(Z_AI_API_KEY)—— 显示你的配额。",
+      "crof_api_key_label": "Crof API 密钥",
+      "crof_api_key_help": "来自 crof.ai 的 Bearer 密钥(CROF_API_KEY)—— 显示请求配额与余额。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

@@ -299,7 +299,9 @@
       "deepseek_api_key_label": "DeepSeek API キー",
       "deepseek_api_key_help": "platform.deepseek.com の Bearer キー — 残高を表示します。",
       "zai_api_key_label": "z.ai API キー",
-      "zai_api_key_help": "z.ai の Bearer キー(Z_AI_API_KEY)— クォータを表示します。"
+      "zai_api_key_help": "z.ai の Bearer キー(Z_AI_API_KEY)— クォータを表示します。",
+      "crof_api_key_label": "Crof API キー",
+      "crof_api_key_help": "crof.ai の Bearer キー(CROF_API_KEY)— リクエスト枠と残高を表示します。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

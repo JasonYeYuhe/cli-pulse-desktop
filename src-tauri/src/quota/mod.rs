@@ -29,6 +29,7 @@ pub mod claude;
 pub mod claude_refresh;
 pub mod codex;
 pub mod copilot;
+pub mod crof;
 pub mod cursor;
 pub mod deepseek;
 pub mod gemini;
@@ -53,6 +54,7 @@ pub const PROVIDER_COPILOT: &str = "Copilot";
 pub const PROVIDER_OPENROUTER: &str = "OpenRouter";
 pub const PROVIDER_DEEPSEEK: &str = "DeepSeek";
 pub const PROVIDER_ZAI: &str = "z.ai";
+pub const PROVIDER_CROF: &str = "Crof";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -182,7 +184,7 @@ pub fn last_outcomes() -> Vec<CollectorOutcome> {
 /// guarantee as v0.4.3 (Codex 2026-05-02 review).
 pub async fn collect_all() -> Vec<CollectorOutcome> {
     type CollectFut = tokio::task::JoinHandle<Result<Option<QuotaSnapshot>, CollectorError>>;
-    // @allow tokio-spawn for the next 6 lines: these run inside an
+    // @allow tokio-spawn for the spawn lines below: these run inside an
     // async fn called from a Tauri command, which always has the
     // Tauri tokio runtime entered. The v0.9.1a pre-push guard
     // protects against tokio::spawn in SYNC contexts (like Tauri's
@@ -196,6 +198,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_OPENROUTER, tokio::spawn(openrouter::collect())), // @allow tokio-spawn
         (PROVIDER_DEEPSEEK, tokio::spawn(deepseek::collect())), // @allow tokio-spawn
         (PROVIDER_ZAI, tokio::spawn(zai::collect())),       // @allow tokio-spawn
+        (PROVIDER_CROF, tokio::spawn(crof::collect())),     // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -332,6 +335,7 @@ mod tests {
             ("openRouter", PROVIDER_OPENROUTER),
             ("deepseek", PROVIDER_DEEPSEEK),
             ("zai", PROVIDER_ZAI),
+            ("crof", PROVIDER_CROF),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -368,6 +372,7 @@ mod tests {
             PROVIDER_OPENROUTER,
             PROVIDER_DEEPSEEK,
             PROVIDER_ZAI,
+            PROVIDER_CROF,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

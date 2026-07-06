@@ -305,7 +305,9 @@
       "deepseek_api_key_label": "DeepSeek API key",
       "deepseek_api_key_help": "Bearer key from platform.deepseek.com — shows your balance.",
       "zai_api_key_label": "z.ai API key",
-      "zai_api_key_help": "Bearer key from z.ai (Z_AI_API_KEY) — shows your quota."
+      "zai_api_key_help": "Bearer key from z.ai (Z_AI_API_KEY) — shows your quota.",
+      "crof_api_key_label": "Crof API key",
+      "crof_api_key_help": "Bearer key from crof.ai (CROF_API_KEY) — shows request quota + credits."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",
