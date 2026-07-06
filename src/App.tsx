@@ -9,6 +9,7 @@ import {
   formatInt,
   formatUSD,
   formatRelativeMinutes,
+  formatRelativeShort,
   formatRelativeShortParts,
   isStaleProviderRow,
   lastNLocalDates,
@@ -748,7 +749,9 @@ export default function App() {
             onRemoteSessionAction={refreshRemoteState}
           />
         )}
-        {tab === "machine" && <MachineTab />}
+        {tab === "machine" && (
+          <MachineTab paired={!!config?.paired} currentDeviceId={config?.device_id ?? null} />
+        )}
         {tab === "swarm" && (
           <Swarm
             paired={!!config?.paired}
@@ -5967,7 +5970,123 @@ function MachineGauge({
   );
 }
 
-function MachineTab() {
+type DeviceHealthRow = {
+  id: string;
+  name: string | null;
+  device_type: string | null;
+  status: string | null;
+  cpu_usage: number | null;
+  memory_usage: number | null;
+  cpu_temp_c: number | null;
+  battery_charge_pct: number | null;
+  battery_state: string | null;
+  last_seen_at: string | null;
+  sensors_updated_at: string | null;
+};
+
+// Cross-device health read-back — the READ half of the device-health pillar
+// (the heartbeat writes; this shows your OTHER devices' last-reported CPU/mem/
+// temp/battery/status). Server read (get_devices, RLS-scoped to your account);
+// 30s poll. Only rendered when paired.
+function FleetHealth({ currentDeviceId }: { currentDeviceId: string | null }) {
+  const { t } = useTranslation();
+  const [devices, setDevices] = useState<DeviceHealthRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const d = await invoke<DeviceHealthRow[]>("get_devices");
+        if (cancelled) return;
+        setDevices(d);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setError(String(e));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  if (error && !devices) {
+    return (
+      <div className="flex items-start gap-2 text-xs text-amber-400/90 p-3 rounded-lg border border-amber-900/60 bg-amber-950/20">
+        <SeverityIcon severity="Warning" />
+        <span>{t("machine.fleet_load_failed")}</span>
+      </div>
+    );
+  }
+  if (!devices) {
+    return <div className="text-xs text-neutral-500">{t("machine.fleet_loading")}</div>;
+  }
+  if (devices.length === 0) {
+    return <div className="text-xs text-neutral-500">{t("machine.fleet_none")}</div>;
+  }
+
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-neutral-400 mb-2">{t("machine.fleet_title")}</h3>
+      <div className="space-y-1.5">
+        {devices.map((d) => {
+          const online = (d.status ?? "").toLowerCase() === "online";
+          const isSelf = currentDeviceId != null && d.id === currentDeviceId;
+          const metrics = [
+            d.cpu_usage != null ? `CPU ${d.cpu_usage}%` : null,
+            d.memory_usage != null ? `MEM ${d.memory_usage}%` : null,
+            d.cpu_temp_c != null ? `${Math.round(d.cpu_temp_c)}°C` : null,
+            d.battery_charge_pct != null
+              ? `${t("machine.battery")} ${d.battery_charge_pct}%`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          const seen = d.last_seen_at ? formatRelativeShort(d.last_seen_at) : null;
+          return (
+            <div
+              key={d.id}
+              className="flex items-center gap-2 text-xs p-2 rounded-md border border-neutral-800/70 bg-neutral-900/30"
+            >
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${online ? "bg-emerald-500" : "bg-neutral-600"}`}
+                title={online ? t("machine.fleet_online") : t("machine.fleet_offline")}
+                aria-hidden="true"
+              />
+              <span className="font-medium text-neutral-300 truncate max-w-[12rem]">
+                {d.name || t("machine.fleet_unnamed")}
+                {isSelf && <span className="text-neutral-500"> · {t("machine.fleet_this")}</span>}
+              </span>
+              {d.device_type && (
+                <span className="text-neutral-600 hidden sm:inline">{d.device_type}</span>
+              )}
+              <span className="ml-auto tabular-nums text-neutral-400 shrink-0">
+                {metrics || "—"}
+              </span>
+              {seen && (
+                <span className="text-[10px] text-neutral-600 shrink-0" title={d.last_seen_at ?? ""}>
+                  {seen}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MachineTab({
+  paired,
+  currentDeviceId,
+}: {
+  paired: boolean;
+  currentDeviceId: string | null;
+}) {
   const { t } = useTranslation();
   const [snap, setSnap] = useState<MachineSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -6124,6 +6243,8 @@ function MachineTab() {
         )}
         <p className="mt-2 text-[11px] text-neutral-600">{t("machine.local_note")}</p>
       </div>
+
+      {paired && <FleetHealth currentDeviceId={currentDeviceId} />}
     </div>
   );
 }

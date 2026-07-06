@@ -598,6 +598,73 @@ pub async fn get_sessions_history(
 }
 
 // ========================================================================
+// devices table — direct PostgREST GET (v0.x, cross-device health read-back)
+// ========================================================================
+
+/// One device's health, as written by `helper_heartbeat`. Every field is
+/// `#[serde(default)] Option<>` (the wire-compat invariant) so a schema the
+/// Mac evolves — or a device that hasn't reported a given metric — decodes
+/// work-or-degrade-gracefully. `risk`/`status`-style fields stay `String`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DeviceHealthRow {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub device_type: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub cpu_usage: Option<i64>,
+    #[serde(default)]
+    pub memory_usage: Option<i64>,
+    #[serde(default)]
+    pub cpu_temp_c: Option<f64>,
+    #[serde(default)]
+    pub battery_charge_pct: Option<i64>,
+    #[serde(default)]
+    pub battery_state: Option<String>,
+    #[serde(default)]
+    pub last_seen_at: Option<String>,
+    #[serde(default)]
+    pub sensors_updated_at: Option<String>,
+}
+
+/// The user's own devices + their last-reported health. RLS-filtered to
+/// `auth.uid() = user_id` (the "Users can manage own devices" policy), so a
+/// user JWT only ever returns this account's fleet.
+pub async fn get_devices(user_id: &str, user_jwt: &str) -> SupabaseResult<Vec<DeviceHealthRow>> {
+    let url = format!("{}/rest/v1/devices", creds::supabase_url());
+    let anon = creds::supabase_anon_key();
+    let resp = client()?
+        .get(&url)
+        .header("apikey", &anon)
+        .header("Authorization", format!("Bearer {user_jwt}"))
+        .query(&[
+            ("user_id", format!("eq.{user_id}")),
+            (
+                "select",
+                "id,name,device_type,status,cpu_usage,memory_usage,cpu_temp_c,\
+                 battery_charge_pct,battery_state,last_seen_at,sensors_updated_at"
+                    .to_string(),
+            ),
+            ("order", "last_seen_at.desc.nullslast".to_string()),
+            ("limit", "50".to_string()),
+        ])
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await?;
+    if !(200..300).contains(&status) {
+        return Err(SupabaseError::Http { status, body: text });
+    }
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
+// ========================================================================
 // alerts table — direct PostgREST GET (v0.5.3)
 // ========================================================================
 //
@@ -1854,5 +1921,33 @@ mod tests {
         let v = serde_json::to_value(&req).unwrap();
         assert_eq!(v["p_provider_plan_status"]["codex"], "off_plan");
         assert_eq!(v["p_metrics"]["cpu_temp_c"], 55);
+    }
+
+    #[test]
+    fn device_health_row_decodes_partial_full_and_evolved() {
+        // Minimal row — every optional field defaults to None (work-or-degrade).
+        let partial: DeviceHealthRow = serde_json::from_str(r#"{"id":"d1"}"#).unwrap();
+        assert_eq!(partial.id, "d1");
+        assert!(partial.status.is_none());
+        assert!(partial.cpu_usage.is_none());
+        assert!(partial.battery_state.is_none());
+
+        // Full row decodes each field.
+        let full: DeviceHealthRow = serde_json::from_str(
+            r#"{"id":"d2","name":"Mac","device_type":"laptop","status":"Online",
+                "cpu_usage":42,"memory_usage":71,"cpu_temp_c":55.5,"battery_charge_pct":83,
+                "battery_state":"charged","last_seen_at":"2026-07-06T00:00:00Z",
+                "sensors_updated_at":"2026-07-06T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(full.name.as_deref(), Some("Mac"));
+        assert_eq!(full.cpu_usage, Some(42));
+        assert_eq!(full.battery_state.as_deref(), Some("charged"));
+
+        // A future column the Mac adds must NOT break decode (no deny_unknown_fields).
+        let evolved: DeviceHealthRow =
+            serde_json::from_str(r#"{"id":"d3","fan_rpm":2200,"future_metric":1}"#).unwrap();
+        assert_eq!(evolved.id, "d3");
+        assert!(evolved.cpu_usage.is_none());
     }
 }

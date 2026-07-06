@@ -148,6 +148,15 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "machine.batt_empty",
     "machine.batt_unknown",
     "machine.temperatures",
+    // Cross-device fleet health read-back on the Machine tab.
+    "machine.fleet_title",
+    "machine.fleet_loading",
+    "machine.fleet_none",
+    "machine.fleet_load_failed",
+    "machine.fleet_online",
+    "machine.fleet_offline",
+    "machine.fleet_unnamed",
+    "machine.fleet_this",
     // v0.10.1 — Alert lifecycle (macOS parity): filter, actions, states.
     "alerts.filter_open",
     "alerts.filter_resolved",

@@ -175,7 +175,15 @@
     "batt_full": "Full",
     "batt_empty": "Empty",
     "batt_unknown": "Unknown",
-    "temperatures": "Temperatures"
+    "temperatures": "Temperatures",
+    "fleet_title": "Your devices",
+    "fleet_loading": "Loading devices…",
+    "fleet_none": "No other devices reporting yet.",
+    "fleet_load_failed": "Couldn't load your devices.",
+    "fleet_online": "Online",
+    "fleet_offline": "Offline",
+    "fleet_unnamed": "Unnamed device",
+    "fleet_this": "this device"
   },
   "swarm": {
     "title": "Agent swarms",

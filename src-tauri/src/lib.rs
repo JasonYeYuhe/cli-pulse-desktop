@@ -1066,6 +1066,22 @@ async fn get_sessions_history(
     .await
 }
 
+/// v0.x — cross-device health read-back for the Machine tab's fleet section.
+/// Returns the user's own devices + their last heartbeat-reported health
+/// (CPU/mem/temp/battery/status). Empty when not paired / signed in.
+#[tauri::command]
+async fn get_devices() -> Result<Vec<supabase::DeviceHealthRow>, String> {
+    let Some(cfg) = config::load().map_err(|e| e.to_string())? else {
+        return Ok(vec![]);
+    };
+    let user_id = cfg.user_id.clone();
+    with_user_jwt(move |jwt| {
+        let user_id = user_id.clone();
+        async move { supabase::get_devices(&user_id, &jwt).await }
+    })
+    .await
+}
+
 /// v0.5.2 — top-projects aggregation. See `top_projects.rs` for
 /// the algorithm; this command pulls the underlying `sessions`
 /// rows for the past `days` days and returns the top-N rolled-up
@@ -2700,6 +2716,8 @@ pub fn run() {
             delete_account_and_unpair,
             // v0.5.5 — Activity Timeline data source (sessions table 24h history)
             get_sessions_history,
+            // Cross-device health read-back (Machine tab fleet section)
+            get_devices,
             // v0.5.6 — Tray mini-metrics force-refresh (language change path)
             force_tray_menu_refresh,
             // v0.6.0 — Remote Approvals (app-side view + decide)

@@ -185,6 +185,26 @@ audit against the Mac app (v1.28).
     tests — injectable `from` date so they don't depend on the runner's
     timezone). `ProviderUsageChart` SVG component; 3 i18n keys × 3 langs,
     pinned. 87 frontend tests; no backend change.
+- **Cross-device fleet health** (Machine tab — the READ half of the
+  device-health pillar). Below this machine's local cockpit, a **"Your
+  devices"** section now shows every device on your account with its
+  last-heartbeat-reported health: Online/Offline dot, CPU% / MEM% / temp /
+  battery, and "last seen X ago" (the current device marked "this device").
+  This closes the loop with the heartbeat/sensor-sync slices — one device
+  *writes* its health, the others *read* it. Server read (`get_devices`,
+  RLS-scoped `auth.uid() = user_id`), 30s poll, paired-only; honest
+  loading/empty/error states.
+  - **Live round-trip verified** end-to-end against prod (no Windows device
+    needed — the heartbeat is cross-platform): a rolled-back Supabase
+    transaction confirmed `helper_heartbeat` writes every field this reads
+    (`status→Online`, cpu/mem, `cpu_temp_c`, `battery_charge_pct`,
+    `battery_state` incl. the `full→charged` map, capability, timestamps),
+    with zero persistent prod change.
+  - **Wire invariant:** `DeviceHealthRow` is all `#[serde(default)] Option<>`
+    (+ tolerates unknown/future columns) so a Mac-evolved schema decodes
+    work-or-degrade-gracefully — pinned by a partial/full/evolved decode test.
+    `get_devices` mirrors the `get_sessions_history` GET. 4 fleet i18n keys +
+    states × 3 langs, pinned. +1 Rust test.
 
 ### Fixed
 

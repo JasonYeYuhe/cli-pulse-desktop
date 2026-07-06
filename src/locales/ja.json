@@ -171,7 +171,15 @@
     "batt_full": "満充電",
     "batt_empty": "残量なし",
     "batt_unknown": "不明",
-    "temperatures": "温度"
+    "temperatures": "温度",
+    "fleet_title": "あなたのデバイス",
+    "fleet_loading": "デバイスを読み込み中…",
+    "fleet_none": "他のデバイスからの報告はまだありません。",
+    "fleet_load_failed": "デバイスを読み込めませんでした。",
+    "fleet_online": "オンライン",
+    "fleet_offline": "オフライン",
+    "fleet_unnamed": "名称未設定のデバイス",
+    "fleet_this": "このデバイス"
   },
   "swarm": {
     "title": "エージェント スウォーム",

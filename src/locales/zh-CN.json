@@ -171,7 +171,15 @@
     "batt_full": "已充满",
     "batt_empty": "电量耗尽",
     "batt_unknown": "未知",
-    "temperatures": "温度"
+    "temperatures": "温度",
+    "fleet_title": "你的设备",
+    "fleet_loading": "正在加载设备…",
+    "fleet_none": "还没有其他设备上报。",
+    "fleet_load_failed": "无法加载你的设备。",
+    "fleet_online": "在线",
+    "fleet_offline": "离线",
+    "fleet_unnamed": "未命名设备",
+    "fleet_this": "本机"
   },
   "swarm": {
     "title": "智能体集群",
