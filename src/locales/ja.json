@@ -309,7 +309,9 @@
       "venice_api_key_label": "Venice API キー",
       "venice_api_key_help": "Venice の Bearer キー(VENICE_API_KEY)— USD / DIEM 残高を表示します。",
       "kimi_k2_api_key_label": "Kimi K2 API キー",
-      "kimi_k2_api_key_help": "kimi-k2.ai の Bearer キー(KIMI_K2_API_KEY)— クレジット利用状況を表示します。"
+      "kimi_k2_api_key_help": "kimi-k2.ai の Bearer キー(KIMI_K2_API_KEY)— クレジット利用状況を表示します。",
+      "augment_cookie_label": "Augment セッション Cookie",
+      "augment_cookie_help": "app.augmentcode.com のセッション Cookie(AUGMENT_COOKIE)を貼り付け — クレジット利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

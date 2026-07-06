@@ -309,7 +309,9 @@
       "venice_api_key_label": "Venice API 密钥",
       "venice_api_key_help": "来自 Venice 的 Bearer 密钥(VENICE_API_KEY)—— 显示你的 USD / DIEM 余额。",
       "kimi_k2_api_key_label": "Kimi K2 API 密钥",
-      "kimi_k2_api_key_help": "来自 kimi-k2.ai 的 Bearer 密钥(KIMI_K2_API_KEY)—— 显示你的积分用量。"
+      "kimi_k2_api_key_help": "来自 kimi-k2.ai 的 Bearer 密钥(KIMI_K2_API_KEY)—— 显示你的积分用量。",
+      "augment_cookie_label": "Augment 会话 Cookie",
+      "augment_cookie_help": "粘贴你的 app.augmentcode.com 会话 Cookie(AUGMENT_COOKIE)—— 显示积分用量。Cookie 会过期,失效后重新粘贴。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

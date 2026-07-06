@@ -370,6 +370,22 @@ audit against the Mac app (v1.28).
   ("T3 Chat")**. Both added so the provider-literal contract test guards every real Mac case.
   (Caught while porting Kimi K2, whose literal wasn't in the fixture.)
 
+- **Augment credit collector** (v0.16 cookie batch #1 — port of macOS `AugmentCollector`). Adds
+  Augment as a 14th provider — and the **first cookie-session collector** beyond the built-in
+  Cursor. Reads a session cookie (Settings → Integrations paste, or env `AUGMENT_COOKIE`), fetches
+  `GET app.augmentcode.com/api/credits` (+ best-effort `/api/subscription` for plan name + billing
+  reset), and maps the `usageUnitsRemaining` / `usageUnitsConsumedThisBillingCycle` split to a real
+  depleting **Credits** tier (`quota = remaining + consumed`, raw unit counts). Unlike the Mac's
+  automatic browser-cookie import, the desktop uses a **manual paste** (same as Cursor) — cookies
+  expire, so the card shows a red badge once the session lapses; re-paste to refresh.
+  - `src-tauri/src/quota/augment.rs` (5 parse/tiering unit tests) + `collect_all` wiring +
+    `PROVIDER_AUGMENT = "Augment"` (validated against the Mac `ProviderKind` snapshot). New
+    `augment_cookie` cred through `provider_creds` (OS-keychain + file + migration + wipe) and a
+    **Settings → Integrations** cookie-paste row (+2 i18n keys × 3, cookie-worded).
+  - **Verification posture:** parse/tiering fully unit-tested; the **live fetch needs a real Augment
+    session cookie so it can't be CI-verified** — endpoints/auth ported from the proven Mac collector.
+    Paste a cookie in Settings to exercise it live.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session

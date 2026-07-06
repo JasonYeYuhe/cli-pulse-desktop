@@ -25,6 +25,7 @@
 //! with the parent and would unwind `sync_now` on any provider panic.
 //! Per Codex 2026-05-02 review of v0.4.3 spec.
 
+pub mod augment;
 pub mod claude;
 pub mod claude_refresh;
 pub mod codex;
@@ -63,6 +64,7 @@ pub const PROVIDER_MINIMAX: &str = "MiniMax";
 pub const PROVIDER_MOONSHOT: &str = "Moonshot";
 pub const PROVIDER_VENICE: &str = "Venice";
 pub const PROVIDER_KIMI_K2: &str = "Kimi K2";
+pub const PROVIDER_AUGMENT: &str = "Augment";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -211,6 +213,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_MOONSHOT, tokio::spawn(moonshot::collect())), // @allow tokio-spawn
         (PROVIDER_VENICE, tokio::spawn(venice::collect())), // @allow tokio-spawn
         (PROVIDER_KIMI_K2, tokio::spawn(kimik2::collect())), // @allow tokio-spawn
+        (PROVIDER_AUGMENT, tokio::spawn(augment::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -354,6 +357,7 @@ mod tests {
             ("moonshot", PROVIDER_MOONSHOT),
             ("venice", PROVIDER_VENICE),
             ("kimiK2", PROVIDER_KIMI_K2),
+            ("augment", PROVIDER_AUGMENT),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -395,6 +399,7 @@ mod tests {
             PROVIDER_MOONSHOT,
             PROVIDER_VENICE,
             PROVIDER_KIMI_K2,
+            PROVIDER_AUGMENT,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),
