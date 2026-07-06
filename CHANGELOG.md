@@ -328,6 +328,25 @@ audit against the Mac app (v1.28).
     real Moonshot key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
     collector. Configure a key in Settings to exercise it live.
 
+- **Venice balance collector** (v0.15 provider batch #6 — port of macOS `VeniceCollector`,
+  itself from steipete/CodexBar MIT). Adds Venice as a 12th provider: reads the api-key
+  (Settings → Integrations, or env `VENICE_API_KEY` / `VENICE_KEY`), fetches
+  `GET api.venice.ai/api/v1/billing/balance`, and maps the dual-currency USD + DIEM balance
+  to tiers (cents). The DIEM balance becomes a **cap-aware** tier when `diemEpochAllocation > 0`
+  (`quota = cap`, `remaining = min(cap, diem)` — a real depleting quota); otherwise a no-cap
+  full tier. USD is a no-cap full tier. The top-level gauge mirrors the most-informative
+  primary (cap-aware DIEM > positive USD > positive DIEM). Values arrive as JSON numbers OR
+  numeric strings — a flexible decoder coerces both (vendored from upstream).
+  - `src-tauri/src/quota/venice.rs` (5 tiering/cap/flexible-decode unit tests) + `collect_all`
+    wiring + `PROVIDER_VENICE = "Venice"` (validated against the Mac `ProviderKind` snapshot).
+    `venice_api_key` added through `provider_creds` (OS-keychain + file + migration + wipe) and
+    a new **Settings → Integrations** input row (+2 i18n keys × 3). Provider literal `"Venice"`
+    matches the Mac rawValue so the dual-writer converges on one row. Uses **cents (×100)** to
+    match the Mac Venice collector's scale (each desktop balance collector mirrors its own twin).
+  - **Verification posture:** parse/tiering/flexible-decode fully unit-tested; the **live fetch
+    needs a real Venice key so it can't be CI-verified** — endpoint/auth ported from the proven
+    Mac collector. Configure a key in Settings to exercise it live.
+
 ### Internal
 
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**

@@ -305,7 +305,9 @@
       "minimax_api_key_label": "MiniMax API キー",
       "minimax_api_key_help": "MiniMax の Bearer キー(MINIMAX_API_KEY)— コーディングプランのクォータを表示します。",
       "moonshot_api_key_label": "Moonshot API キー",
-      "moonshot_api_key_help": "Moonshot / Kimi プラットフォームの Bearer キー(MOONSHOT_API_KEY)— 残高を表示します。"
+      "moonshot_api_key_help": "Moonshot / Kimi プラットフォームの Bearer キー(MOONSHOT_API_KEY)— 残高を表示します。",
+      "venice_api_key_label": "Venice API キー",
+      "venice_api_key_help": "Venice の Bearer キー(VENICE_API_KEY)— USD / DIEM 残高を表示します。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

@@ -311,7 +311,9 @@
       "minimax_api_key_label": "MiniMax API key",
       "minimax_api_key_help": "Bearer key from MiniMax (MINIMAX_API_KEY) — shows your coding-plan quota.",
       "moonshot_api_key_label": "Moonshot API key",
-      "moonshot_api_key_help": "Bearer key from Moonshot / Kimi platform (MOONSHOT_API_KEY) — shows your balance."
+      "moonshot_api_key_help": "Bearer key from Moonshot / Kimi platform (MOONSHOT_API_KEY) — shows your balance.",
+      "venice_api_key_label": "Venice API key",
+      "venice_api_key_help": "Bearer key from Venice (VENICE_API_KEY) — shows your USD / DIEM balance."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

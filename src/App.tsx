@@ -3204,6 +3204,7 @@ type ProviderCredsView = {
   crof_api_key_set: boolean;
   minimax_api_key_set: boolean;
   moonshot_api_key_set: boolean;
+  venice_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3214,6 +3215,7 @@ type ProviderCredsView = {
   env_override_crof: boolean;
   env_override_minimax: boolean;
   env_override_moonshot: boolean;
+  env_override_venice: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3231,7 +3233,8 @@ type ProviderCredsUpdateKey =
   | "zai_api_key"
   | "crof_api_key"
   | "minimax_api_key"
-  | "moonshot_api_key";
+  | "moonshot_api_key"
+  | "venice_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3365,6 +3368,15 @@ function IntegrationsSection() {
       isSet: view.moonshot_api_key_set,
       envOverride: view.env_override_moonshot,
       envVar: "MOONSHOT_API_KEY",
+    },
+    {
+      provider: "Venice",
+      key: "venice_api_key",
+      labelKey: "settings.integrations.venice_api_key_label",
+      helpKey: "settings.integrations.venice_api_key_help",
+      isSet: view.venice_api_key_set,
+      envOverride: view.env_override_venice,
+      envVar: "VENICE_API_KEY",
     },
   ];
 

@@ -37,6 +37,7 @@ pub mod gemini_refresh;
 pub mod minimax;
 pub mod moonshot;
 pub mod openrouter;
+pub mod venice;
 pub mod zai;
 
 use std::sync::RwLock;
@@ -59,6 +60,7 @@ pub const PROVIDER_ZAI: &str = "z.ai";
 pub const PROVIDER_CROF: &str = "Crof";
 pub const PROVIDER_MINIMAX: &str = "MiniMax";
 pub const PROVIDER_MOONSHOT: &str = "Moonshot";
+pub const PROVIDER_VENICE: &str = "Venice";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -205,6 +207,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_CROF, tokio::spawn(crof::collect())),     // @allow tokio-spawn
         (PROVIDER_MINIMAX, tokio::spawn(minimax::collect())), // @allow tokio-spawn
         (PROVIDER_MOONSHOT, tokio::spawn(moonshot::collect())), // @allow tokio-spawn
+        (PROVIDER_VENICE, tokio::spawn(venice::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -344,6 +347,7 @@ mod tests {
             ("crof", PROVIDER_CROF),
             ("minimax", PROVIDER_MINIMAX),
             ("moonshot", PROVIDER_MOONSHOT),
+            ("venice", PROVIDER_VENICE),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -383,6 +387,7 @@ mod tests {
             PROVIDER_CROF,
             PROVIDER_MINIMAX,
             PROVIDER_MOONSHOT,
+            PROVIDER_VENICE,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

@@ -64,6 +64,7 @@ const ACCT_ZAI: &str = "zai-api-key";
 const ACCT_CROF: &str = "crof-api-key";
 const ACCT_MINIMAX: &str = "minimax-api-key";
 const ACCT_MOONSHOT: &str = "moonshot-api-key";
+const ACCT_VENICE: &str = "venice-api-key";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -97,6 +98,9 @@ pub struct ProviderCreds {
     /// Moonshot api-key (Bearer). Secret — masked in `ProviderCredsView`.
     #[serde(default)]
     pub moonshot_api_key: Option<String>,
+    /// Venice api-key (Bearer). Secret — masked in `ProviderCredsView`.
+    #[serde(default)]
+    pub venice_api_key: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -116,6 +120,7 @@ impl Default for ProviderCreds {
             crof_api_key: None,
             minimax_api_key: None,
             moonshot_api_key: None,
+            venice_api_key: None,
         }
     }
 }
@@ -222,6 +227,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         crof_api_key: keychain::read_at(ACCT_CROF).ok().flatten(),
         minimax_api_key: keychain::read_at(ACCT_MINIMAX).ok().flatten(),
         moonshot_api_key: keychain::read_at(ACCT_MOONSHOT).ok().flatten(),
+        venice_api_key: keychain::read_at(ACCT_VENICE).ok().flatten(),
     })
 }
 
@@ -261,6 +267,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_CROF, creds.crof_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_MINIMAX, creds.minimax_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_MOONSHOT, creds.moonshot_api_key.as_deref())?;
+    set_or_clear_keychain(ACCT_VENICE, creds.venice_api_key.as_deref())?;
     Ok(())
 }
 
@@ -345,6 +352,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_CROF,
         ACCT_MINIMAX,
         ACCT_MOONSHOT,
+        ACCT_VENICE,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -447,6 +455,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.crof_api_key.as_deref(),
             v1.minimax_api_key.as_deref(),
             v1.moonshot_api_key.as_deref(),
+            v1.venice_api_key.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -469,6 +478,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         crof_api_key: None,
         minimax_api_key: None,
         moonshot_api_key: None,
+        venice_api_key: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -507,6 +517,7 @@ mod tests {
             crof_api_key: None,
             minimax_api_key: None,
             moonshot_api_key: None,
+            venice_api_key: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -584,6 +595,7 @@ mod tests {
             crof_api_key: None,
             minimax_api_key: None,
             moonshot_api_key: None,
+            venice_api_key: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -636,6 +648,7 @@ mod tests {
                 crof_api_key: None,
                 minimax_api_key: None,
                 moonshot_api_key: None,
+                venice_api_key: None,
             },
         );
         assert!(path.exists());
@@ -663,6 +676,7 @@ mod tests {
                 crof_api_key: None,
                 minimax_api_key: None,
                 moonshot_api_key: None,
+                venice_api_key: None,
             },
         );
         assert!(path.exists());
@@ -706,6 +720,7 @@ mod tests {
                 crof_api_key: None,
                 minimax_api_key: None,
                 moonshot_api_key: None,
+                venice_api_key: None,
             },
         );
         assert!(path_v1.exists());
