@@ -112,6 +112,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // T3 Chat collector (v0.16 cookie batch) — Settings cookie-paste row.
     "settings.integrations.t3chat_cookie_label",
     "settings.integrations.t3chat_cookie_help",
+    // StepFun collector (v0.16 cookie batch) — Settings cookie-paste row.
+    "settings.integrations.stepfun_cookie_label",
+    "settings.integrations.stepfun_cookie_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

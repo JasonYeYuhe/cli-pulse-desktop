@@ -315,7 +315,9 @@
       "perplexity_cookie_label": "Perplexity セッション Cookie",
       "perplexity_cookie_help": "perplexity.ai のセッション Cookie(PERPLEXITY_COOKIE)を貼り付け — クレジット残高を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。",
       "t3chat_cookie_label": "T3 Chat セッション Cookie",
-      "t3chat_cookie_help": "t3.chat のセッション Cookie(T3CHAT_COOKIE)を貼り付け — 4時間・月間の利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。"
+      "t3chat_cookie_help": "t3.chat のセッション Cookie(T3CHAT_COOKIE)を貼り付け — 4時間・月間の利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。",
+      "stepfun_cookie_label": "StepFun セッション Cookie",
+      "stepfun_cookie_help": "platform.stepfun.com の Cookie(Oasis-Token を含む、STEPFUN_COOKIE)を貼り付け — 5時間・週間の利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

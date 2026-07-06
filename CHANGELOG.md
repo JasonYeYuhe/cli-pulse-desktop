@@ -420,6 +420,23 @@ audit against the Mac app (v1.28).
     **live fetch needs a real T3 Chat session cookie so it can't be CI-verified** — endpoint/auth ported
     from the proven Mac collector. Paste a cookie in Settings to exercise it live.
 
+- **StepFun (阶跃星辰) usage collector** (v0.16 cookie batch #4 — port of macOS `StepFunCollector`, itself
+  from steipete/CodexBar MIT). Adds StepFun as a 17th provider (4th cookie collector). Reads the
+  `Oasis-Token` cookie (Settings paste, or env `STEPFUN_COOKIE` / `STEPFUN_OASIS_TOKEN`), `POST`s the
+  plain-JSON connect-RPC `QueryStepPlanRateLimit` (+ a grace-bounded best-effort `GetStepPlanStatus` for
+  the plan name), and maps two *left-rate* windows (5-hour + weekly, each 0…1) to `remaining =
+  round(rate·100)` percent gauges (`quota = 100`, like Claude/Codex). The 5-hour window is the headline.
+  **Security:** upstream can password-login; we never do — the standalone `Oasis-Token` cookie drives the
+  RPCs directly (`Oasis-Webid` read from the cookie or a vendored fallback). Flexible int|float rate and
+  string|int timestamp decoders tolerate the API's shape drift.
+  - `src-tauri/src/quota/stepfun.rs` (7 cookie-extract / flexible-decode / gate / percent-clamp unit
+    tests) + `collect_all` wiring + `PROVIDER_STEPFUN = "StepFun"`. New `stepfun_cookie` cred through
+    `provider_creds` (OS-keychain + file + migration + wipe) and a **Settings → Integrations**
+    cookie-paste row (+2 i18n keys × 3).
+  - **Verification posture:** cookie extraction / RPC parsing / percent mapping fully unit-tested; the
+    **live fetch needs a real StepFun `Oasis-Token` cookie so it can't be CI-verified** — endpoints/auth
+    ported from the proven Mac collector. Paste a cookie in Settings to exercise it live.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session
