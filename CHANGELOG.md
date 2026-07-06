@@ -240,6 +240,27 @@ audit against the Mac app (v1.28).
     the other 6 collectors) — the endpoint/auth are ported from the proven Mac
     collector. Configure a key in Settings to exercise it live.
 
+- **z.ai quota collector** (v0.15 provider batch #2 — port of macOS
+  `ZaiCollector`). Adds z.ai (Zhipu/BigModel) as an 8th provider: reads the
+  api-key (Settings → Integrations, or env `Z_AI_API_KEY`), fetches
+  `GET api.z.ai/api/monitor/usage/quota/limit`, and maps each returned limit to
+  a tier. Unlike DeepSeek's pure-balance, z.ai reports depleting limits: each
+  `limits[]` entry (`TOKENS_LIMIT` → "Tokens", `TIME_LIMIT` → "Time") becomes a
+  tier with `quota = usage + remaining` and an optional `nextResetTime`
+  (epoch-ms → RFC 3339); the primary (first) limit drives the top-level gauge.
+  Host is overridable via env `Z_AI_API_HOST` (BigModel CN) or the whole URL via
+  `Z_AI_QUOTA_URL`.
+  - `src-tauri/src/quota/zai.rs` (5 parse/mapping/URL unit tests) + `collect_all`
+    wiring + `PROVIDER_ZAI = "z.ai"` (validated against the Mac `ProviderKind`
+    snapshot). `zai_api_key` added through `provider_creds` (OS-keychain + file +
+    migration + wipe) and a new **Settings → Integrations** input row (+2 i18n
+    keys × 3). Provider literal `"z.ai"` matches the Mac rawValue so the
+    dual-writer converges on one `(user_id, provider)` row.
+  - **Verification posture:** parse/mapping/URL-resolution fully unit-tested; the
+    **live fetch needs a real z.ai key so it can't be CI-verified** — endpoint/auth
+    are ported from the proven Mac collector. Configure a key in Settings to
+    exercise it live.
+
 ### Internal
 
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**

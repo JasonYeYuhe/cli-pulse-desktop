@@ -3200,12 +3200,14 @@ type ProviderCredsView = {
   copilot_token_set: boolean;
   openrouter_api_key_set: boolean;
   deepseek_api_key_set: boolean;
+  zai_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
   env_override_openrouter_key: boolean;
   env_override_openrouter_url: boolean;
   env_override_deepseek: boolean;
+  env_override_zai: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3219,7 +3221,8 @@ type ProviderCredsUpdateKey =
   | "copilot_token"
   | "openrouter_api_key"
   | "openrouter_base_url"
-  | "deepseek_api_key";
+  | "deepseek_api_key"
+  | "zai_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3317,6 +3320,15 @@ function IntegrationsSection() {
       isSet: view.deepseek_api_key_set,
       envOverride: view.env_override_deepseek,
       envVar: "DEEPSEEK_API_KEY",
+    },
+    {
+      provider: "z.ai",
+      key: "zai_api_key",
+      labelKey: "settings.integrations.zai_api_key_label",
+      helpKey: "settings.integrations.zai_api_key_help",
+      isSet: view.zai_api_key_set,
+      envOverride: view.env_override_zai,
+      envVar: "Z_AI_API_KEY",
     },
   ];
 

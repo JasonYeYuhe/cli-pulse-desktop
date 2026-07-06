@@ -34,6 +34,7 @@ pub mod deepseek;
 pub mod gemini;
 pub mod gemini_refresh;
 pub mod openrouter;
+pub mod zai;
 
 use std::sync::RwLock;
 
@@ -51,6 +52,7 @@ pub const PROVIDER_GEMINI: &str = "Gemini";
 pub const PROVIDER_COPILOT: &str = "Copilot";
 pub const PROVIDER_OPENROUTER: &str = "OpenRouter";
 pub const PROVIDER_DEEPSEEK: &str = "DeepSeek";
+pub const PROVIDER_ZAI: &str = "z.ai";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -168,7 +170,7 @@ pub fn last_outcomes() -> Vec<CollectorOutcome> {
         .unwrap_or_default()
 }
 
-/// Run all 6 collectors concurrently with panic isolation. Returns a
+/// Run all collectors concurrently with panic isolation. Returns a
 /// vec of `CollectorOutcome` — one entry per provider regardless of
 /// success/failure, so the UI can show a status badge per provider
 /// independently of whether the snapshot landed in the helper_sync
@@ -193,6 +195,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_COPILOT, tokio::spawn(copilot::collect())), // @allow tokio-spawn
         (PROVIDER_OPENROUTER, tokio::spawn(openrouter::collect())), // @allow tokio-spawn
         (PROVIDER_DEEPSEEK, tokio::spawn(deepseek::collect())), // @allow tokio-spawn
+        (PROVIDER_ZAI, tokio::spawn(zai::collect())),       // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -328,6 +331,7 @@ mod tests {
             ("copilot", PROVIDER_COPILOT),
             ("openRouter", PROVIDER_OPENROUTER),
             ("deepseek", PROVIDER_DEEPSEEK),
+            ("zai", PROVIDER_ZAI),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -363,6 +367,7 @@ mod tests {
             PROVIDER_COPILOT,
             PROVIDER_OPENROUTER,
             PROVIDER_DEEPSEEK,
+            PROVIDER_ZAI,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

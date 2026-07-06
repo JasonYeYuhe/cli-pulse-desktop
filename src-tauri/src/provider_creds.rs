@@ -60,6 +60,7 @@ const ACCT_COPILOT: &str = "copilot-token";
 const ACCT_OR_KEY: &str = "openrouter-api-key";
 const ACCT_OR_URL: &str = "openrouter-base-url";
 const ACCT_DEEPSEEK: &str = "deepseek-api-key";
+const ACCT_ZAI: &str = "zai-api-key";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -81,6 +82,9 @@ pub struct ProviderCreds {
     /// DeepSeek api-key (Bearer). Secret — masked in `ProviderCredsView`.
     #[serde(default)]
     pub deepseek_api_key: Option<String>,
+    /// z.ai api-key (Bearer). Secret — masked in `ProviderCredsView`.
+    #[serde(default)]
+    pub zai_api_key: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -96,6 +100,7 @@ impl Default for ProviderCreds {
             openrouter_api_key: None,
             openrouter_base_url: None,
             deepseek_api_key: None,
+            zai_api_key: None,
         }
     }
 }
@@ -198,6 +203,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         openrouter_api_key: keychain::read_at(ACCT_OR_KEY).ok().flatten(),
         openrouter_base_url: keychain::read_at(ACCT_OR_URL).ok().flatten(),
         deepseek_api_key: keychain::read_at(ACCT_DEEPSEEK).ok().flatten(),
+        zai_api_key: keychain::read_at(ACCT_ZAI).ok().flatten(),
     })
 }
 
@@ -233,6 +239,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_OR_KEY, creds.openrouter_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_OR_URL, creds.openrouter_base_url.as_deref())?;
     set_or_clear_keychain(ACCT_DEEPSEEK, creds.deepseek_api_key.as_deref())?;
+    set_or_clear_keychain(ACCT_ZAI, creds.zai_api_key.as_deref())?;
     Ok(())
 }
 
@@ -313,6 +320,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_OR_KEY,
         ACCT_OR_URL,
         ACCT_DEEPSEEK,
+        ACCT_ZAI,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -411,6 +419,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.openrouter_api_key.as_deref(),
             v1.openrouter_base_url.as_deref(),
             v1.deepseek_api_key.as_deref(),
+            v1.zai_api_key.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -429,6 +438,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         openrouter_api_key: None,
         openrouter_base_url: None,
         deepseek_api_key: None,
+        zai_api_key: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -463,6 +473,7 @@ mod tests {
             openrouter_api_key: Some("sk-or-v1-test".into()),
             openrouter_base_url: Some("https://custom.example.com".into()),
             deepseek_api_key: Some("sk-deepseek-test".into()),
+            zai_api_key: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -536,6 +547,7 @@ mod tests {
             openrouter_api_key: None,
             openrouter_base_url: None,
             deepseek_api_key: None,
+            zai_api_key: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -584,6 +596,7 @@ mod tests {
                 openrouter_api_key: None,
                 openrouter_base_url: None,
                 deepseek_api_key: None,
+                zai_api_key: None,
             },
         );
         assert!(path.exists());
@@ -607,6 +620,7 @@ mod tests {
                 openrouter_api_key: None,
                 openrouter_base_url: None,
                 deepseek_api_key: None,
+                zai_api_key: None,
             },
         );
         assert!(path.exists());
@@ -646,6 +660,7 @@ mod tests {
                 openrouter_api_key: Some("sk-or-real".into()),
                 openrouter_base_url: None,
                 deepseek_api_key: None,
+                zai_api_key: None,
             },
         );
         assert!(path_v1.exists());
