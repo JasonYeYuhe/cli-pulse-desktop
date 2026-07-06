@@ -317,7 +317,9 @@
       "t3chat_cookie_label": "T3 Chat 会话 Cookie",
       "t3chat_cookie_help": "粘贴你的 t3.chat 会话 Cookie(T3CHAT_COOKIE)—— 显示 4 小时与每月用量。Cookie 会过期,失效后重新粘贴。",
       "stepfun_cookie_label": "StepFun 会话 Cookie",
-      "stepfun_cookie_help": "粘贴你的 platform.stepfun.com Cookie(含 Oasis-Token,STEPFUN_COOKIE)—— 显示 5 小时与每周用量。Cookie 会过期,失效后重新粘贴。"
+      "stepfun_cookie_help": "粘贴你的 platform.stepfun.com Cookie(含 Oasis-Token,STEPFUN_COOKIE)—— 显示 5 小时与每周用量。Cookie 会过期,失效后重新粘贴。",
+      "warp_api_key_label": "Warp API 密钥",
+      "warp_api_key_help": "来自 Warp 的 Bearer 令牌(WARP_API_KEY)—— 显示你的请求额度与赠送积分。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

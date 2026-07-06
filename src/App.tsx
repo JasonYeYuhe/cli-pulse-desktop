@@ -3210,6 +3210,7 @@ type ProviderCredsView = {
   perplexity_cookie_set: boolean;
   t3chat_cookie_set: boolean;
   stepfun_cookie_set: boolean;
+  warp_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3226,6 +3227,7 @@ type ProviderCredsView = {
   env_override_perplexity: boolean;
   env_override_t3chat: boolean;
   env_override_stepfun: boolean;
+  env_override_warp: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3249,7 +3251,8 @@ type ProviderCredsUpdateKey =
   | "augment_cookie"
   | "perplexity_cookie"
   | "t3chat_cookie"
-  | "stepfun_cookie";
+  | "stepfun_cookie"
+  | "warp_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3437,6 +3440,15 @@ function IntegrationsSection() {
       isSet: view.stepfun_cookie_set,
       envOverride: view.env_override_stepfun,
       envVar: "STEPFUN_COOKIE",
+    },
+    {
+      provider: "Warp",
+      key: "warp_api_key",
+      labelKey: "settings.integrations.warp_api_key_label",
+      helpKey: "settings.integrations.warp_api_key_help",
+      isSet: view.warp_api_key_set,
+      envOverride: view.env_override_warp,
+      envVar: "WARP_API_KEY",
     },
   ];
 

@@ -437,6 +437,21 @@ audit against the Mac app (v1.28).
     **live fetch needs a real StepFun `Oasis-Token` cookie so it can't be CI-verified** — endpoints/auth
     ported from the proven Mac collector. Paste a cookie in Settings to exercise it live.
 
+- **Warp usage collector** (v0.16 — GraphQL, port of macOS `WarpCollector`). Adds Warp as an 18th
+  provider. Despite the GraphQL transport it's an ordinary **Bearer api-key** collector (env
+  `WARP_API_KEY` / `WARP_TOKEN`, or Settings): it `POST`s a fixed query + empty `requestContext` to
+  `app.warp.dev/graphql/v2` and parses the nested `data.user.user.{requestLimitInfo,bonusGrants}` JSON. A
+  real depleting `.quota` (raw request counts): the request allocation
+  (`requestLimit` / `requestsUsedSinceLastRefresh`) is the headline **Requests** tier; bonus grants
+  aggregate into a **Bonus Credits** tier. Unlimited plans have no numeric gauge (surfaced via
+  `plan_type: "Unlimited"`).
+  - `src-tauri/src/quota/warp.rs` (5 free/unlimited/bonus-aggregate/over-limit unit tests) + `collect_all`
+    wiring + `PROVIDER_WARP = "Warp"`. New `warp_api_key` cred through `provider_creds` (OS-keychain +
+    file + migration + wipe) and a **Settings → Integrations** input row (+2 i18n keys × 3).
+  - **Verification posture:** GraphQL response parsing / tiering fully unit-tested; the **live fetch needs
+    a real Warp token so it can't be CI-verified** — endpoint/query/auth ported from the proven Mac
+    collector. Configure a token in Settings to exercise it live.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session

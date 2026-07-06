@@ -323,7 +323,9 @@
       "t3chat_cookie_label": "T3 Chat session cookie",
       "t3chat_cookie_help": "Paste your t3.chat session cookie (T3CHAT_COOKIE) — shows 4-hour + monthly usage. Cookies expire; re-paste to refresh.",
       "stepfun_cookie_label": "StepFun session cookie",
-      "stepfun_cookie_help": "Paste your platform.stepfun.com cookie incl. Oasis-Token (STEPFUN_COOKIE) — shows 5-hour + weekly usage. Cookies expire; re-paste to refresh."
+      "stepfun_cookie_help": "Paste your platform.stepfun.com cookie incl. Oasis-Token (STEPFUN_COOKIE) — shows 5-hour + weekly usage. Cookies expire; re-paste to refresh.",
+      "warp_api_key_label": "Warp API key",
+      "warp_api_key_help": "Bearer token from Warp (WARP_API_KEY) — shows your request limit + bonus credits."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

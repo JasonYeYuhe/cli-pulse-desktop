@@ -43,6 +43,7 @@ pub mod perplexity;
 pub mod stepfun;
 pub mod t3chat;
 pub mod venice;
+pub mod warp;
 pub mod zai;
 
 use std::sync::RwLock;
@@ -71,6 +72,7 @@ pub const PROVIDER_AUGMENT: &str = "Augment";
 pub const PROVIDER_PERPLEXITY: &str = "Perplexity";
 pub const PROVIDER_T3CHAT: &str = "T3 Chat";
 pub const PROVIDER_STEPFUN: &str = "StepFun";
+pub const PROVIDER_WARP: &str = "Warp";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -223,6 +225,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_PERPLEXITY, tokio::spawn(perplexity::collect())), // @allow tokio-spawn
         (PROVIDER_T3CHAT, tokio::spawn(t3chat::collect())), // @allow tokio-spawn
         (PROVIDER_STEPFUN, tokio::spawn(stepfun::collect())), // @allow tokio-spawn
+        (PROVIDER_WARP, tokio::spawn(warp::collect())),     // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -370,6 +373,7 @@ mod tests {
             ("perplexity", PROVIDER_PERPLEXITY),
             ("t3chat", PROVIDER_T3CHAT),
             ("stepfun", PROVIDER_STEPFUN),
+            ("warp", PROVIDER_WARP),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -415,6 +419,7 @@ mod tests {
             PROVIDER_PERPLEXITY,
             PROVIDER_T3CHAT,
             PROVIDER_STEPFUN,
+            PROVIDER_WARP,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),
