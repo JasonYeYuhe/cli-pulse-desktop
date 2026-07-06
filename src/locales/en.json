@@ -317,7 +317,9 @@
       "kimi_k2_api_key_label": "Kimi K2 API key",
       "kimi_k2_api_key_help": "Bearer key from kimi-k2.ai (KIMI_K2_API_KEY) — shows your credit usage.",
       "augment_cookie_label": "Augment session cookie",
-      "augment_cookie_help": "Paste your app.augmentcode.com session cookie (AUGMENT_COOKIE) — shows credit usage. Cookies expire; re-paste to refresh."
+      "augment_cookie_help": "Paste your app.augmentcode.com session cookie (AUGMENT_COOKIE) — shows credit usage. Cookies expire; re-paste to refresh.",
+      "perplexity_cookie_label": "Perplexity session cookie",
+      "perplexity_cookie_help": "Paste your perplexity.ai session cookie (PERPLEXITY_COOKIE) — shows credit balance. Cookies expire; re-paste to refresh."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

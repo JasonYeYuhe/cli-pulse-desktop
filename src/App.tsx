@@ -3207,6 +3207,7 @@ type ProviderCredsView = {
   venice_api_key_set: boolean;
   kimi_k2_api_key_set: boolean;
   augment_cookie_set: boolean;
+  perplexity_cookie_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3220,6 +3221,7 @@ type ProviderCredsView = {
   env_override_venice: boolean;
   env_override_kimi_k2: boolean;
   env_override_augment: boolean;
+  env_override_perplexity: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3240,7 +3242,8 @@ type ProviderCredsUpdateKey =
   | "moonshot_api_key"
   | "venice_api_key"
   | "kimi_k2_api_key"
-  | "augment_cookie";
+  | "augment_cookie"
+  | "perplexity_cookie";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3401,6 +3404,15 @@ function IntegrationsSection() {
       isSet: view.augment_cookie_set,
       envOverride: view.env_override_augment,
       envVar: "AUGMENT_COOKIE",
+    },
+    {
+      provider: "Perplexity",
+      key: "perplexity_cookie",
+      labelKey: "settings.integrations.perplexity_cookie_label",
+      helpKey: "settings.integrations.perplexity_cookie_help",
+      isSet: view.perplexity_cookie_set,
+      envOverride: view.env_override_perplexity,
+      envVar: "PERPLEXITY_COOKIE",
     },
   ];
 

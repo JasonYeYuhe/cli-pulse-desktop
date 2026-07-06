@@ -386,6 +386,22 @@ audit against the Mac app (v1.28).
     session cookie so it can't be CI-verified** — endpoints/auth ported from the proven Mac collector.
     Paste a cookie in Settings to exercise it live.
 
+- **Perplexity credit collector** (v0.16 cookie batch #2 — port of macOS `PerplexityCollector`, itself
+  from steipete/CodexBar MIT). Adds Perplexity as a 15th provider (2nd cookie collector). Reads a session
+  cookie (Settings paste, or env `PERPLEXITY_SESSION_TOKEN` / `PERPLEXITY_COOKIE`), fetches
+  `GET perplexity.ai/rest/billing/credits` (with browser-like Origin/Referer/User-Agent headers — the
+  endpoint 403s without them), and attributes credit grants with a **waterfall** (recurring → purchased →
+  promotional): `total_usage_cents` drains each pool in order, so each tier shows `remaining = pool_total
+  − pool_used`. Expired promotional grants are excluded; the plan (Free/Pro/Max) is inferred from the
+  recurring pool. Scaled at **$1 = 100 000 units** (the OpenRouter convention the Mac uses here).
+  - `src-tauri/src/quota/perplexity.rs` (6 waterfall / expiry / plan / scale unit tests, with an injectable
+    clock so promo-expiry is deterministic) + `collect_all` wiring + `PROVIDER_PERPLEXITY = "Perplexity"`.
+    New `perplexity_cookie` cred through `provider_creds` (OS-keychain + file + migration + wipe) and a
+    **Settings → Integrations** cookie-paste row (+2 i18n keys × 3).
+  - **Verification posture:** attribution / scale / plan fully unit-tested; the **live fetch needs a real
+    Perplexity session cookie so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Paste a cookie in Settings to exercise it live.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session

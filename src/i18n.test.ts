@@ -106,6 +106,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Augment collector (v0.16 cookie batch) — Settings cookie-paste row.
     "settings.integrations.augment_cookie_label",
     "settings.integrations.augment_cookie_help",
+    // Perplexity collector (v0.16 cookie batch) — Settings cookie-paste row.
+    "settings.integrations.perplexity_cookie_label",
+    "settings.integrations.perplexity_cookie_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

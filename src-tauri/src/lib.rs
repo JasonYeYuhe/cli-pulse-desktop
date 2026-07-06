@@ -1591,6 +1591,7 @@ struct ProviderCredsView {
     venice_api_key_set: bool,
     kimi_k2_api_key_set: bool,
     augment_cookie_set: bool,
+    perplexity_cookie_set: bool,
     /// Optional override for OpenRouter's API URL — NOT secret, returned
     /// plaintext so the Settings UI can show the current custom endpoint
     /// (or empty if using default openrouter.ai).
@@ -1613,6 +1614,7 @@ struct ProviderCredsView {
     env_override_venice: bool,
     env_override_kimi_k2: bool,
     env_override_augment: bool,
+    env_override_perplexity: bool,
     /// v0.4.20 — surface the active storage backend ("os_keychain" or
     /// "file") inside the Settings → Integrations panel itself. v0.4.16
     /// already exposed this on `DiagnosticSnapshot`, but a Linux user
@@ -1640,6 +1642,7 @@ struct ProviderCredsUpdate {
     venice_api_key: Option<String>,
     kimi_k2_api_key: Option<String>,
     augment_cookie: Option<String>,
+    perplexity_cookie: Option<String>,
 }
 
 fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
@@ -1659,6 +1662,10 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         venice_api_key_set: c.venice_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         kimi_k2_api_key_set: c.kimi_k2_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         augment_cookie_set: c.augment_cookie.as_deref().is_some_and(|s| !s.is_empty()),
+        perplexity_cookie_set: c
+            .perplexity_cookie
+            .as_deref()
+            .is_some_and(|s| !s.is_empty()),
         openrouter_base_url: c.openrouter_base_url.clone(),
         env_override_cursor: env_set("CURSOR_COOKIE"),
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
@@ -1674,6 +1681,8 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
             || env_set("KIMI_API_KEY")
             || env_set("KIMI_KEY"),
         env_override_augment: env_set("AUGMENT_COOKIE"),
+        env_override_perplexity: env_set("PERPLEXITY_SESSION_TOKEN")
+            || env_set("PERPLEXITY_COOKIE"),
         storage_backend: provider_creds::current_backend(),
     }
 }
@@ -1727,6 +1736,9 @@ async fn set_provider_creds(
     }
     if let Some(v) = update.augment_cookie {
         current.augment_cookie = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.perplexity_cookie {
+        current.perplexity_cookie = if v.is_empty() { None } else { Some(v) };
     }
     provider_creds::save(&current).map_err(|e| e.to_string())?;
     // Emit event so the background sync loop (or any other listener) can
