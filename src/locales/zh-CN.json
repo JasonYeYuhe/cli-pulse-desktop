@@ -313,7 +313,9 @@
       "augment_cookie_label": "Augment 会话 Cookie",
       "augment_cookie_help": "粘贴你的 app.augmentcode.com 会话 Cookie(AUGMENT_COOKIE)—— 显示积分用量。Cookie 会过期,失效后重新粘贴。",
       "perplexity_cookie_label": "Perplexity 会话 Cookie",
-      "perplexity_cookie_help": "粘贴你的 perplexity.ai 会话 Cookie(PERPLEXITY_COOKIE)—— 显示积分余额。Cookie 会过期,失效后重新粘贴。"
+      "perplexity_cookie_help": "粘贴你的 perplexity.ai 会话 Cookie(PERPLEXITY_COOKIE)—— 显示积分余额。Cookie 会过期,失效后重新粘贴。",
+      "t3chat_cookie_label": "T3 Chat 会话 Cookie",
+      "t3chat_cookie_help": "粘贴你的 t3.chat 会话 Cookie(T3CHAT_COOKIE)—— 显示 4 小时与每月用量。Cookie 会过期,失效后重新粘贴。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

@@ -40,6 +40,7 @@ pub mod minimax;
 pub mod moonshot;
 pub mod openrouter;
 pub mod perplexity;
+pub mod t3chat;
 pub mod venice;
 pub mod zai;
 
@@ -67,6 +68,7 @@ pub const PROVIDER_VENICE: &str = "Venice";
 pub const PROVIDER_KIMI_K2: &str = "Kimi K2";
 pub const PROVIDER_AUGMENT: &str = "Augment";
 pub const PROVIDER_PERPLEXITY: &str = "Perplexity";
+pub const PROVIDER_T3CHAT: &str = "T3 Chat";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -217,6 +219,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_KIMI_K2, tokio::spawn(kimik2::collect())), // @allow tokio-spawn
         (PROVIDER_AUGMENT, tokio::spawn(augment::collect())), // @allow tokio-spawn
         (PROVIDER_PERPLEXITY, tokio::spawn(perplexity::collect())), // @allow tokio-spawn
+        (PROVIDER_T3CHAT, tokio::spawn(t3chat::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -362,6 +365,7 @@ mod tests {
             ("kimiK2", PROVIDER_KIMI_K2),
             ("augment", PROVIDER_AUGMENT),
             ("perplexity", PROVIDER_PERPLEXITY),
+            ("t3chat", PROVIDER_T3CHAT),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -405,6 +409,7 @@ mod tests {
             PROVIDER_KIMI_K2,
             PROVIDER_AUGMENT,
             PROVIDER_PERPLEXITY,
+            PROVIDER_T3CHAT,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

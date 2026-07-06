@@ -68,6 +68,7 @@ const ACCT_VENICE: &str = "venice-api-key";
 const ACCT_KIMI_K2: &str = "kimi-k2-api-key";
 const ACCT_AUGMENT: &str = "augment-cookie";
 const ACCT_PERPLEXITY: &str = "perplexity-cookie";
+const ACCT_T3CHAT: &str = "t3chat-cookie";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -115,6 +116,10 @@ pub struct ProviderCreds {
     /// `ProviderCredsView`.
     #[serde(default)]
     pub perplexity_cookie: Option<String>,
+    /// T3 Chat session cookie (not an api-key). Secret — masked in
+    /// `ProviderCredsView`.
+    #[serde(default)]
+    pub t3chat_cookie: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -138,6 +143,7 @@ impl Default for ProviderCreds {
             kimi_k2_api_key: None,
             augment_cookie: None,
             perplexity_cookie: None,
+            t3chat_cookie: None,
         }
     }
 }
@@ -248,6 +254,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         kimi_k2_api_key: keychain::read_at(ACCT_KIMI_K2).ok().flatten(),
         augment_cookie: keychain::read_at(ACCT_AUGMENT).ok().flatten(),
         perplexity_cookie: keychain::read_at(ACCT_PERPLEXITY).ok().flatten(),
+        t3chat_cookie: keychain::read_at(ACCT_T3CHAT).ok().flatten(),
     })
 }
 
@@ -291,6 +298,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_KIMI_K2, creds.kimi_k2_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_AUGMENT, creds.augment_cookie.as_deref())?;
     set_or_clear_keychain(ACCT_PERPLEXITY, creds.perplexity_cookie.as_deref())?;
+    set_or_clear_keychain(ACCT_T3CHAT, creds.t3chat_cookie.as_deref())?;
     Ok(())
 }
 
@@ -379,6 +387,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_KIMI_K2,
         ACCT_AUGMENT,
         ACCT_PERPLEXITY,
+        ACCT_T3CHAT,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -485,6 +494,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.kimi_k2_api_key.as_deref(),
             v1.augment_cookie.as_deref(),
             v1.perplexity_cookie.as_deref(),
+            v1.t3chat_cookie.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -511,6 +521,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         kimi_k2_api_key: None,
         augment_cookie: None,
         perplexity_cookie: None,
+        t3chat_cookie: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -553,6 +564,7 @@ mod tests {
             kimi_k2_api_key: None,
             augment_cookie: None,
             perplexity_cookie: None,
+            t3chat_cookie: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -634,6 +646,7 @@ mod tests {
             kimi_k2_api_key: None,
             augment_cookie: None,
             perplexity_cookie: None,
+            t3chat_cookie: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -690,6 +703,7 @@ mod tests {
                 kimi_k2_api_key: None,
                 augment_cookie: None,
                 perplexity_cookie: None,
+                t3chat_cookie: None,
             },
         );
         assert!(path.exists());
@@ -721,6 +735,7 @@ mod tests {
                 kimi_k2_api_key: None,
                 augment_cookie: None,
                 perplexity_cookie: None,
+                t3chat_cookie: None,
             },
         );
         assert!(path.exists());
@@ -768,6 +783,7 @@ mod tests {
                 kimi_k2_api_key: None,
                 augment_cookie: None,
                 perplexity_cookie: None,
+                t3chat_cookie: None,
             },
         );
         assert!(path_v1.exists());

@@ -402,6 +402,24 @@ audit against the Mac app (v1.28).
     Perplexity session cookie so it can't be CI-verified** — endpoint/auth ported from the proven Mac
     collector. Paste a cookie in Settings to exercise it live.
 
+- **T3 Chat usage collector** (v0.16 cookie batch #3 — port of macOS `T3ChatCollector`, itself from
+  steipete/CodexBar MIT). Adds T3 Chat as a 16th provider (3rd cookie collector) — and the **first
+  cookie collector with a real percent-window quota gauge** (like Claude/Codex, not a balance). Reads a
+  session cookie (Settings paste, or env `T3CHAT_COOKIE`), fetches
+  `GET t3.chat/api/trpc/getCustomerData` (tRPC → JSONL, with browser-like + tRPC headers), recursively
+  locates the customer object in the JSONL envelope, and maps two *used*-percentage windows (4-hour +
+  monthly) to `remaining = 100 − used` gauges (`quota = 100`). The 4-hour window is the headline; plan
+  name is title-cased from the subscription. A 429 Vercel bot-challenge surfaces an actionable
+  "refresh your cookie" error.
+  - `src-tauri/src/quota/t3chat.rs` (6 JSONL-finder / percent-clamp / plan / ms-epoch unit tests) +
+    `collect_all` wiring + `PROVIDER_T3CHAT = "T3 Chat"`. New `t3chat_cookie` cred through
+    `provider_creds` (OS-keychain + file + migration + wipe) and a **Settings → Integrations**
+    cookie-paste row (+2 i18n keys × 3). Note: the Mac's per-tier `windowMinutes` isn't carried (the
+    desktop `TierEntry` has no such field yet — same reason pace text is still deferred).
+  - **Verification posture:** JSONL parsing / percent mapping / plan inference fully unit-tested; the
+    **live fetch needs a real T3 Chat session cookie so it can't be CI-verified** — endpoint/auth ported
+    from the proven Mac collector. Paste a cookie in Settings to exercise it live.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session
