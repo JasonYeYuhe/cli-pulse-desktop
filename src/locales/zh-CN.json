@@ -295,7 +295,9 @@
       "clear_confirm_title": "清除 {{provider}} 凭证?",
       "clear_confirm_body": "你需要从原处重新粘贴。此操作不可撤销。",
       "clear_confirm_action": "清除",
-      "env_override_banner": "环境变量 {{var}} 正在覆盖此保存的值。请从系统中移除该变量以生效。"
+      "env_override_banner": "环境变量 {{var}} 正在覆盖此保存的值。请从系统中移除该变量以生效。",
+      "deepseek_api_key_label": "DeepSeek API 密钥",
+      "deepseek_api_key_help": "来自 platform.deepseek.com 的 Bearer 密钥 —— 显示你的余额。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

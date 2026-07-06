@@ -30,6 +30,7 @@ pub mod claude_refresh;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
+pub mod deepseek;
 pub mod gemini;
 pub mod gemini_refresh;
 pub mod openrouter;
@@ -49,6 +50,7 @@ pub const PROVIDER_CURSOR: &str = "Cursor";
 pub const PROVIDER_GEMINI: &str = "Gemini";
 pub const PROVIDER_COPILOT: &str = "Copilot";
 pub const PROVIDER_OPENROUTER: &str = "OpenRouter";
+pub const PROVIDER_DEEPSEEK: &str = "DeepSeek";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -190,6 +192,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_GEMINI, tokio::spawn(gemini::collect())), // @allow tokio-spawn
         (PROVIDER_COPILOT, tokio::spawn(copilot::collect())), // @allow tokio-spawn
         (PROVIDER_OPENROUTER, tokio::spawn(openrouter::collect())), // @allow tokio-spawn
+        (PROVIDER_DEEPSEEK, tokio::spawn(deepseek::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -324,6 +327,7 @@ mod tests {
             ("gemini", PROVIDER_GEMINI),
             ("copilot", PROVIDER_COPILOT),
             ("openRouter", PROVIDER_OPENROUTER),
+            ("deepseek", PROVIDER_DEEPSEEK),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -358,6 +362,7 @@ mod tests {
             PROVIDER_GEMINI,
             PROVIDER_COPILOT,
             PROVIDER_OPENROUTER,
+            PROVIDER_DEEPSEEK,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

@@ -295,7 +295,9 @@
       "clear_confirm_title": "{{provider}} の認証情報を削除しますか?",
       "clear_confirm_body": "元のソースから再度貼り付ける必要があります。この操作は取り消せません。",
       "clear_confirm_action": "削除",
-      "env_override_banner": "環境変数 {{var}} が保存された値を上書きしています。この設定を有効にするにはシステムから変数を削除してください。"
+      "env_override_banner": "環境変数 {{var}} が保存された値を上書きしています。この設定を有効にするにはシステムから変数を削除してください。",
+      "deepseek_api_key_label": "DeepSeek API キー",
+      "deepseek_api_key_help": "platform.deepseek.com の Bearer キー — 残高を表示します。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

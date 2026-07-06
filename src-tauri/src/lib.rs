@@ -1583,6 +1583,7 @@ struct ProviderCredsView {
     cursor_cookie_set: bool,
     copilot_token_set: bool,
     openrouter_api_key_set: bool,
+    deepseek_api_key_set: bool,
     /// Optional override for OpenRouter's API URL — NOT secret, returned
     /// plaintext so the Settings UI can show the current custom endpoint
     /// (or empty if using default openrouter.ai).
@@ -1597,6 +1598,7 @@ struct ProviderCredsView {
     env_override_copilot: bool,
     env_override_openrouter_key: bool,
     env_override_openrouter_url: bool,
+    env_override_deepseek: bool,
     /// v0.4.20 — surface the active storage backend ("os_keychain" or
     /// "file") inside the Settings → Integrations panel itself. v0.4.16
     /// already exposed this on `DiagnosticSnapshot`, but a Linux user
@@ -1616,6 +1618,7 @@ struct ProviderCredsUpdate {
     copilot_token: Option<String>,
     openrouter_api_key: Option<String>,
     openrouter_base_url: Option<String>,
+    deepseek_api_key: Option<String>,
 }
 
 fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
@@ -1627,11 +1630,13 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
             .openrouter_api_key
             .as_deref()
             .is_some_and(|s| !s.is_empty()),
+        deepseek_api_key_set: c.deepseek_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         openrouter_base_url: c.openrouter_base_url.clone(),
         env_override_cursor: env_set("CURSOR_COOKIE"),
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
         env_override_openrouter_key: env_set("OPENROUTER_API_KEY"),
         env_override_openrouter_url: env_set("OPENROUTER_API_URL"),
+        env_override_deepseek: env_set("DEEPSEEK_API_KEY") || env_set("DEEPSEEK_KEY"),
         storage_backend: provider_creds::current_backend(),
     }
 }
@@ -1661,6 +1666,9 @@ async fn set_provider_creds(
     }
     if let Some(v) = update.openrouter_base_url {
         current.openrouter_base_url = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.deepseek_api_key {
+        current.deepseek_api_key = if v.is_empty() { None } else { Some(v) };
     }
     provider_creds::save(&current).map_err(|e| e.to_string())?;
     // Emit event so the background sync loop (or any other listener) can

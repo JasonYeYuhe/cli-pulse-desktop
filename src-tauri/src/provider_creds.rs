@@ -59,6 +59,7 @@ const ACCT_CURSOR: &str = "cursor-cookie";
 const ACCT_COPILOT: &str = "copilot-token";
 const ACCT_OR_KEY: &str = "openrouter-api-key";
 const ACCT_OR_URL: &str = "openrouter-base-url";
+const ACCT_DEEPSEEK: &str = "deepseek-api-key";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -77,6 +78,9 @@ pub struct ProviderCreds {
     /// secret — exposed plaintext in `ProviderCredsView`.
     #[serde(default)]
     pub openrouter_base_url: Option<String>,
+    /// DeepSeek api-key (Bearer). Secret — masked in `ProviderCredsView`.
+    #[serde(default)]
+    pub deepseek_api_key: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -91,6 +95,7 @@ impl Default for ProviderCreds {
             copilot_token: None,
             openrouter_api_key: None,
             openrouter_base_url: None,
+            deepseek_api_key: None,
         }
     }
 }
@@ -192,6 +197,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         copilot_token: keychain::read_at(ACCT_COPILOT).ok().flatten(),
         openrouter_api_key: keychain::read_at(ACCT_OR_KEY).ok().flatten(),
         openrouter_base_url: keychain::read_at(ACCT_OR_URL).ok().flatten(),
+        deepseek_api_key: keychain::read_at(ACCT_DEEPSEEK).ok().flatten(),
     })
 }
 
@@ -226,6 +232,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_COPILOT, creds.copilot_token.as_deref())?;
     set_or_clear_keychain(ACCT_OR_KEY, creds.openrouter_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_OR_URL, creds.openrouter_base_url.as_deref())?;
+    set_or_clear_keychain(ACCT_DEEPSEEK, creds.deepseek_api_key.as_deref())?;
     Ok(())
 }
 
@@ -300,7 +307,13 @@ pub fn wipe() -> anyhow::Result<()> {
     // selected for THIS process while the keychain still has stale
     // entries from a prior session. Clear both so wipe() is robust to
     // backend drift.
-    for account in [ACCT_CURSOR, ACCT_COPILOT, ACCT_OR_KEY, ACCT_OR_URL] {
+    for account in [
+        ACCT_CURSOR,
+        ACCT_COPILOT,
+        ACCT_OR_KEY,
+        ACCT_OR_URL,
+        ACCT_DEEPSEEK,
+    ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
         }
@@ -397,6 +410,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.copilot_token.as_deref(),
             v1.openrouter_api_key.as_deref(),
             v1.openrouter_base_url.as_deref(),
+            v1.deepseek_api_key.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -414,6 +428,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         copilot_token: None,
         openrouter_api_key: None,
         openrouter_base_url: None,
+        deepseek_api_key: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -447,6 +462,7 @@ mod tests {
             copilot_token: Some("ghp_test".into()),
             openrouter_api_key: Some("sk-or-v1-test".into()),
             openrouter_base_url: Some("https://custom.example.com".into()),
+            deepseek_api_key: Some("sk-deepseek-test".into()),
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -519,6 +535,7 @@ mod tests {
             copilot_token: None,
             openrouter_api_key: None,
             openrouter_base_url: None,
+            deepseek_api_key: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -566,6 +583,7 @@ mod tests {
                 copilot_token: None,
                 openrouter_api_key: None,
                 openrouter_base_url: None,
+                deepseek_api_key: None,
             },
         );
         assert!(path.exists());
@@ -588,6 +606,7 @@ mod tests {
                 copilot_token: None,
                 openrouter_api_key: None,
                 openrouter_base_url: None,
+                deepseek_api_key: None,
             },
         );
         assert!(path.exists());
@@ -626,6 +645,7 @@ mod tests {
                 copilot_token: Some("ghp_real".into()),
                 openrouter_api_key: Some("sk-or-real".into()),
                 openrouter_base_url: None,
+                deepseek_api_key: None,
             },
         );
         assert!(path_v1.exists());

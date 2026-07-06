@@ -221,6 +221,24 @@ audit against the Mac app (v1.28).
     unit tests (indicator mapping, catalog coverage, operational/incident
     parse, malformed-body rejection), no network needed. `get_service_statuses`
     Tauri command. 5 severity i18n keys × 3 langs, pinned.
+- **DeepSeek quota collector** (v0.15 provider batch #1 — port of macOS
+  `DeepSeekCollector`, itself from steipete/CodexBar MIT). Adds DeepSeek as a
+  7th provider: reads the api-key (Settings → Integrations, or env
+  `DEEPSEEK_API_KEY`/`DEEPSEEK_KEY`), fetches `GET api.deepseek.com/user/balance`,
+  and shows your balance per currency as tiers. Pure-balance (no depleting
+  quota) — each positive-balance currency is a tier (`quota == remaining`);
+  string-encoded balances parsed defensively; USD-positive → any-positive
+  primary selection (verbatim from upstream).
+  - `src-tauri/src/quota/deepseek.rs` (5 parse/mapping unit tests) + `collect_all`
+    wiring + `PROVIDER_DEEPSEEK` (validated against the refreshed snapshot).
+    `deepseek_api_key` added through `provider_creds` (OS-keychain + file +
+    migration + wipe) and a new **Settings → Integrations** input row (+2 i18n
+    keys × 3). Provider literal `"DeepSeek"` matches the Mac `ProviderKind`
+    rawValue so the dual-writer converges on one `(user_id, provider)` row.
+  - **Verification posture:** the parse/mapping is fully unit-tested; the
+    **live fetch needs a real DeepSeek key so it can't be CI-verified** (same as
+    the other 6 collectors) — the endpoint/auth are ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
 
 ### Internal
 
