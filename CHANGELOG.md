@@ -205,6 +205,22 @@ audit against the Mac app (v1.28).
     work-or-degrade-gracefully — pinned by a partial/full/evolved decode test.
     `get_devices` mirrors the `get_sessions_history` GET. 4 fleet i18n keys +
     states × 3 langs, pinned. +1 Rust test.
+- **Provider service-status badges** (v0.14 — "is it me or is the provider
+  down?"). Each provider card now shows a small **status dot** driven by the
+  provider's public **Atlassian Statuspage** (`status.json`) — green
+  operational, amber/orange minor/major, red critical — with a localized
+  tooltip + the page's own description, and a click-through to the status page.
+  Covers the four shipped providers that publish a Statuspage (Claude →
+  `status.claude.com`, Codex → `status.openai.com`, Cursor, Copilot →
+  `githubstatus.com`); Gemini + OpenRouter have no standard Statuspage → no
+  dot (honest, not an error).
+  - **`src-tauri/src/service_status.rs`** — indicator model + tolerant
+    `status.json` parse + catalog + a **concurrent, 5-min-cached** fetch
+    (`tokio::join!`, no burst). **Public endpoints, no auth, no pairing** — so
+    unlike quota collectors this is **fully CI-verifiable**: 4 parse/catalog
+    unit tests (indicator mapping, catalog coverage, operational/incident
+    parse, malformed-body rejection), no network needed. `get_service_statuses`
+    Tauri command. 5 severity i18n keys × 3 langs, pinned.
 
 ### Internal
 

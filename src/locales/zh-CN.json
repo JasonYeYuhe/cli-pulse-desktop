@@ -125,7 +125,12 @@
     "warn_threshold": "使用达 {{pct}}% 时警告",
     "chart_title": "30 天用量",
     "chart_no_history": "暂无足够历史。",
-    "chart_io_total": "{{value}} 输入/输出 tokens"
+    "chart_io_total": "{{value}} 输入/输出 tokens",
+    "status_operational": "运营正常",
+    "status_maintenance": "维护中",
+    "status_minor": "轻微问题",
+    "status_major": "严重故障",
+    "status_critical": "严重中断"
   },
   "sessions": {
     "header": "{{active}} 活跃 · 扫描 {{total}} 个进程 · 刷新于 {{time}}",

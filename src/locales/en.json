@@ -129,7 +129,12 @@
     "warn_threshold": "Warning at {{pct}}% used",
     "chart_title": "30-day usage",
     "chart_no_history": "Not enough history yet.",
-    "chart_io_total": "{{value}} I/O tokens"
+    "chart_io_total": "{{value}} I/O tokens",
+    "status_operational": "Operational",
+    "status_maintenance": "Maintenance",
+    "status_minor": "Minor issues",
+    "status_major": "Major outage",
+    "status_critical": "Critical outage"
   },
   "sessions": {
     "header": "{{active}} active · {{total}} processes scanned · refreshed {{time}}",

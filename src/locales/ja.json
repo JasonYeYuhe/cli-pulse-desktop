@@ -125,7 +125,12 @@
     "warn_threshold": "{{pct}}% 使用で警告",
     "chart_title": "30日間の使用量",
     "chart_no_history": "履歴がまだ不足しています。",
-    "chart_io_total": "{{value}} I/O トークン"
+    "chart_io_total": "{{value}} I/O トークン",
+    "status_operational": "正常稼働",
+    "status_maintenance": "メンテナンス中",
+    "status_minor": "軽微な問題",
+    "status_major": "重大な障害",
+    "status_critical": "重大な停止"
   },
   "sessions": {
     "header": "{{active}} アクティブ · {{total}} プロセス走査 · 更新 {{time}}",

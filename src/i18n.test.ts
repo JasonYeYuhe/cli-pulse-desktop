@@ -100,6 +100,12 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "providers.chart_title",
     "providers.chart_no_history",
     "providers.chart_io_total",
+    // v0.14 — provider service-status badge severity labels.
+    "providers.status_operational",
+    "providers.status_maintenance",
+    "providers.status_minor",
+    "providers.status_major",
+    "providers.status_critical",
     // v0.10.1 — alert related-entity chips (session + device), macOS parity.
     "misc.session_label",
     "misc.device_label",

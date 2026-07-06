@@ -32,6 +32,7 @@ pub mod remote;
 pub mod risk;
 pub mod scanner;
 pub mod sentry_init;
+pub mod service_status;
 pub mod sessions;
 pub mod smoke;
 pub mod supabase;
@@ -1080,6 +1081,14 @@ async fn get_devices() -> Result<Vec<supabase::DeviceHealthRow>, String> {
         async move { supabase::get_devices(&user_id, &jwt).await }
     })
     .await
+}
+
+/// v0.14 — provider service-status (public Atlassian Statuspage; no auth,
+/// no pairing). Cached ~5min. Never errors — a failed fetch just omits that
+/// provider.
+#[tauri::command]
+async fn get_service_statuses() -> Result<Vec<service_status::ServiceStatus>, String> {
+    Ok(service_status::get_statuses().await)
 }
 
 /// v0.5.2 — top-projects aggregation. See `top_projects.rs` for
@@ -2718,6 +2727,8 @@ pub fn run() {
             get_sessions_history,
             // Cross-device health read-back (Machine tab fleet section)
             get_devices,
+            // v0.14 — provider service-status badges (public Statuspage)
+            get_service_statuses,
             // v0.5.6 — Tray mini-metrics force-refresh (language change path)
             force_tray_menu_refresh,
             // v0.6.0 — Remote Approvals (app-side view + decide)

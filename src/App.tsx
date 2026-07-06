@@ -1969,6 +1969,31 @@ function QuotaBarTicks({ thresholds = DEFAULT_WARN_THRESHOLDS }: { thresholds?: 
   );
 }
 
+type ServiceStatusRow = {
+  provider: string;
+  indicator: "operational" | "maintenance" | "minor" | "major" | "critical" | "unknown";
+  description: string;
+  page_url: string | null;
+};
+
+// Dot color by severity (v0.14). `unknown` → null (no dot — nothing meaningful).
+function serviceStatusColor(indicator: ServiceStatusRow["indicator"]): string | null {
+  switch (indicator) {
+    case "operational":
+      return "#34d399";
+    case "maintenance":
+      return "#38bdf8";
+    case "minor":
+      return "#fbbf24";
+    case "major":
+      return "#fb923c";
+    case "critical":
+      return "#f87171";
+    default:
+      return null;
+  }
+}
+
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -2173,6 +2198,27 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
     return m;
   }, [collectorStatus]);
 
+  // v0.14 — provider service-status (public Statuspage; no auth). Fetched once
+  // on mount; the Rust side caches ~5min so re-opening the tab is cheap.
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatusRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<ServiceStatusRow[]>("get_service_statuses")
+      .then((s) => {
+        if (!cancelled) setServiceStatus(s);
+      })
+      .catch(() => {
+        // Non-fatal — no badges rather than an error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const serviceStatusByProvider = useMemo(
+    () => new Map(serviceStatus.map((s) => [s.provider, s])),
+    [serviceStatus],
+  );
+
   const grouped = useMemo<ProviderAgg[] | null>(() => {
     // v0.4.8 — also render cards when only server data is available
     // (paired user with valid Gemini/Codex creds but no local scan
@@ -2374,6 +2420,37 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                       {providerMonogram(v.provider)}
                     </span>
                     <span className="font-semibold">{v.provider}</span>
+                    {(() => {
+                      // v0.14 — provider service-status dot (public Statuspage).
+                      const ss = serviceStatusByProvider.get(v.provider);
+                      const color = ss ? serviceStatusColor(ss.indicator) : null;
+                      if (!ss || !color) return null;
+                      const label = `${t(`providers.status_${ss.indicator}`)}${
+                        ss.description ? ` · ${ss.description}` : ""
+                      }`;
+                      const dot = (
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: color }}
+                          title={label}
+                          aria-label={label}
+                          role="img"
+                        />
+                      );
+                      return ss.page_url ? (
+                        <a
+                          href={ss.page_url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          onClick={(e) => e.stopPropagation()}
+                          className="shrink-0 flex items-center"
+                        >
+                          {dot}
+                        </a>
+                      ) : (
+                        dot
+                      );
+                    })()}
                     {srv?.plan_type && <PlanBadge plan={srv.plan_type} />}
                     {/* v0.4.20 — error badge takes precedence over the
                         v0.4.15 stale badge: a known collect() failure
