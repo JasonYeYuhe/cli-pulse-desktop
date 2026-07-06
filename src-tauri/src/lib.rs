@@ -1595,6 +1595,7 @@ struct ProviderCredsView {
     t3chat_cookie_set: bool,
     stepfun_cookie_set: bool,
     warp_api_key_set: bool,
+    kimi_auth_token_set: bool,
     /// Optional override for OpenRouter's API URL — NOT secret, returned
     /// plaintext so the Settings UI can show the current custom endpoint
     /// (or empty if using default openrouter.ai).
@@ -1621,6 +1622,7 @@ struct ProviderCredsView {
     env_override_t3chat: bool,
     env_override_stepfun: bool,
     env_override_warp: bool,
+    env_override_kimi: bool,
     /// v0.4.20 — surface the active storage backend ("os_keychain" or
     /// "file") inside the Settings → Integrations panel itself. v0.4.16
     /// already exposed this on `DiagnosticSnapshot`, but a Linux user
@@ -1652,6 +1654,7 @@ struct ProviderCredsUpdate {
     t3chat_cookie: Option<String>,
     stepfun_cookie: Option<String>,
     warp_api_key: Option<String>,
+    kimi_auth_token: Option<String>,
 }
 
 fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
@@ -1678,6 +1681,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         t3chat_cookie_set: c.t3chat_cookie.as_deref().is_some_and(|s| !s.is_empty()),
         stepfun_cookie_set: c.stepfun_cookie.as_deref().is_some_and(|s| !s.is_empty()),
         warp_api_key_set: c.warp_api_key.as_deref().is_some_and(|s| !s.is_empty()),
+        kimi_auth_token_set: c.kimi_auth_token.as_deref().is_some_and(|s| !s.is_empty()),
         openrouter_base_url: c.openrouter_base_url.clone(),
         env_override_cursor: env_set("CURSOR_COOKIE"),
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
@@ -1698,6 +1702,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         env_override_t3chat: env_set("T3CHAT_COOKIE"),
         env_override_stepfun: env_set("STEPFUN_COOKIE") || env_set("STEPFUN_OASIS_TOKEN"),
         env_override_warp: env_set("WARP_API_KEY") || env_set("WARP_TOKEN"),
+        env_override_kimi: env_set("KIMI_AUTH_TOKEN"),
         storage_backend: provider_creds::current_backend(),
     }
 }
@@ -1763,6 +1768,9 @@ async fn set_provider_creds(
     }
     if let Some(v) = update.warp_api_key {
         current.warp_api_key = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.kimi_auth_token {
+        current.kimi_auth_token = if v.is_empty() { None } else { Some(v) };
     }
     provider_creds::save(&current).map_err(|e| e.to_string())?;
     // Emit event so the background sync loop (or any other listener) can

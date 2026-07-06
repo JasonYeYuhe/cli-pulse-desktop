@@ -118,6 +118,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Warp collector (v0.16 — GraphQL api-key) — Settings input row.
     "settings.integrations.warp_api_key_label",
     "settings.integrations.warp_api_key_help",
+    // Kimi collector (v0.16 — connect-JSON token) — Settings input row.
+    "settings.integrations.kimi_auth_token_label",
+    "settings.integrations.kimi_auth_token_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

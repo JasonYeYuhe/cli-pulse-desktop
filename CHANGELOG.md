@@ -452,6 +452,22 @@ audit against the Mac app (v1.28).
     a real Warp token so it can't be CI-verified** — endpoint/query/auth ported from the proven Mac
     collector. Configure a token in Settings to exercise it live.
 
+- **Kimi (consumer app) usage collector** (v0.16 — Connect-RPC, port of macOS `KimiCollector`). Adds
+  Kimi as a 19th provider — **distinct from the existing Kimi K2** (that's the kimi-k2.ai developer
+  api-key balance; this is the kimi.com coding-console usage). Despite the `…BillingService/GetUsages`
+  Connect-RPC endpoint it uses the **JSON codec** (`Content-Type: application/json`,
+  `connect-protocol-version: 1`, body `{"scope":["FEATURE_CODING"]}`) — an ordinary HTTP+JSON POST, not
+  protobuf. Auth: the `kimi-auth` JWT (env `KIMI_AUTH_TOKEN` or Settings) — the value may be the raw JWT
+  or a full Cookie header, from which the `kimi-auth=…` value is extracted. Maps a weekly window
+  (headline) + an optional 5-hour rate-limit window; all counts arrive as JSON strings.
+  - `src-tauri/src/quota/kimi.rs` (6 window-mapping / string-parse / token-extract unit tests) +
+    `collect_all` wiring + `PROVIDER_KIMI = "Kimi"`. New `kimi_auth_token` cred through `provider_creds`
+    (OS-keychain + file + migration + wipe) and a **Settings → Integrations** token-paste row (+2 i18n
+    keys × 3).
+  - **Verification posture:** Connect-JSON response parsing / windowing fully unit-tested; the **live
+    fetch needs a real `kimi-auth` token so it can't be CI-verified** — endpoint/auth ported from the
+    proven Mac collector. Paste a token in Settings to exercise it live.
+
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
   stale 6-entry list; it now mirrors the whole Mac provider enum (status/session

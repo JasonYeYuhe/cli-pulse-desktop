@@ -325,7 +325,9 @@
       "stepfun_cookie_label": "StepFun session cookie",
       "stepfun_cookie_help": "Paste your platform.stepfun.com cookie incl. Oasis-Token (STEPFUN_COOKIE) — shows 5-hour + weekly usage. Cookies expire; re-paste to refresh.",
       "warp_api_key_label": "Warp API key",
-      "warp_api_key_help": "Bearer token from Warp (WARP_API_KEY) — shows your request limit + bonus credits."
+      "warp_api_key_help": "Bearer token from Warp (WARP_API_KEY) — shows your request limit + bonus credits.",
+      "kimi_auth_token_label": "Kimi auth token",
+      "kimi_auth_token_help": "Paste your kimi.com kimi-auth token or full cookie header (KIMI_AUTH_TOKEN) — shows weekly + 5h usage. Tokens expire; re-paste to refresh."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

@@ -3211,6 +3211,7 @@ type ProviderCredsView = {
   t3chat_cookie_set: boolean;
   stepfun_cookie_set: boolean;
   warp_api_key_set: boolean;
+  kimi_auth_token_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3228,6 +3229,7 @@ type ProviderCredsView = {
   env_override_t3chat: boolean;
   env_override_stepfun: boolean;
   env_override_warp: boolean;
+  env_override_kimi: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3252,7 +3254,8 @@ type ProviderCredsUpdateKey =
   | "perplexity_cookie"
   | "t3chat_cookie"
   | "stepfun_cookie"
-  | "warp_api_key";
+  | "warp_api_key"
+  | "kimi_auth_token";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3449,6 +3452,15 @@ function IntegrationsSection() {
       isSet: view.warp_api_key_set,
       envOverride: view.env_override_warp,
       envVar: "WARP_API_KEY",
+    },
+    {
+      provider: "Kimi",
+      key: "kimi_auth_token",
+      labelKey: "settings.integrations.kimi_auth_token_label",
+      helpKey: "settings.integrations.kimi_auth_token_help",
+      isSet: view.kimi_auth_token_set,
+      envOverride: view.env_override_kimi,
+      envVar: "KIMI_AUTH_TOKEN",
     },
   ];
 

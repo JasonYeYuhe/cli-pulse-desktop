@@ -319,7 +319,9 @@
       "stepfun_cookie_label": "StepFun セッション Cookie",
       "stepfun_cookie_help": "platform.stepfun.com の Cookie(Oasis-Token を含む、STEPFUN_COOKIE)を貼り付け — 5時間・週間の利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。",
       "warp_api_key_label": "Warp API キー",
-      "warp_api_key_help": "Warp の Bearer トークン(WARP_API_KEY)— リクエスト上限とボーナスクレジットを表示します。"
+      "warp_api_key_help": "Warp の Bearer トークン(WARP_API_KEY)— リクエスト上限とボーナスクレジットを表示します。",
+      "kimi_auth_token_label": "Kimi 認証トークン",
+      "kimi_auth_token_help": "kimi.com の kimi-auth トークンまたは Cookie ヘッダー全体(KIMI_AUTH_TOKEN)を貼り付け — 週間・5時間の利用状況を表示します。トークンは期限切れになるため、失効したら再度貼り付けてください。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

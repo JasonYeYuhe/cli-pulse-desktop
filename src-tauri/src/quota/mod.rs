@@ -35,6 +35,7 @@ pub mod cursor;
 pub mod deepseek;
 pub mod gemini;
 pub mod gemini_refresh;
+pub mod kimi;
 pub mod kimik2;
 pub mod minimax;
 pub mod moonshot;
@@ -73,6 +74,7 @@ pub const PROVIDER_PERPLEXITY: &str = "Perplexity";
 pub const PROVIDER_T3CHAT: &str = "T3 Chat";
 pub const PROVIDER_STEPFUN: &str = "StepFun";
 pub const PROVIDER_WARP: &str = "Warp";
+pub const PROVIDER_KIMI: &str = "Kimi";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -226,6 +228,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_T3CHAT, tokio::spawn(t3chat::collect())), // @allow tokio-spawn
         (PROVIDER_STEPFUN, tokio::spawn(stepfun::collect())), // @allow tokio-spawn
         (PROVIDER_WARP, tokio::spawn(warp::collect())),     // @allow tokio-spawn
+        (PROVIDER_KIMI, tokio::spawn(kimi::collect())),     // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -374,6 +377,7 @@ mod tests {
             ("t3chat", PROVIDER_T3CHAT),
             ("stepfun", PROVIDER_STEPFUN),
             ("warp", PROVIDER_WARP),
+            ("kimi", PROVIDER_KIMI),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -420,6 +424,7 @@ mod tests {
             PROVIDER_T3CHAT,
             PROVIDER_STEPFUN,
             PROVIDER_WARP,
+            PROVIDER_KIMI,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),
