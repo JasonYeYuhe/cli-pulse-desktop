@@ -34,6 +34,7 @@ pub mod cursor;
 pub mod deepseek;
 pub mod gemini;
 pub mod gemini_refresh;
+pub mod kimik2;
 pub mod minimax;
 pub mod moonshot;
 pub mod openrouter;
@@ -61,6 +62,7 @@ pub const PROVIDER_CROF: &str = "Crof";
 pub const PROVIDER_MINIMAX: &str = "MiniMax";
 pub const PROVIDER_MOONSHOT: &str = "Moonshot";
 pub const PROVIDER_VENICE: &str = "Venice";
+pub const PROVIDER_KIMI_K2: &str = "Kimi K2";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -208,6 +210,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_MINIMAX, tokio::spawn(minimax::collect())), // @allow tokio-spawn
         (PROVIDER_MOONSHOT, tokio::spawn(moonshot::collect())), // @allow tokio-spawn
         (PROVIDER_VENICE, tokio::spawn(venice::collect())), // @allow tokio-spawn
+        (PROVIDER_KIMI_K2, tokio::spawn(kimik2::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -308,6 +311,8 @@ mod tests {
         ("vertexAI", "Vertex AI"),
         ("perplexity", "Perplexity"),
         ("volcanoEngine", "Volcano Engine"),
+        ("kimiK2", "Kimi K2"),
+        ("t3chat", "T3 Chat"),
         ("glm", "GLM"),
         ("crof", "Crof"),
         ("deepseek", "DeepSeek"),
@@ -348,6 +353,7 @@ mod tests {
             ("minimax", PROVIDER_MINIMAX),
             ("moonshot", PROVIDER_MOONSHOT),
             ("venice", PROVIDER_VENICE),
+            ("kimiK2", PROVIDER_KIMI_K2),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -388,6 +394,7 @@ mod tests {
             PROVIDER_MINIMAX,
             PROVIDER_MOONSHOT,
             PROVIDER_VENICE,
+            PROVIDER_KIMI_K2,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

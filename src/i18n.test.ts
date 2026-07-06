@@ -100,6 +100,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Venice collector (v0.15 provider batch) — Settings input row.
     "settings.integrations.venice_api_key_label",
     "settings.integrations.venice_api_key_help",
+    // Kimi K2 collector (v0.15 provider batch) — Settings input row.
+    "settings.integrations.kimi_k2_api_key_label",
+    "settings.integrations.kimi_k2_api_key_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

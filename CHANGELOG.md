@@ -347,7 +347,28 @@ audit against the Mac app (v1.28).
     needs a real Venice key so it can't be CI-verified** — endpoint/auth ported from the proven
     Mac collector. Configure a key in Settings to exercise it live.
 
+- **Kimi K2 credit collector** (v0.15 provider batch #7 — port of macOS `KimiK2Collector`).
+  Adds Kimi K2 as a 13th provider: reads the api-key (Settings → Integrations, or env
+  `KIMI_K2_API_KEY` / `KIMI_API_KEY` / `KIMI_KEY`), fetches `GET kimi-k2.ai/api/user/credits`,
+  and maps the consumed + remaining split to a **Credits** tier. Unlike the pure-balance
+  collectors this is a real depleting gauge (`quota = consumed + remaining`, `remaining =
+  remaining`). The response shape varies — fields may be flat, nested under `data`, or
+  `data.usage`, under any of several candidate key names — so a flexible search extracts them
+  (vendored from upstream). Uses **units (×100_000)** to match the Mac Kimi K2 scale.
+  - `src-tauri/src/quota/kimik2.rs` (6 flexible-parse / nesting / scale unit tests) +
+    `collect_all` wiring + `PROVIDER_KIMI_K2 = "Kimi K2"`. `kimi_k2_api_key` added through
+    `provider_creds` (OS-keychain + file + migration + wipe) and a new **Settings →
+    Integrations** input row (+2 i18n keys × 3).
+  - **Verification posture:** parse/nesting/scale fully unit-tested; the **live fetch needs a
+    real Kimi K2 key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 ### Internal
+
+- **`MAC_PROVIDER_KIND_SNAPSHOT` completed to the full 49-entry Mac `ProviderKind` set** — the
+  earlier "47-provider" refresh had silently missed **`kimiK2` ("Kimi K2")** and **`t3chat`
+  ("T3 Chat")**. Both added so the provider-literal contract test guards every real Mac case.
+  (Caught while porting Kimi K2, whose literal wasn't in the fixture.)
 
 - **Provider-contract snapshot refreshed to the full Mac `ProviderKind` set**
   (47 providers; Codex P2). The `MAC_PROVIDER_KIND_SNAPSHOT` test fixture was a
