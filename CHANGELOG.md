@@ -11,6 +11,17 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Activity strip + usage streaks on the Overview** — a compact per-day heat strip over the local scan
+  window (last `days_scanned` days) plus **current** and **longest** usage streaks, learned from
+  `javis603/token-monitor`'s home-screen heatmap + streaks (`DEV_PLAN_2026-07-07_competitive_learnings.md`
+  §3a A4/A5). Local-scan only, so it works unpaired; hidden when the whole window is idle. A day counts as
+  active when it has any tokens **or** any messages (so a Claude-only day, whose tokens live in a separate
+  message bucket, still counts); heat level is quartile-bucketed against the window's busiest day. The
+  current streak has a one-day grace so an unfinished "today" doesn't zero a live streak.
+  - `src/lib/activity.ts` (`buildActivity` / `computeStreaks` / `activityLevel` — pure, timezone-safe via
+    an injectable `from` date) + `src/lib/activity.test.ts` (10 tests) + an `ActivitySection` on the
+    Overview + 5 i18n keys × 3 locales (3 pinned in the critical-labels gate).
+
 - **WSL usage merge on Windows** — Windows developers often run Claude Code / Codex **inside a WSL
   distro**, where the logs live under the Linux home (`/home/<user>/.claude`, …) that the native Windows
   scanner never saw. We now enumerate the home dirs of **running** WSL distros (via the

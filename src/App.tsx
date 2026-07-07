@@ -22,6 +22,7 @@ import {
   toggleHiddenProvider,
 } from "./lib/providerVisibility";
 import { providerColor, providerMonogram } from "./lib/providerTheme";
+import { activityLevel, buildActivity, computeStreaks } from "./lib/activity";
 import {
   DEFAULT_WARN_THRESHOLDS,
   warningFractions,
@@ -1035,6 +1036,64 @@ function updaterReducer(state: UpdaterState, action: UpdaterAction): UpdaterStat
   }
 }
 
+// Activity strip + usage streaks for the Overview (token-monitor learning).
+// Pure logic lives in `lib/activity.ts`; this just renders a compact per-day
+// heat strip over the local scan window plus current/longest streaks.
+function ActivitySection({ scan }: { scan: ScanResult }) {
+  const { t } = useTranslation();
+  const { activity, streaks, max } = useMemo(() => {
+    const activity = buildActivity(scan.entries, scan.days_scanned);
+    const streaks = computeStreaks(activity);
+    const max = activity.reduce((m, d) => Math.max(m, d.tokens), 0);
+    return { activity, streaks, max };
+  }, [scan]);
+
+  // Nothing worth showing if the whole window is idle.
+  if (!activity.some((d) => d.active)) return null;
+
+  // Heat levels 0–4 → neutral (empty) then an emerald ramp.
+  const levelClass = [
+    "bg-neutral-800",
+    "bg-emerald-900",
+    "bg-emerald-700",
+    "bg-emerald-500",
+    "bg-emerald-400",
+  ] as const;
+
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <h2 className="text-sm font-semibold text-neutral-400">
+          {t("overview.activity_title", { days: scan.days_scanned })}
+        </h2>
+        <div className="flex items-center gap-3 text-xs tabular-nums shrink-0">
+          <span className="text-emerald-400">
+            {t("overview.streak_current", { n: streaks.current })}
+          </span>
+          <span className="text-neutral-400">
+            {t("overview.streak_longest", { n: streaks.longest })}
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {activity.map((d) => {
+          const level = activityLevel(d.tokens, max, d.active);
+          const label = d.active
+            ? t("overview.activity_tokens", { tokens: formatInt(d.tokens) })
+            : t("overview.activity_idle");
+          return (
+            <span
+              key={d.date}
+              className={`w-3 h-3 rounded-sm ${levelClass[level]}`}
+              title={`${d.date} · ${label}`}
+            />
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Overview({
   scan,
   loading,
@@ -1168,6 +1227,11 @@ function Overview({
           />
         </div>
       </section>
+
+      {/* Activity strip + usage streaks (learned from token-monitor's
+          home-screen heatmap + streaks). Local-scan only; hidden when the
+          window has no active days. */}
+      <ActivitySection scan={scan} />
 
       {/* v0.10.1 — Provider usage breakdown (macOS parity, OverviewTab
           costSection). Brand-colored bars ranked by I/O tokens from the
