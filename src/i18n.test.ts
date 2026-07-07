@@ -124,6 +124,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Grok collector (v0.16 — gRPC-web cookie) — Settings cookie-paste row.
     "settings.integrations.grok_cookie_label",
     "settings.integrations.grok_cookie_help",
+    // GLM collector (v0.17 — status-only api-key) — Settings input row.
+    "settings.integrations.glm_api_key_label",
+    "settings.integrations.glm_api_key_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

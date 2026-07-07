@@ -323,7 +323,9 @@
       "kimi_auth_token_label": "Kimi 認証トークン",
       "kimi_auth_token_help": "kimi.com の kimi-auth トークンまたは Cookie ヘッダー全体(KIMI_AUTH_TOKEN)を貼り付け — 週間・5時間の利用状況を表示します。トークンは期限切れになるため、失効したら再度貼り付けてください。",
       "grok_cookie_label": "Grok セッション Cookie",
-      "grok_cookie_help": "grok.com のセッション Cookie(GROK_COOKIE)を貼り付け、または GROK_TOKEN を設定 — クレジット利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。"
+      "grok_cookie_help": "grok.com のセッション Cookie(GROK_COOKIE)を貼り付け、または GROK_TOKEN を設定 — クレジット利用状況を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。",
+      "glm_api_key_label": "GLM API キー",
+      "glm_api_key_help": "Zhipu / GLM の Bearer キー(GLM_API_KEY)— ステータスのみ(クォータ API なし);接続状態と利用可能な残高を表示します。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

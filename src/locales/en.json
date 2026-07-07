@@ -329,7 +329,9 @@
       "kimi_auth_token_label": "Kimi auth token",
       "kimi_auth_token_help": "Paste your kimi.com kimi-auth token or full cookie header (KIMI_AUTH_TOKEN) — shows weekly + 5h usage. Tokens expire; re-paste to refresh.",
       "grok_cookie_label": "Grok session cookie",
-      "grok_cookie_help": "Paste your grok.com session cookie (GROK_COOKIE), or set GROK_TOKEN — shows your credit usage. Cookies expire; re-paste to refresh."
+      "grok_cookie_help": "Paste your grok.com session cookie (GROK_COOKIE), or set GROK_TOKEN — shows your credit usage. Cookies expire; re-paste to refresh.",
+      "glm_api_key_label": "GLM API key",
+      "glm_api_key_help": "Bearer key from Zhipu / GLM (GLM_API_KEY) — status-only (no quota endpoint); shows connectivity + balance if available."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

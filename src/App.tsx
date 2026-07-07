@@ -3230,6 +3230,7 @@ type ProviderCredsView = {
   warp_api_key_set: boolean;
   kimi_auth_token_set: boolean;
   grok_cookie_set: boolean;
+  glm_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3249,6 +3250,7 @@ type ProviderCredsView = {
   env_override_warp: boolean;
   env_override_kimi: boolean;
   env_override_grok: boolean;
+  env_override_glm: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3275,7 +3277,8 @@ type ProviderCredsUpdateKey =
   | "stepfun_cookie"
   | "warp_api_key"
   | "kimi_auth_token"
-  | "grok_cookie";
+  | "grok_cookie"
+  | "glm_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3490,6 +3493,15 @@ function IntegrationsSection() {
       isSet: view.grok_cookie_set,
       envOverride: view.env_override_grok,
       envVar: "GROK_COOKIE",
+    },
+    {
+      provider: "GLM",
+      key: "glm_api_key",
+      labelKey: "settings.integrations.glm_api_key_label",
+      helpKey: "settings.integrations.glm_api_key_help",
+      isSet: view.glm_api_key_set,
+      envOverride: view.env_override_glm,
+      envVar: "GLM_API_KEY",
     },
   ];
 

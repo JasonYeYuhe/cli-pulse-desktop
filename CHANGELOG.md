@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **GLM (Zhipu / 智谱) status-only collector** (v0.17 — port of macOS `GLMCollector`, the first
+  status-only provider). Adds GLM as a 21st provider, now that the `status_text` line gives status-only
+  providers a render path. GLM has no quota/limit endpoint, so it's a **connectivity probe**: reads the
+  api-key (Settings → Integrations, or env `GLM_API_KEY` / `ZHIPU_API_KEY` / `CHATGLM_API_KEY`), fetches
+  `GET open.bigmodel.cn/api/paas/v4/models`, and reports a `status_text` only — `"N models available"`,
+  `"X.XX CUR remaining"` when a balance shape comes back, else `"Connected"`. No numeric gauge is drawn
+  (`quota`/`remaining` = 0, `tiers` empty) — the card shows just the status line. Host overridable via
+  env `GLM_API_HOST`.
+  - `src-tauri/src/quota/glm.rs` (5 shape-detection / status-format unit tests) + `collect_all` wiring +
+    `PROVIDER_GLM = "GLM"` (validated against the Mac `ProviderKind` snapshot). `glm_api_key` cred through
+    `provider_creds` (OS-keychain + file + migration + wipe) + a **Settings → Integrations** input row
+    (+2 i18n keys × 3).
+  - **Verification posture:** shape detection / status formatting fully unit-tested; the **live fetch
+    needs a real GLM key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 - **Provider `status_text` — a readable local status line** (v0.17 — macOS parity, ports the Mac
   `ProviderUsage.status_text`). Fixes the long-standing balance-display gap: uncapped-balance providers
   (DeepSeek, Moonshot, Venice, Kimi K2, Crof credits) rendered their gauge as a raw scaled integer
