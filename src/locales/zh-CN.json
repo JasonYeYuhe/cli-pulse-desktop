@@ -331,7 +331,9 @@
       "groq_api_key_label": "Groq API 密钥",
       "groq_api_key_help": "来自 Groq 的 Bearer 密钥(GROQ_API_KEY)—— 仅状态;显示实时吞吐(请求/分 · 令牌/分)。",
       "mistral_cookie_label": "Mistral 会话 Cookie",
-      "mistral_cookie_help": "粘贴你的 admin.mistral.ai 会话 Cookie(含 ory_session_*,MISTRAL_COOKIE)—— 显示当月精确消费。Cookie 会过期,失效后重新粘贴。"
+      "mistral_cookie_help": "粘贴你的 admin.mistral.ai 会话 Cookie(含 ory_session_*,MISTRAL_COOKIE)—— 显示当月精确消费。Cookie 会过期,失效后重新粘贴。",
+      "deepgram_api_key_label": "Deepgram API 密钥",
+      "deepgram_api_key_help": "来自 Deepgram 的 API 密钥(DEEPGRAM_API_KEY)—— 仅状态;显示用量(请求 · 音频小时 · 令牌)。可用 DEEPGRAM_PROJECT_ID 指定单个项目。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

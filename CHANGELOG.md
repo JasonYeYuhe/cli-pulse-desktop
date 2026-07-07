@@ -11,6 +11,23 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Deepgram usage collector** (v0.17 — port of macOS `DeepgramCollector`, status-only). Adds Deepgram
+  as a 25th provider — and **completes the status-only batch** (GLM, Volcano, Groq, Mistral, Deepgram all
+  ported). Deepgram exposes no quota/credits denominator — only absolute usage counts — so it's
+  status-only: "N requests · X audio hrs · N tokens". Auth uses the custom **`Token`** scheme (not
+  Bearer) — env `DEEPGRAM_API_KEY` or Settings. A pinned `DEEPGRAM_PROJECT_ID` → one usage call;
+  otherwise `GET /v1/projects` then a capped (≤5), **concurrent** per-project
+  `GET /v1/projects/{id}/usage/breakdown`, aggregated across projects (`plan_type` becomes "N projects" /
+  the single project name / "API key").
+  - `src-tauri/src/quota/deepgram.rs` (7 unit tests — projects parse, usage sum, cross-project combine,
+    status-text with billable-hrs / TTS-chars fallbacks, plan-type selection, decimal grouping) +
+    `collect_all` wiring + `PROVIDER_DEEPGRAM = "Deepgram"`. The concurrent fan-out uses `tokio::spawn`
+    (annotated; async context). `deepgram_api_key` cred through `provider_creds` + a **Settings →
+    Integrations** input row (+2 i18n keys × 3).
+  - **Verification posture:** projects/usage parsing / aggregation / formatting fully unit-tested; the
+    **live fetch needs a real Deepgram key so it can't be CI-verified** — endpoints/auth ported from the
+    proven Mac collector. Configure a key in Settings to exercise it live.
+
 - **Mistral spend collector** (v0.17 — port of macOS `MistralCollector`, status-only). Adds Mistral as a
   24th provider. Mistral is pay-as-you-go (no quota cap, no balance), so it's status-only carrying an
   EXACT month-to-date **spend**, computed from `tokens × price`: reads a session cookie (Settings paste,

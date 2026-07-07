@@ -337,7 +337,9 @@
       "groq_api_key_label": "Groq API key",
       "groq_api_key_help": "Bearer key from Groq (GROQ_API_KEY) — status-only; shows live throughput (req/min · tok/min).",
       "mistral_cookie_label": "Mistral session cookie",
-      "mistral_cookie_help": "Paste your admin.mistral.ai session cookie incl. ory_session_* (MISTRAL_COOKIE) — shows exact month-to-date spend. Cookies expire; re-paste to refresh."
+      "mistral_cookie_help": "Paste your admin.mistral.ai session cookie incl. ory_session_* (MISTRAL_COOKIE) — shows exact month-to-date spend. Cookies expire; re-paste to refresh.",
+      "deepgram_api_key_label": "Deepgram API key",
+      "deepgram_api_key_help": "API key from Deepgram (DEEPGRAM_API_KEY) — status-only; shows usage counts (requests · audio hrs · tokens). Pin one project via DEEPGRAM_PROJECT_ID."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",
