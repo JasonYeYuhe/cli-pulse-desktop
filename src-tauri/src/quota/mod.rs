@@ -41,6 +41,7 @@ pub mod groq;
 pub mod kimi;
 pub mod kimik2;
 pub mod minimax;
+pub mod mistral;
 pub mod moonshot;
 pub mod openrouter;
 pub mod perplexity;
@@ -83,6 +84,7 @@ pub const PROVIDER_GROK: &str = "Grok";
 pub const PROVIDER_GLM: &str = "GLM";
 pub const PROVIDER_VOLCANO: &str = "Volcano Engine";
 pub const PROVIDER_GROQ: &str = "Groq";
+pub const PROVIDER_MISTRAL: &str = "Mistral";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -252,6 +254,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_GLM, tokio::spawn(glm::collect())),       // @allow tokio-spawn
         (PROVIDER_VOLCANO, tokio::spawn(volcano::collect())), // @allow tokio-spawn
         (PROVIDER_GROQ, tokio::spawn(groq::collect())),     // @allow tokio-spawn
+        (PROVIDER_MISTRAL, tokio::spawn(mistral::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -405,6 +408,7 @@ mod tests {
             ("glm", PROVIDER_GLM),
             ("volcanoEngine", PROVIDER_VOLCANO),
             ("groq", PROVIDER_GROQ),
+            ("mistral", PROVIDER_MISTRAL),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -456,6 +460,7 @@ mod tests {
             PROVIDER_GLM,
             PROVIDER_VOLCANO,
             PROVIDER_GROQ,
+            PROVIDER_MISTRAL,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

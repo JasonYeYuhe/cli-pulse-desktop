@@ -3233,6 +3233,7 @@ type ProviderCredsView = {
   glm_api_key_set: boolean;
   volcano_api_key_set: boolean;
   groq_api_key_set: boolean;
+  mistral_cookie_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3255,6 +3256,7 @@ type ProviderCredsView = {
   env_override_glm: boolean;
   env_override_volcano: boolean;
   env_override_groq: boolean;
+  env_override_mistral: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3284,7 +3286,8 @@ type ProviderCredsUpdateKey =
   | "grok_cookie"
   | "glm_api_key"
   | "volcano_api_key"
-  | "groq_api_key";
+  | "groq_api_key"
+  | "mistral_cookie";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3526,6 +3529,15 @@ function IntegrationsSection() {
       isSet: view.groq_api_key_set,
       envOverride: view.env_override_groq,
       envVar: "GROQ_API_KEY",
+    },
+    {
+      provider: "Mistral",
+      key: "mistral_cookie",
+      labelKey: "settings.integrations.mistral_cookie_label",
+      helpKey: "settings.integrations.mistral_cookie_help",
+      isSet: view.mistral_cookie_set,
+      envOverride: view.env_override_mistral,
+      envVar: "MISTRAL_COOKIE",
     },
   ];
 

@@ -329,7 +329,9 @@
       "volcano_api_key_label": "Volcano Engine API キー",
       "volcano_api_key_help": "Volcano Engine / Ark の Bearer キー(ARK_API_KEY)— 利用可能ならプラン枠、なければ接続状態を表示します。",
       "groq_api_key_label": "Groq API キー",
-      "groq_api_key_help": "Groq の Bearer キー(GROQ_API_KEY)— ステータスのみ;リアルタイムのスループット(req/min · tok/min)を表示します。"
+      "groq_api_key_help": "Groq の Bearer キー(GROQ_API_KEY)— ステータスのみ;リアルタイムのスループット(req/min · tok/min)を表示します。",
+      "mistral_cookie_label": "Mistral セッション Cookie",
+      "mistral_cookie_help": "admin.mistral.ai のセッション Cookie(ory_session_* を含む、MISTRAL_COOKIE)を貼り付け — 当月の正確な利用額を表示します。Cookie は期限切れになるため、失効したら再度貼り付けてください。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

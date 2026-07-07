@@ -335,7 +335,9 @@
       "volcano_api_key_label": "Volcano Engine API key",
       "volcano_api_key_help": "Bearer key from Volcano Engine / Ark (ARK_API_KEY) — shows plan quota if available, else connectivity.",
       "groq_api_key_label": "Groq API key",
-      "groq_api_key_help": "Bearer key from Groq (GROQ_API_KEY) — status-only; shows live throughput (req/min · tok/min)."
+      "groq_api_key_help": "Bearer key from Groq (GROQ_API_KEY) — status-only; shows live throughput (req/min · tok/min).",
+      "mistral_cookie_label": "Mistral session cookie",
+      "mistral_cookie_help": "Paste your admin.mistral.ai session cookie incl. ory_session_* (MISTRAL_COOKIE) — shows exact month-to-date spend. Cookies expire; re-paste to refresh."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

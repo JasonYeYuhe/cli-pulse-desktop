@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Mistral spend collector** (v0.17 — port of macOS `MistralCollector`, status-only). Adds Mistral as a
+  24th provider. Mistral is pay-as-you-go (no quota cap, no balance), so it's status-only carrying an
+  EXACT month-to-date **spend**, computed from `tokens × price`: reads a session cookie (Settings paste,
+  or env `MISTRAL_COOKIE` / `MISTRAL_SESSION_TOKEN`; the header must contain an `ory_session_*` cookie,
+  and a `csrftoken` cookie is echoed as `X-CSRFTOKEN`), fetches
+  `GET admin.mistral.ai/api/billing/v2/usage?month&year` (current UTC month), builds a `metric::group →
+  price` index, and aggregates cost + tokens across all billing categories (completion / ocr / connectors
+  / audio / libraries / fine-tuning). Status line: "€X.XXXX this month · N tokens".
+  - `src-tauri/src/quota/mistral.rs` (5 unit tests — ory_session/csrf extraction, cost+token aggregation
+    with the price index, value_paid-preferred, missing-price → 0, thousands grouping) + `collect_all`
+    wiring + `PROVIDER_MISTRAL = "Mistral"`. New `mistral_cookie` cred through `provider_creds` + a
+    **Settings → Integrations** cookie-paste row (+2 i18n keys × 3).
+  - **Verification posture:** billing-tree aggregation / price index / formatting fully unit-tested; the
+    **live fetch needs a real Mistral session cookie so it can't be CI-verified** — endpoint/auth ported
+    from the proven Mac collector. Paste a cookie in Settings to exercise it live.
+
 - **Groq throughput collector** (v0.17 — port of macOS `GroqCollector`, status-only). Adds Groq (the
   inference company; NOT xAI's Grok) as a 23rd provider. Groq exposes only a **Prometheus** metrics
   endpoint with throughput RATES — no quota/cost/balance — so it's status-only: reads the api-key
