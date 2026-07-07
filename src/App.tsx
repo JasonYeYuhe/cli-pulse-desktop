@@ -3241,6 +3241,7 @@ type ProviderCredsView = {
   openai_admin_key_set: boolean;
   codebuff_api_key_set: boolean;
   manus_cookie_set: boolean;
+  abacus_cookie_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3271,6 +3272,7 @@ type ProviderCredsView = {
   env_override_openai_admin: boolean;
   env_override_codebuff: boolean;
   env_override_manus: boolean;
+  env_override_abacus: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3308,7 +3310,8 @@ type ProviderCredsUpdateKey =
   | "alibaba_api_key"
   | "openai_admin_key"
   | "codebuff_api_key"
-  | "manus_cookie";
+  | "manus_cookie"
+  | "abacus_cookie";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3622,6 +3625,15 @@ function IntegrationsSection() {
       isSet: view.manus_cookie_set,
       envOverride: view.env_override_manus,
       envVar: "MANUS_SESSION_TOKEN",
+    },
+    {
+      provider: "Abacus AI",
+      key: "abacus_cookie",
+      labelKey: "settings.integrations.abacus_cookie_label",
+      helpKey: "settings.integrations.abacus_cookie_help",
+      isSet: view.abacus_cookie_set,
+      envOverride: view.env_override_abacus,
+      envVar: "ABACUS_COOKIE",
     },
   ];
 

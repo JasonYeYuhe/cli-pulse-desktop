@@ -11,6 +11,27 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Abacus AI compute-points collector** (port of macOS `AbacusCollector`, derived from steipete/CodexBar,
+  MIT). Adds Abacus AI as a **33rd provider** — a second cookie-authed MEDIUM collector. Two calls run
+  concurrently: a required `GET apps.abacus.ai/api/_getOrganizationComputePoints`
+  (`totalComputePoints` / `computePointsLeft`) and a best-effort `POST /api/_getBillingInfo`
+  (`nextBillingDate` / `currentTier`) bounded to a **5s per-request timeout** so it can never stall the
+  required render. Auth: the whole resolved **`Cookie:` header** is sent as-is (no token extraction, unlike
+  Manus), from env `ABACUS_COOKIE` / `ABACUS_SESSION_TOKEN` or the Settings `abacus_cookie`. Both endpoints
+  use a `{success, result}` envelope; a 401/403 or an auth-flavored `error` message surfaces as an error
+  (the auth-keyword set is tightened — no bare "session"/"expired" — to avoid false re-auth prompts). A
+  positive cap maps to a real **`.quota`** ("Compute Points" gauge, `status_text` "left/total compute
+  points"); a degenerate `total ≤ 0` degrades to status-only. `plan_type` = the title-cased billing tier
+  or "Account".
+  - `src-tauri/src/quota/abacus.rs` (6 unit tests — quota + billing tier, left-clamped-to-total,
+    degenerate→status-only, success-envelope unwrap, auth-status + auth-vs-non-auth message routing,
+    missing-fields rejection) + `collect_all` wiring + `PROVIDER_ABACUS = "Abacus AI"` in both
+    contract-test arrays (case `"abacus"`). `abacus_cookie` cred through `provider_creds` + **Settings →
+    Integrations** cookie input row + 2 i18n keys × 3 locales.
+  - **Divergence from the Mac:** no browser cookie auto-import (manual paste / env only).
+  - **Verification posture:** envelope unwrap / auth routing / compute-point mapping fully unit-tested; the
+    live fetch needs a real Abacus session cookie (not CI-verifiable) — ported from the proven Mac collector.
+
 - **Manus credit-pool collector** (port of macOS `ManusCollector`, derived from steipete/CodexBar, MIT).
   Adds Manus as a **32nd provider** — the first **cookie**-authed collector of the MEDIUM tranche. A single
   `POST https://api.manus.im/user.v1.UserService/GetAvailableCredits` (Connect-RPC, JSON body `{}`). Auth

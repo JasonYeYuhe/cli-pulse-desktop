@@ -25,6 +25,7 @@
 //! with the parent and would unwind `sync_now` on any provider panic.
 //! Per Codex 2026-05-02 review of v0.4.3 spec.
 
+pub mod abacus;
 pub mod alibaba;
 pub mod augment;
 pub mod claude;
@@ -101,6 +102,7 @@ pub const PROVIDER_ALIBABA: &str = "Alibaba";
 pub const PROVIDER_OPENAI_ADMIN: &str = "OpenAI Admin";
 pub const PROVIDER_CODEBUFF: &str = "Codebuff";
 pub const PROVIDER_MANUS: &str = "Manus";
+pub const PROVIDER_ABACUS: &str = "Abacus AI";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -279,6 +281,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_OPENAI_ADMIN, tokio::spawn(openai_admin::collect())), // @allow tokio-spawn
         (PROVIDER_CODEBUFF, tokio::spawn(codebuff::collect())), // @allow tokio-spawn
         (PROVIDER_MANUS, tokio::spawn(manus::collect())),   // @allow tokio-spawn
+        (PROVIDER_ABACUS, tokio::spawn(abacus::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -441,6 +444,7 @@ mod tests {
             ("openaiAdmin", PROVIDER_OPENAI_ADMIN),
             ("codebuff", PROVIDER_CODEBUFF),
             ("manus", PROVIDER_MANUS),
+            ("abacus", PROVIDER_ABACUS),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -501,6 +505,7 @@ mod tests {
             PROVIDER_OPENAI_ADMIN,
             PROVIDER_CODEBUFF,
             PROVIDER_MANUS,
+            PROVIDER_ABACUS,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

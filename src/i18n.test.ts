@@ -157,6 +157,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Manus collector — session-cookie credit pools (monthly + refresh).
     "settings.integrations.manus_cookie_label",
     "settings.integrations.manus_cookie_help",
+    // Abacus AI collector — session-cookie compute-points quota gauge.
+    "settings.integrations.abacus_cookie_label",
+    "settings.integrations.abacus_cookie_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",
