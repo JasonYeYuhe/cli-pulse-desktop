@@ -48,6 +48,7 @@ pub mod minimax;
 pub mod mistral;
 pub mod moonshot;
 pub mod ollama;
+pub mod openai_admin;
 pub mod openrouter;
 pub mod perplexity;
 pub mod stepfun;
@@ -95,6 +96,7 @@ pub const PROVIDER_ELEVENLABS: &str = "ElevenLabs";
 pub const PROVIDER_OLLAMA: &str = "Ollama";
 pub const PROVIDER_KILO: &str = "Kilo";
 pub const PROVIDER_ALIBABA: &str = "Alibaba";
+pub const PROVIDER_OPENAI_ADMIN: &str = "OpenAI Admin";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -270,6 +272,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_OLLAMA, tokio::spawn(ollama::collect())), // @allow tokio-spawn
         (PROVIDER_KILO, tokio::spawn(kilo::collect())),     // @allow tokio-spawn
         (PROVIDER_ALIBABA, tokio::spawn(alibaba::collect())), // @allow tokio-spawn
+        (PROVIDER_OPENAI_ADMIN, tokio::spawn(openai_admin::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -429,6 +432,7 @@ mod tests {
             ("ollama", PROVIDER_OLLAMA),
             ("kilo", PROVIDER_KILO),
             ("alibaba", PROVIDER_ALIBABA),
+            ("openaiAdmin", PROVIDER_OPENAI_ADMIN),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -486,6 +490,7 @@ mod tests {
             PROVIDER_OLLAMA,
             PROVIDER_KILO,
             PROVIDER_ALIBABA,
+            PROVIDER_OPENAI_ADMIN,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

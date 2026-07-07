@@ -11,6 +11,30 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **OpenAI Admin org-spend collector** (port of macOS `OpenAIAdminCollector`, itself derived from
+  steipete/CodexBar, MIT). Adds OpenAI Admin as a **30th provider** — and **completes the api-key-REST
+  batch** of remaining Mac collectors (ElevenLabs, Ollama, Kilo, Alibaba, OpenAI Admin all ported). A
+  single `GET api.openai.com/v1/organization/costs?start_time&end_time&bucket_width=1d&limit=31`,
+  `Authorization: Bearer <admin key>`, summing the month-to-date daily cost buckets. This is the
+  **organization cost admin API** — DISTINCT from CLI Pulse's existing Codex provider (the Codex CLI); it
+  needs an **org admin key** (`sk-admin-…`), a regular `sk-` key 401s. Status-only (`quota`/`remaining` =
+  0, no tiers): `status_text` = "$X this month" (or "CUR X this month" for a non-USD org), `plan_type =
+  "Admin API"`. Like the Mac (which notes the admin API "occasionally 503s under load"), the idempotent
+  GET is retried **once** on a transient failure (network error / 408 / 429 / 5xx).
+  - **Divergence from the Mac:** drops the ubiquitous `OPENAI_API_KEY` env fallback (a desktop GUI app
+    doesn't inherit shell env, and a non-admin `OPENAI_API_KEY` would just 401 forever) — reads only
+    `OPENAI_ADMIN_KEY` or the Settings `openai_admin_key`; a 401/403 is a genuine "wrong key" error.
+  - `src-tauri/src/quota/openai_admin.rs` (5 unit tests — bucket summing across results, empty-data zero,
+    flexible string-amount + non-USD currency, missing-data schema error, UTC month-start) + `collect_all`
+    wiring + `PROVIDER_OPENAI_ADMIN = "OpenAI Admin"` in both contract-test arrays (case `"openaiAdmin"`).
+    `openai_admin_key` cred through `provider_creds` + **Settings → Integrations** input row + 2 i18n keys
+    × 3 locales.
+  - Reviewed for wire-format fidelity against the Mac twin (adversarial workflow, sonnet); the one finding
+    (missing transient-retry) is folded into this collector.
+  - **Verification posture:** parse / sum / month-window / retry logic fully unit-tested; the live cost
+    fetch needs a real org admin key (not CI-verifiable) — endpoint/auth ported from the proven Mac
+    collector.
+
 - **Alibaba coding-plan quota collector** (port of macOS `AlibabaCollector`). Adds Alibaba as a **29th
   provider** — a real multi-window `.quota`. `POST {host}/data/api.json?action=…queryCodingPlanInstanceInfoV2`
   authed with a Bearer token that is also mirrored into `x-api-key` + `X-DashScope-API-Key` (as the Mac

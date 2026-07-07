@@ -3238,6 +3238,7 @@ type ProviderCredsView = {
   elevenlabs_api_key_set: boolean;
   kilo_api_key_set: boolean;
   alibaba_api_key_set: boolean;
+  openai_admin_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3265,6 +3266,7 @@ type ProviderCredsView = {
   env_override_elevenlabs: boolean;
   env_override_kilo: boolean;
   env_override_alibaba: boolean;
+  env_override_openai_admin: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3299,7 +3301,8 @@ type ProviderCredsUpdateKey =
   | "deepgram_api_key"
   | "elevenlabs_api_key"
   | "kilo_api_key"
-  | "alibaba_api_key";
+  | "alibaba_api_key"
+  | "openai_admin_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3586,6 +3589,15 @@ function IntegrationsSection() {
       isSet: view.alibaba_api_key_set,
       envOverride: view.env_override_alibaba,
       envVar: "ALIBABA_CODING_PLAN_API_KEY",
+    },
+    {
+      provider: "OpenAI Admin",
+      key: "openai_admin_key",
+      labelKey: "settings.integrations.openai_admin_key_label",
+      helpKey: "settings.integrations.openai_admin_key_help",
+      isSet: view.openai_admin_key_set,
+      envOverride: view.env_override_openai_admin,
+      envVar: "OPENAI_ADMIN_KEY",
     },
   ];
 

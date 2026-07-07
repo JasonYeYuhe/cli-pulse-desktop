@@ -345,7 +345,9 @@
       "kilo_api_key_label": "Kilo API key",
       "kilo_api_key_help": "API key from Kilo (KILO_API_KEY) — shows your credit balance and Kilo Pass subscription usage as a dollar figure. Falls back to the Kilo CLI login (~/.local/share/kilo/auth.json) when no key is set.",
       "alibaba_api_key_label": "Alibaba coding-plan API key",
-      "alibaba_api_key_help": "API key for the Alibaba (Model Studio / Bailian) coding plan (ALIBABA_CODING_PLAN_API_KEY) — shows 5-hour, weekly, and monthly request quotas. Routes to the International console first, falling back to China mainland."
+      "alibaba_api_key_help": "API key for the Alibaba (Model Studio / Bailian) coding plan (ALIBABA_CODING_PLAN_API_KEY) — shows 5-hour, weekly, and monthly request quotas. Routes to the International console first, falling back to China mainland.",
+      "openai_admin_key_label": "OpenAI Admin key",
+      "openai_admin_key_help": "Organization admin key (sk-admin-…, OPENAI_ADMIN_KEY) for the OpenAI org cost API — shows this month's total spend. Distinct from the Codex CLI; a regular sk- key won't work."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

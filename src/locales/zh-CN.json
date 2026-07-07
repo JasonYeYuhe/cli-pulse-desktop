@@ -339,7 +339,9 @@
       "kilo_api_key_label": "Kilo API 密钥",
       "kilo_api_key_help": "来自 Kilo 的 API 密钥(KILO_API_KEY)—— 以美元金额显示信用余额和 Kilo Pass 订阅用量。未设置密钥时回退到 Kilo CLI 登录(~/.local/share/kilo/auth.json)。",
       "alibaba_api_key_label": "阿里云编程套餐 API 密钥",
-      "alibaba_api_key_help": "阿里云(百炼 / Model Studio)编程套餐的 API 密钥(ALIBABA_CODING_PLAN_API_KEY)—— 显示 5 小时、每周和每月的请求配额。优先访问国际站,失败时回退到中国大陆。"
+      "alibaba_api_key_help": "阿里云(百炼 / Model Studio)编程套餐的 API 密钥(ALIBABA_CODING_PLAN_API_KEY)—— 显示 5 小时、每周和每月的请求配额。优先访问国际站,失败时回退到中国大陆。",
+      "openai_admin_key_label": "OpenAI Admin 密钥",
+      "openai_admin_key_help": "OpenAI 组织管理员密钥(sk-admin-…,OPENAI_ADMIN_KEY),用于组织成本 API —— 显示本月的总支出。与 Codex CLI 不同;普通 sk- 密钥无法使用。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

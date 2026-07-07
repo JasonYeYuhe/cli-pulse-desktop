@@ -339,7 +339,9 @@
       "kilo_api_key_label": "Kilo API キー",
       "kilo_api_key_help": "Kilo の API キー(KILO_API_KEY)— クレジット残高と Kilo Pass サブスクリプションの使用量を金額で表示します。キー未設定時は Kilo CLI のログイン(~/.local/share/kilo/auth.json)にフォールバックします。",
       "alibaba_api_key_label": "Alibaba コーディングプラン API キー",
-      "alibaba_api_key_help": "Alibaba(Model Studio / Bailian)コーディングプランの API キー(ALIBABA_CODING_PLAN_API_KEY)— 5 時間・週次・月次のリクエストクォータを表示します。国際コンソールを優先し、失敗時は中国本土にフォールバックします。"
+      "alibaba_api_key_help": "Alibaba(Model Studio / Bailian)コーディングプランの API キー(ALIBABA_CODING_PLAN_API_KEY)— 5 時間・週次・月次のリクエストクォータを表示します。国際コンソールを優先し、失敗時は中国本土にフォールバックします。",
+      "openai_admin_key_label": "OpenAI Admin キー",
+      "openai_admin_key_help": "OpenAI 組織の管理者キー(sk-admin-…、OPENAI_ADMIN_KEY)。組織コスト API 用で、今月の合計支出を表示します。Codex CLI とは別物で、通常の sk- キーは使用できません。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",
