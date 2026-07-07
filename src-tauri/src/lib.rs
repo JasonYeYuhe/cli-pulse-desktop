@@ -56,7 +56,58 @@ const HELPER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEVICE_TYPE_WIN: &str = "Windows";
 const DEVICE_TYPE_LINUX: &str = "Linux";
 const DEVICE_TYPE_MAC: &str = "macOS";
+/// Base background-sync cadence — used when on AC power (or on a device with no
+/// battery). On battery we back off; see [`adaptive_sync_interval`].
 const SYNC_INTERVAL: Duration = Duration::from_secs(120);
+
+/// Power state hint that drives the adaptive background-sync cadence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PowerHint {
+    /// On AC, charging/full, no battery (desktop/VM), or unreadable — poll fast.
+    Plugged,
+    /// Discharging, above the low threshold — poll less often to save power.
+    OnBattery,
+    /// Discharging and low — poll rarely.
+    LowBattery,
+}
+
+const LOW_BATTERY_PCT: f64 = 20.0;
+
+/// Read the primary battery to pick a sync cadence. Cheap; called once per
+/// cycle. Any failure / no battery → [`PowerHint::Plugged`] (the fast cadence),
+/// so desktops, VMs, and CI runners are unaffected.
+fn power_hint() -> PowerHint {
+    let Ok(manager) = starship_battery::Manager::new() else {
+        return PowerHint::Plugged;
+    };
+    let Some(Ok(bat)) = manager.batteries().ok().and_then(|mut b| b.next()) else {
+        return PowerHint::Plugged;
+    };
+    match bat.state() {
+        starship_battery::State::Discharging => {
+            if f64::from(bat.state_of_charge().value) * 100.0 <= LOW_BATTERY_PCT {
+                PowerHint::LowBattery
+            } else {
+                PowerHint::OnBattery
+            }
+        }
+        // Charging / Full / Empty(plugged) / Unknown → treat as plugged.
+        _ => PowerHint::Plugged,
+    }
+}
+
+/// Adaptive background-sync interval. On AC we keep the responsive 120 s
+/// cadence; on battery we back off to 5 min, and when the battery is low to
+/// 15 min, to conserve power + provider rate-limit budget. Mirrors CodexBar's
+/// Low-Power-aware cadence (adapted to desktop — no thermal signal yet).
+pub(crate) fn adaptive_sync_interval(hint: PowerHint) -> Duration {
+    match hint {
+        PowerHint::Plugged => SYNC_INTERVAL,
+        PowerHint::OnBattery => Duration::from_secs(300),
+        PowerHint::LowBattery => Duration::from_secs(900),
+    }
+}
+
 /// v0.5.6 — tray menu mini-metrics refresh cadence. Independent of
 /// `SYNC_INTERVAL` so future tuning to either doesn't accidentally
 /// couple them; both happen to be 120 s today which avoids racing
@@ -2331,7 +2382,8 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
 
     async_runtime::spawn(async move {
         log::info!(
-            "Background sync loop started — first tick in 20s, then every {}s",
+            "Background sync loop started — first tick in 20s, then every {}s on AC \
+             (5 min on battery, 15 min when low)",
             SYNC_INTERVAL.as_secs()
         );
         // First tick after 20s so the UI feels responsive on startup
@@ -2410,7 +2462,8 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
                                 // v0.4.23 — `wait_for_next_tick` also returns
                                 // `Stopped` for fast shutdown; `Stopped == Reset`
                                 // is false so the existing loop naturally exits.
-                                while wait_for_next_tick(&mut rx, SYNC_INTERVAL, &stop).await
+                                let interval = adaptive_sync_interval(power_hint());
+                                while wait_for_next_tick(&mut rx, interval, &stop).await
                                     == WaitOutcome::Reset
                                     && !stop.load(Ordering::Relaxed)
                                 {
@@ -2443,7 +2496,11 @@ fn spawn_background_sync(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
             // v0.4.23 — `wait_for_next_tick` also returns `Stopped` on
             // shutdown, so the loop exits within ~100 ms instead of
             // waiting for the current 120 s sleep to elapse.
-            while wait_for_next_tick(&mut rx, SYNC_INTERVAL, &stop).await == WaitOutcome::Reset
+            // Adaptive cadence: 120 s on AC, backing off on battery / low
+            // battery. Recomputed once per cycle (battery state changes slowly,
+            // so tick-boundary adaptation is fine).
+            let interval = adaptive_sync_interval(power_hint());
+            while wait_for_next_tick(&mut rx, interval, &stop).await == WaitOutcome::Reset
                 && !stop.load(Ordering::Relaxed)
             {}
         }
@@ -3032,6 +3089,23 @@ mod tests {
     //! advances when all tasks block — no real wall-clock wait.
 
     use super::*;
+
+    #[test]
+    fn adaptive_sync_interval_backs_off_on_battery() {
+        assert_eq!(adaptive_sync_interval(PowerHint::Plugged), SYNC_INTERVAL);
+        assert_eq!(adaptive_sync_interval(PowerHint::Plugged).as_secs(), 120);
+        assert_eq!(adaptive_sync_interval(PowerHint::OnBattery).as_secs(), 300);
+        assert_eq!(adaptive_sync_interval(PowerHint::LowBattery).as_secs(), 900);
+        // Cadence must be monotonically non-decreasing as power gets scarcer.
+        assert!(
+            adaptive_sync_interval(PowerHint::Plugged)
+                <= adaptive_sync_interval(PowerHint::OnBattery)
+        );
+        assert!(
+            adaptive_sync_interval(PowerHint::OnBattery)
+                <= adaptive_sync_interval(PowerHint::LowBattery)
+        );
+    }
 
     #[tokio::test(start_paused = true)]
     async fn drained_signal_does_not_interrupt_idle_sleep() {

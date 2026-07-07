@@ -11,6 +11,15 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Adaptive background-sync cadence (power-aware)** — the background sync/quota loop now backs off on
+  battery to save power + provider rate-limit budget: **120 s on AC**, **5 min on battery**, **15 min when
+  the battery is low** (≤20% and discharging). Learned from CodexBar's Low-Power-aware polling
+  (`DEV_PLAN_2026-07-07_competitive_learnings.md` §3b B1; the thermal + window-focus dimensions are
+  deferred). Read via `starship-battery` once per cycle (battery state changes slowly, so tick-boundary
+  adaptation is fine); any read failure / no battery → the fast 120 s cadence, so desktops, VMs, and CI
+  runners are unaffected. `adaptive_sync_interval` / `PowerHint` are pure + unit-tested (mapping +
+  monotonic back-off); both `wait_for_next_tick` call sites now compute the interval per cycle.
+
 - **Activity strip + usage streaks on the Overview** — a compact per-day heat strip over the local scan
   window (last `days_scanned` days) plus **current** and **longest** usage streaks, learned from
   `javis603/token-monitor`'s home-screen heatmap + streaks (`DEV_PLAN_2026-07-07_competitive_learnings.md`
