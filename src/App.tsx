@@ -3237,6 +3237,7 @@ type ProviderCredsView = {
   deepgram_api_key_set: boolean;
   elevenlabs_api_key_set: boolean;
   kilo_api_key_set: boolean;
+  alibaba_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3263,6 +3264,7 @@ type ProviderCredsView = {
   env_override_deepgram: boolean;
   env_override_elevenlabs: boolean;
   env_override_kilo: boolean;
+  env_override_alibaba: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3296,7 +3298,8 @@ type ProviderCredsUpdateKey =
   | "mistral_cookie"
   | "deepgram_api_key"
   | "elevenlabs_api_key"
-  | "kilo_api_key";
+  | "kilo_api_key"
+  | "alibaba_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3574,6 +3577,15 @@ function IntegrationsSection() {
       isSet: view.kilo_api_key_set,
       envOverride: view.env_override_kilo,
       envVar: "KILO_API_KEY",
+    },
+    {
+      provider: "Alibaba",
+      key: "alibaba_api_key",
+      labelKey: "settings.integrations.alibaba_api_key_label",
+      helpKey: "settings.integrations.alibaba_api_key_help",
+      isSet: view.alibaba_api_key_set,
+      envOverride: view.env_override_alibaba,
+      envVar: "ALIBABA_CODING_PLAN_API_KEY",
     },
   ];
 

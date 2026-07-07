@@ -25,6 +25,7 @@
 //! with the parent and would unwind `sync_now` on any provider panic.
 //! Per Codex 2026-05-02 review of v0.4.3 spec.
 
+pub mod alibaba;
 pub mod augment;
 pub mod claude;
 pub mod claude_refresh;
@@ -93,6 +94,7 @@ pub const PROVIDER_DEEPGRAM: &str = "Deepgram";
 pub const PROVIDER_ELEVENLABS: &str = "ElevenLabs";
 pub const PROVIDER_OLLAMA: &str = "Ollama";
 pub const PROVIDER_KILO: &str = "Kilo";
+pub const PROVIDER_ALIBABA: &str = "Alibaba";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -267,6 +269,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_ELEVENLABS, tokio::spawn(elevenlabs::collect())), // @allow tokio-spawn
         (PROVIDER_OLLAMA, tokio::spawn(ollama::collect())), // @allow tokio-spawn
         (PROVIDER_KILO, tokio::spawn(kilo::collect())),     // @allow tokio-spawn
+        (PROVIDER_ALIBABA, tokio::spawn(alibaba::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -425,6 +428,7 @@ mod tests {
             ("elevenLabs", PROVIDER_ELEVENLABS),
             ("ollama", PROVIDER_OLLAMA),
             ("kilo", PROVIDER_KILO),
+            ("alibaba", PROVIDER_ALIBABA),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -481,6 +485,7 @@ mod tests {
             PROVIDER_ELEVENLABS,
             PROVIDER_OLLAMA,
             PROVIDER_KILO,
+            PROVIDER_ALIBABA,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

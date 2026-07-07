@@ -11,6 +11,25 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Alibaba coding-plan quota collector** (port of macOS `AlibabaCollector`). Adds Alibaba as a **29th
+  provider** — a real multi-window `.quota`. `POST {host}/data/api.json?action=…queryCodingPlanInstanceInfoV2`
+  authed with a Bearer token that is also mirrored into `x-api-key` + `X-DashScope-API-Key` (as the Mac
+  does), from env `ALIBABA_CODING_PLAN_API_KEY` or the Settings `alibaba_api_key`. **Region routing:** the
+  International console (`modelstudio.console.alibabacloud.com`, commodity `broadscope-bailian-intl`) is
+  tried first, falling back to China mainland (`bailian.console.aliyun.com`, `broadscope-bailian`) on any
+  failure — mirrors the Mac do/catch. Parses `data.codingPlanInstanceInfos[0]` into up to three windows
+  (**5-hour / weekly / monthly**), each `used`/`total` with a next-refresh reset. The 5-hour window (else
+  monthly) drives the headline gauge; `status_text` shows "used/total used"; `plan_type` is `planName`
+  (or `packageName`, default "Coding Plan").
+  - `src-tauri/src/quota/alibaba.rs` (4 unit tests — three-window mapping + 5h headline, monthly-headline
+    fallback + `packageName`, no-quota-info "Unknown"/default-plan, missing-infos schema error) +
+    `collect_all` wiring + `PROVIDER_ALIBABA = "Alibaba"` in both contract-test arrays (case `"alibaba"`).
+    `alibaba_api_key` cred through `provider_creds` + **Settings → Integrations** input row + 2 i18n keys
+    × 3 locales.
+  - **Verification posture:** region routing / parse / window mapping fully unit-tested; the live POST
+    needs a real Alibaba coding-plan key so it can't be CI-verified — endpoint/auth/region-fallback ported
+    from the proven Mac collector.
+
 - **Kilo credit + subscription collector** (port of macOS `KiloCollector`). Adds Kilo as a **28th
   provider**. A single **tRPC batch** GET
   `https://app.kilo.ai/api/trpc/user.getCreditBlocks,kiloPass.getState?batch=1` (two procedures, one

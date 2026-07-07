@@ -145,6 +145,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Kilo collector — credit balance + Kilo Pass subscription ($ figure).
     "settings.integrations.kilo_api_key_label",
     "settings.integrations.kilo_api_key_help",
+    // Alibaba coding-plan collector — 5h/weekly/monthly request quotas.
+    "settings.integrations.alibaba_api_key_label",
+    "settings.integrations.alibaba_api_key_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

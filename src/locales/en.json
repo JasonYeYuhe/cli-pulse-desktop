@@ -343,7 +343,9 @@
       "elevenlabs_api_key_label": "ElevenLabs API key",
       "elevenlabs_api_key_help": "API key from ElevenLabs (ELEVENLABS_API_KEY or XI_API_KEY) — shows the monthly character quota (used / limit) with renewal, plus voice-slot tiers.",
       "kilo_api_key_label": "Kilo API key",
-      "kilo_api_key_help": "API key from Kilo (KILO_API_KEY) — shows your credit balance and Kilo Pass subscription usage as a dollar figure. Falls back to the Kilo CLI login (~/.local/share/kilo/auth.json) when no key is set."
+      "kilo_api_key_help": "API key from Kilo (KILO_API_KEY) — shows your credit balance and Kilo Pass subscription usage as a dollar figure. Falls back to the Kilo CLI login (~/.local/share/kilo/auth.json) when no key is set.",
+      "alibaba_api_key_label": "Alibaba coding-plan API key",
+      "alibaba_api_key_help": "API key for the Alibaba (Model Studio / Bailian) coding plan (ALIBABA_CODING_PLAN_API_KEY) — shows 5-hour, weekly, and monthly request quotas. Routes to the International console first, falling back to China mainland."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",
