@@ -22,7 +22,7 @@ import {
   toggleHiddenProvider,
 } from "./lib/providerVisibility";
 import { providerColor, providerMonogram } from "./lib/providerTheme";
-import { activityLevel, buildActivity, computeStreaks } from "./lib/activity";
+import { activityLevel, buildActivity, cacheHitRate, computeStreaks } from "./lib/activity";
 import {
   DEFAULT_WARN_THRESHOLDS,
   warningFractions,
@@ -1041,11 +1041,12 @@ function updaterReducer(state: UpdaterState, action: UpdaterAction): UpdaterStat
 // heat strip over the local scan window plus current/longest streaks.
 function ActivitySection({ scan }: { scan: ScanResult }) {
   const { t } = useTranslation();
-  const { activity, streaks, max } = useMemo(() => {
+  const { activity, streaks, max, cache } = useMemo(() => {
     const activity = buildActivity(scan.entries, scan.days_scanned);
     const streaks = computeStreaks(activity);
     const max = activity.reduce((m, d) => Math.max(m, d.tokens), 0);
-    return { activity, streaks, max };
+    const cache = cacheHitRate(scan.entries);
+    return { activity, streaks, max, cache };
   }, [scan]);
 
   // Nothing worth showing if the whole window is idle.
@@ -1067,6 +1068,11 @@ function ActivitySection({ scan }: { scan: ScanResult }) {
           {t("overview.activity_title", { days: scan.days_scanned })}
         </h2>
         <div className="flex items-center gap-3 text-xs tabular-nums shrink-0">
+          {cache !== null && (
+            <span className="text-neutral-400" title={t("overview.cache_hit_hint")}>
+              {t("overview.cache_hit", { pct: Math.round(cache) })}
+            </span>
+          )}
           <span className="text-emerald-400">
             {t("overview.streak_current", { n: streaks.current })}
           </span>

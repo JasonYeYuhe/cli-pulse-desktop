@@ -91,6 +91,22 @@ export function computeStreaks(
 }
 
 /**
+ * Prompt-cache hit rate over the window: `cached / (input + cached)` as a
+ * percentage. `null` when there are no input+cached tokens (avoids 0/0) — e.g.
+ * a window whose only rows are Claude message buckets with no token detail.
+ */
+export function cacheHitRate(entries: ReadonlyArray<ActivityEntry>): number | null {
+  let cached = 0;
+  let input = 0;
+  for (const e of entries) {
+    cached += e.cached_tokens || 0;
+    input += e.input_tokens || 0;
+  }
+  const denom = input + cached;
+  return denom > 0 ? (cached / denom) * 100 : null;
+}
+
+/**
  * Heat level 0–4 for a day, relative to the window's busiest day. 0 = no
  * activity; 1–4 are quartile-ish buckets of `tokens / max`. An active day with
  * 0 tokens (message-only) still shows as level 1 so it's visible.

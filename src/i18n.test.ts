@@ -193,6 +193,7 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "overview.activity_title",
     "overview.streak_current",
     "overview.streak_longest",
+    "overview.cache_hit",
     // v0.10.1 — Swarm tab (macOS/iOS parity). Pin tab label, state
     // hints, and card chrome. Plural keys (agents/blocked_count) are
     // exercised separately and intentionally omitted here.

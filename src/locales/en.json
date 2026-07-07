@@ -62,6 +62,8 @@
     "activity_title": "Activity — last {{days}}d",
     "streak_current": "{{n}}-day streak",
     "streak_longest": "Longest {{n}}",
+    "cache_hit": "{{pct}}% cache",
+    "cache_hit_hint": "Prompt-cache hit rate over the window (cached ÷ input+cached tokens)",
     "activity_tokens": "{{tokens}} tokens",
     "activity_idle": "No activity",
     "today_breakdown": "Today's breakdown",

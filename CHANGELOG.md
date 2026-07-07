@@ -11,6 +11,13 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Cache hit-rate on the Overview** — the Overview activity row now shows the prompt-**cache hit rate**
+  over the scan window (`cached ÷ (input + cached)` tokens), so you can see how much prompt caching is
+  saving you (learned from `javis603/token-monitor`'s cache-hit analytics,
+  `DEV_PLAN_2026-07-07_competitive_learnings.md` §3a A6). Pure `cacheHitRate` helper in `src/lib/activity.ts`
+  (3 tests; `null` when there are no input+cached tokens, so a message-only window hides the chip) + a muted
+  chip alongside the streaks + 1 i18n key × 3 locales (pinned).
+
 - **Adaptive background-sync cadence (power-aware)** — the background sync/quota loop now backs off on
   battery to save power + provider rate-limit budget: **120 s on AC**, **5 min on battery**, **15 min when
   the battery is low** (≤20% and discharging). Learned from CodexBar's Low-Power-aware polling

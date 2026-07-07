@@ -62,6 +62,8 @@
     "activity_title": "アクティビティ — 直近 {{days}} 日",
     "streak_current": "{{n}} 日連続",
     "streak_longest": "最長 {{n}} 日",
+    "cache_hit": "キャッシュ {{pct}}%",
+    "cache_hit_hint": "ウィンドウ内のプロンプトキャッシュ率(キャッシュ ÷ 入力+キャッシュ トークン)",
     "activity_tokens": "{{tokens}} tokens",
     "activity_idle": "アクティビティなし",
     "today_breakdown": "本日の内訳",

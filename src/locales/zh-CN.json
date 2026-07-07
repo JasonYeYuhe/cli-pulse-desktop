@@ -62,6 +62,8 @@
     "activity_title": "活跃度 — 近 {{days}} 天",
     "streak_current": "连续 {{n}} 天",
     "streak_longest": "最长 {{n}} 天",
+    "cache_hit": "缓存 {{pct}}%",
+    "cache_hit_hint": "窗口内的提示缓存命中率(缓存 ÷ 输入+缓存 tokens)",
     "activity_tokens": "{{tokens}} tokens",
     "activity_idle": "无活动",
     "today_breakdown": "今日明细",

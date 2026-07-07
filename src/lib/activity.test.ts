@@ -3,16 +3,17 @@ import {
   activityLevel,
   aggregateByDate,
   buildActivity,
+  cacheHitRate,
   computeStreaks,
   type ActivityEntry,
   type DayActivity,
 } from "./activity";
 
-function entry(date: string, tokens: number, msgs = 0): ActivityEntry {
+function entry(date: string, tokens: number, msgs = 0, cached = 0): ActivityEntry {
   return {
     date,
     input_tokens: tokens,
-    cached_tokens: 0,
+    cached_tokens: cached,
     output_tokens: 0,
     message_count: msgs,
   };
@@ -64,6 +65,21 @@ describe("computeStreaks", () => {
 
   it("empty window is zero/zero", () => {
     expect(computeStreaks([])).toEqual({ current: 0, longest: 0 });
+  });
+});
+
+describe("cacheHitRate", () => {
+  it("computes cached / (input + cached) as a percentage", () => {
+    // input 300 + cached 700 → 70% hit.
+    expect(cacheHitRate([entry("2026-07-07", 300, 0, 700)])).toBeCloseTo(70);
+  });
+  it("sums across entries", () => {
+    const rate = cacheHitRate([entry("d1", 100, 0, 100), entry("d2", 300, 0, 500)]);
+    expect(rate).toBeCloseTo((600 / 1000) * 100); // 60%
+  });
+  it("is null when there are no input+cached tokens", () => {
+    expect(cacheHitRate([])).toBeNull();
+    expect(cacheHitRate([entry("d1", 0, 5, 0)])).toBeNull(); // message-only day
   });
 });
 
