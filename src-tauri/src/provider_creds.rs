@@ -75,6 +75,7 @@ const ACCT_KIMI: &str = "kimi-auth-token";
 const ACCT_GROK: &str = "grok-cookie";
 const ACCT_GLM: &str = "glm-api-key";
 const ACCT_VOLCANO: &str = "volcano-api-key";
+const ACCT_GROQ: &str = "groq-api-key";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -149,6 +150,9 @@ pub struct ProviderCreds {
     /// `ProviderCredsView`.
     #[serde(default)]
     pub volcano_api_key: Option<String>,
+    /// Groq api-key (Bearer). Secret — masked in `ProviderCredsView`.
+    #[serde(default)]
+    pub groq_api_key: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -179,6 +183,7 @@ impl Default for ProviderCreds {
             grok_cookie: None,
             glm_api_key: None,
             volcano_api_key: None,
+            groq_api_key: None,
         }
     }
 }
@@ -296,6 +301,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         grok_cookie: keychain::read_at(ACCT_GROK).ok().flatten(),
         glm_api_key: keychain::read_at(ACCT_GLM).ok().flatten(),
         volcano_api_key: keychain::read_at(ACCT_VOLCANO).ok().flatten(),
+        groq_api_key: keychain::read_at(ACCT_GROQ).ok().flatten(),
     })
 }
 
@@ -346,6 +352,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_GROK, creds.grok_cookie.as_deref())?;
     set_or_clear_keychain(ACCT_GLM, creds.glm_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_VOLCANO, creds.volcano_api_key.as_deref())?;
+    set_or_clear_keychain(ACCT_GROQ, creds.groq_api_key.as_deref())?;
     Ok(())
 }
 
@@ -441,6 +448,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_GROK,
         ACCT_GLM,
         ACCT_VOLCANO,
+        ACCT_GROQ,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -554,6 +562,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.grok_cookie.as_deref(),
             v1.glm_api_key.as_deref(),
             v1.volcano_api_key.as_deref(),
+            v1.groq_api_key.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -587,6 +596,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         grok_cookie: None,
         glm_api_key: None,
         volcano_api_key: None,
+        groq_api_key: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -636,6 +646,7 @@ mod tests {
             grok_cookie: None,
             glm_api_key: None,
             volcano_api_key: None,
+            groq_api_key: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -724,6 +735,7 @@ mod tests {
             grok_cookie: None,
             glm_api_key: None,
             volcano_api_key: None,
+            groq_api_key: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -787,6 +799,7 @@ mod tests {
                 grok_cookie: None,
                 glm_api_key: None,
                 volcano_api_key: None,
+                groq_api_key: None,
             },
         );
         assert!(path.exists());
@@ -825,6 +838,7 @@ mod tests {
                 grok_cookie: None,
                 glm_api_key: None,
                 volcano_api_key: None,
+                groq_api_key: None,
             },
         );
         assert!(path.exists());
@@ -879,6 +893,7 @@ mod tests {
                 grok_cookie: None,
                 glm_api_key: None,
                 volcano_api_key: None,
+                groq_api_key: None,
             },
         );
         assert!(path_v1.exists());

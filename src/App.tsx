@@ -3232,6 +3232,7 @@ type ProviderCredsView = {
   grok_cookie_set: boolean;
   glm_api_key_set: boolean;
   volcano_api_key_set: boolean;
+  groq_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3253,6 +3254,7 @@ type ProviderCredsView = {
   env_override_grok: boolean;
   env_override_glm: boolean;
   env_override_volcano: boolean;
+  env_override_groq: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3281,7 +3283,8 @@ type ProviderCredsUpdateKey =
   | "kimi_auth_token"
   | "grok_cookie"
   | "glm_api_key"
-  | "volcano_api_key";
+  | "volcano_api_key"
+  | "groq_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3514,6 +3517,15 @@ function IntegrationsSection() {
       isSet: view.volcano_api_key_set,
       envOverride: view.env_override_volcano,
       envVar: "ARK_API_KEY",
+    },
+    {
+      provider: "Groq",
+      key: "groq_api_key",
+      labelKey: "settings.integrations.groq_api_key_label",
+      helpKey: "settings.integrations.groq_api_key_help",
+      isSet: view.groq_api_key_set,
+      envOverride: view.env_override_groq,
+      envVar: "GROQ_API_KEY",
     },
   ];
 

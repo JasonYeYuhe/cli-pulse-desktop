@@ -1599,6 +1599,7 @@ struct ProviderCredsView {
     grok_cookie_set: bool,
     glm_api_key_set: bool,
     volcano_api_key_set: bool,
+    groq_api_key_set: bool,
     /// Optional override for OpenRouter's API URL — NOT secret, returned
     /// plaintext so the Settings UI can show the current custom endpoint
     /// (or empty if using default openrouter.ai).
@@ -1629,6 +1630,7 @@ struct ProviderCredsView {
     env_override_grok: bool,
     env_override_glm: bool,
     env_override_volcano: bool,
+    env_override_groq: bool,
     /// v0.4.20 — surface the active storage backend ("os_keychain" or
     /// "file") inside the Settings → Integrations panel itself. v0.4.16
     /// already exposed this on `DiagnosticSnapshot`, but a Linux user
@@ -1664,6 +1666,7 @@ struct ProviderCredsUpdate {
     grok_cookie: Option<String>,
     glm_api_key: Option<String>,
     volcano_api_key: Option<String>,
+    groq_api_key: Option<String>,
 }
 
 fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
@@ -1694,6 +1697,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         grok_cookie_set: c.grok_cookie.as_deref().is_some_and(|s| !s.is_empty()),
         glm_api_key_set: c.glm_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         volcano_api_key_set: c.volcano_api_key.as_deref().is_some_and(|s| !s.is_empty()),
+        groq_api_key_set: c.groq_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         openrouter_base_url: c.openrouter_base_url.clone(),
         env_override_cursor: env_set("CURSOR_COOKIE"),
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
@@ -1722,6 +1726,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         env_override_volcano: env_set("ARK_API_KEY")
             || env_set("VOLC_ACCESSKEY")
             || env_set("VOLCANO_ENGINE_API_KEY"),
+        env_override_groq: env_set("GROQ_API_KEY"),
         storage_backend: provider_creds::current_backend(),
     }
 }
@@ -1799,6 +1804,9 @@ async fn set_provider_creds(
     }
     if let Some(v) = update.volcano_api_key {
         current.volcano_api_key = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.groq_api_key {
+        current.groq_api_key = if v.is_empty() { None } else { Some(v) };
     }
     provider_creds::save(&current).map_err(|e| e.to_string())?;
     // Emit event so the background sync loop (or any other listener) can

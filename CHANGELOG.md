@@ -11,6 +11,20 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Groq throughput collector** (v0.17 — port of macOS `GroqCollector`, status-only). Adds Groq (the
+  inference company; NOT xAI's Grok) as a 23rd provider. Groq exposes only a **Prometheus** metrics
+  endpoint with throughput RATES — no quota/cost/balance — so it's status-only: reads the api-key
+  (Settings, or env `GROQ_API_KEY`), runs **4 concurrent PromQL rate queries** against
+  `{base}/metrics/prometheus/api/v1/query` (base via env `GROQ_API_URL`), and reports a live
+  `status_text` line "X req/min · Y tok/min" (+ "· Z cache/min" when non-zero). No gauge is drawn.
+  - `src-tauri/src/quota/groq.rs` (6 unit tests — Prometheus instant-envelope parse with mixed
+    number/string values, empty-result → 0, non-success → error, per-minute rate formatting with the
+    ≥100/≥10/else precision buckets) + `collect_all` wiring + `PROVIDER_GROQ = "Groq"`. `groq_api_key`
+    cred through `provider_creds` + a **Settings → Integrations** input row (+2 i18n keys × 3).
+  - **Verification posture:** Prometheus parsing / rate formatting fully unit-tested; the **live fetch
+    needs a real Groq key so it can't be CI-verified** — endpoint/queries/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 - **Volcano Engine (火山引擎 / 豆包) Ark collector** (v0.17 — port of macOS `VolcanoEngineCollector`).
   Adds Volcano Engine as a 22nd provider. **Dual-mode:** when the Ark response carries `{total,
   remaining}` it renders a real **"Ark Plan"** quota gauge ("700/1000 used"); otherwise the models-list

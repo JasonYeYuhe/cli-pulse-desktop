@@ -333,7 +333,9 @@
       "glm_api_key_label": "GLM API key",
       "glm_api_key_help": "Bearer key from Zhipu / GLM (GLM_API_KEY) — status-only (no quota endpoint); shows connectivity + balance if available.",
       "volcano_api_key_label": "Volcano Engine API key",
-      "volcano_api_key_help": "Bearer key from Volcano Engine / Ark (ARK_API_KEY) — shows plan quota if available, else connectivity."
+      "volcano_api_key_help": "Bearer key from Volcano Engine / Ark (ARK_API_KEY) — shows plan quota if available, else connectivity.",
+      "groq_api_key_label": "Groq API key",
+      "groq_api_key_help": "Bearer key from Groq (GROQ_API_KEY) — status-only; shows live throughput (req/min · tok/min)."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",
