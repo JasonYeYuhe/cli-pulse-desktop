@@ -349,7 +349,9 @@
       "openai_admin_key_label": "OpenAI Admin key",
       "openai_admin_key_help": "Organization admin key (sk-admin-…, OPENAI_ADMIN_KEY) for the OpenAI org cost API — shows this month's total spend. Distinct from the Codex CLI; a regular sk- key won't work.",
       "codebuff_api_key_label": "Codebuff API key",
-      "codebuff_api_key_help": "API key from Codebuff (CODEBUFF_API_KEY) — shows your credit balance as a quota gauge with reset, plus a best-effort weekly window and plan tier."
+      "codebuff_api_key_help": "API key from Codebuff (CODEBUFF_API_KEY) — shows your credit balance as a quota gauge with reset, plus a best-effort weekly window and plan tier.",
+      "manus_cookie_label": "Manus session cookie",
+      "manus_cookie_help": "Paste your Manus session cookie or session_id value (MANUS_SESSION_TOKEN) — shows your monthly and refresh credit pools. Session cookies expire, so re-paste if it stops updating."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

@@ -343,7 +343,9 @@
       "openai_admin_key_label": "OpenAI Admin 密钥",
       "openai_admin_key_help": "OpenAI 组织管理员密钥(sk-admin-…,OPENAI_ADMIN_KEY),用于组织成本 API —— 显示本月的总支出。与 Codex CLI 不同;普通 sk- 密钥无法使用。",
       "codebuff_api_key_label": "Codebuff API 密钥",
-      "codebuff_api_key_help": "来自 Codebuff 的 API 密钥(CODEBUFF_API_KEY)—— 以配额条形式显示信用余额及重置时间,并尽力附带每周窗口和套餐等级。"
+      "codebuff_api_key_help": "来自 Codebuff 的 API 密钥(CODEBUFF_API_KEY)—— 以配额条形式显示信用余额及重置时间,并尽力附带每周窗口和套餐等级。",
+      "manus_cookie_label": "Manus 会话 Cookie",
+      "manus_cookie_help": "粘贴你的 Manus 会话 Cookie 或 session_id 值(MANUS_SESSION_TOKEN)—— 显示每月和刷新的信用额度池。会话 Cookie 会过期,若停止更新请重新粘贴。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

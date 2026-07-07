@@ -11,6 +11,29 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Manus credit-pool collector** (port of macOS `ManusCollector`, derived from steipete/CodexBar, MIT).
+  Adds Manus as a **32nd provider** — the first **cookie**-authed collector of the MEDIUM tranche. A single
+  `POST https://api.manus.im/user.v1.UserService/GetAvailableCredits` (Connect-RPC, JSON body `{}`). Auth
+  novelty: the **`session_id` cookie value is sent as `Authorization: Bearer <value>`** (not a `Cookie:`
+  header); the cookie comes from env `MANUS_SESSION_TOKEN` / `MANUS_SESSION_ID` / `MANUS_COOKIE` or the
+  Settings `manus_cookie` (manual paste — the desktop has no browser auto-import). A token extractor pulls
+  the `session_id` value from a full Cookie header, accepts a bare token, and (for a lone base64 value)
+  treats trailing `=` padding as non-cookie-syntax while rejecting a stray `name=value` pair. Manus returns
+  two capped pools (monthly pro + periodic refresh) → a real **`.quota`**: the monthly pool (else the
+  refresh pool) drives the headline gauge, the refresh pool is a secondary tier; neither capped degrades to
+  a status-only balance. Envelope-tolerant parse (`data`/`result`/`response`/`availableCredits`) with a
+  "require ≥1 known credits key" guard so an error payload can't decode to an all-zero snapshot; lossy
+  number decode (number|int|string). `status_text` = "Balance: N credits" (+ a refresh detail);
+  `plan_type` = "Pro"/"Free" inferred from the monthly pool.
+  - `src-tauri/src/quota/manus.rs` (7 unit tests — monthly-primary + refresh-secondary, refresh-only,
+    status-only, envelope unwrap, unrelated-payload rejection, lossy string numbers, session-token
+    extraction incl. base64 padding + stray-pair rejection) + `collect_all` wiring + `PROVIDER_MANUS =
+    "Manus"` in both contract-test arrays (case `"manus"`). `manus_cookie` cred through `provider_creds` +
+    **Settings → Integrations** cookie input row + 2 i18n keys × 3 locales.
+  - **Divergence from the Mac:** no browser cookie auto-import (manual paste / env only).
+  - **Verification posture:** token extraction / envelope parse / pool mapping fully unit-tested; the live
+    fetch needs a real Manus session cookie (not CI-verifiable) — ported from the proven Mac collector.
+
 - **Codebuff credit-quota collector** (port of macOS `CodebuffCollector`, derived from steipete/CodexBar,
   MIT). Adds Codebuff as a **31st provider** — the first of the MEDIUM (multi-call) tranche. A required
   `POST https://www.codebuff.com/api/v1/usage` (body `{"fingerprintId":"clipulse-usage"}`, Bearer) returns

@@ -83,6 +83,7 @@ const ACCT_KILO: &str = "kilo-api-key";
 const ACCT_ALIBABA: &str = "alibaba-coding-plan-api-key";
 const ACCT_OPENAI_ADMIN: &str = "openai-admin-key";
 const ACCT_CODEBUFF: &str = "codebuff-api-key";
+const ACCT_MANUS: &str = "manus-cookie";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -178,6 +179,8 @@ pub struct ProviderCreds {
     pub openai_admin_key: Option<String>,
     #[serde(default)]
     pub codebuff_api_key: Option<String>,
+    #[serde(default)]
+    pub manus_cookie: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -216,6 +219,7 @@ impl Default for ProviderCreds {
             alibaba_api_key: None,
             openai_admin_key: None,
             codebuff_api_key: None,
+            manus_cookie: None,
         }
     }
 }
@@ -341,6 +345,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         alibaba_api_key: keychain::read_at(ACCT_ALIBABA).ok().flatten(),
         openai_admin_key: keychain::read_at(ACCT_OPENAI_ADMIN).ok().flatten(),
         codebuff_api_key: keychain::read_at(ACCT_CODEBUFF).ok().flatten(),
+        manus_cookie: keychain::read_at(ACCT_MANUS).ok().flatten(),
     })
 }
 
@@ -399,6 +404,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_ALIBABA, creds.alibaba_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_OPENAI_ADMIN, creds.openai_admin_key.as_deref())?;
     set_or_clear_keychain(ACCT_CODEBUFF, creds.codebuff_api_key.as_deref())?;
+    set_or_clear_keychain(ACCT_MANUS, creds.manus_cookie.as_deref())?;
     Ok(())
 }
 
@@ -502,6 +508,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_ALIBABA,
         ACCT_OPENAI_ADMIN,
         ACCT_CODEBUFF,
+        ACCT_MANUS,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -623,6 +630,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.alibaba_api_key.as_deref(),
             v1.openai_admin_key.as_deref(),
             v1.codebuff_api_key.as_deref(),
+            v1.manus_cookie.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -664,6 +672,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         alibaba_api_key: None,
         openai_admin_key: None,
         codebuff_api_key: None,
+        manus_cookie: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -721,6 +730,7 @@ mod tests {
             alibaba_api_key: None,
             openai_admin_key: None,
             codebuff_api_key: None,
+            manus_cookie: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -817,6 +827,7 @@ mod tests {
             alibaba_api_key: None,
             openai_admin_key: None,
             codebuff_api_key: None,
+            manus_cookie: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -888,6 +899,7 @@ mod tests {
                 alibaba_api_key: None,
                 openai_admin_key: None,
                 codebuff_api_key: None,
+                manus_cookie: None,
             },
         );
         assert!(path.exists());
@@ -934,6 +946,7 @@ mod tests {
                 alibaba_api_key: None,
                 openai_admin_key: None,
                 codebuff_api_key: None,
+                manus_cookie: None,
             },
         );
         assert!(path.exists());
@@ -996,6 +1009,7 @@ mod tests {
                 alibaba_api_key: None,
                 openai_admin_key: None,
                 codebuff_api_key: None,
+                manus_cookie: None,
             },
         );
         assert!(path_v1.exists());

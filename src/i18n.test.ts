@@ -154,6 +154,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // Codebuff collector — credit balance quota gauge + weekly window.
     "settings.integrations.codebuff_api_key_label",
     "settings.integrations.codebuff_api_key_help",
+    // Manus collector — session-cookie credit pools (monthly + refresh).
+    "settings.integrations.manus_cookie_label",
+    "settings.integrations.manus_cookie_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

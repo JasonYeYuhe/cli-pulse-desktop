@@ -3240,6 +3240,7 @@ type ProviderCredsView = {
   alibaba_api_key_set: boolean;
   openai_admin_key_set: boolean;
   codebuff_api_key_set: boolean;
+  manus_cookie_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3269,6 +3270,7 @@ type ProviderCredsView = {
   env_override_alibaba: boolean;
   env_override_openai_admin: boolean;
   env_override_codebuff: boolean;
+  env_override_manus: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3305,7 +3307,8 @@ type ProviderCredsUpdateKey =
   | "kilo_api_key"
   | "alibaba_api_key"
   | "openai_admin_key"
-  | "codebuff_api_key";
+  | "codebuff_api_key"
+  | "manus_cookie";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3610,6 +3613,15 @@ function IntegrationsSection() {
       isSet: view.codebuff_api_key_set,
       envOverride: view.env_override_codebuff,
       envVar: "CODEBUFF_API_KEY",
+    },
+    {
+      provider: "Manus",
+      key: "manus_cookie",
+      labelKey: "settings.integrations.manus_cookie_label",
+      helpKey: "settings.integrations.manus_cookie_help",
+      isSet: view.manus_cookie_set,
+      envOverride: view.env_override_manus,
+      envVar: "MANUS_SESSION_TOKEN",
     },
   ];
 

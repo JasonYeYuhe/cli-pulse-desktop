@@ -343,7 +343,9 @@
       "openai_admin_key_label": "OpenAI Admin キー",
       "openai_admin_key_help": "OpenAI 組織の管理者キー(sk-admin-…、OPENAI_ADMIN_KEY)。組織コスト API 用で、今月の合計支出を表示します。Codex CLI とは別物で、通常の sk- キーは使用できません。",
       "codebuff_api_key_label": "Codebuff API キー",
-      "codebuff_api_key_help": "Codebuff の API キー(CODEBUFF_API_KEY)— クレジット残高をリセット付きのクォータゲージで表示し、可能であれば週次ウィンドウとプランティアも表示します。"
+      "codebuff_api_key_help": "Codebuff の API キー(CODEBUFF_API_KEY)— クレジット残高をリセット付きのクォータゲージで表示し、可能であれば週次ウィンドウとプランティアも表示します。",
+      "manus_cookie_label": "Manus セッション Cookie",
+      "manus_cookie_help": "Manus のセッション Cookie または session_id 値(MANUS_SESSION_TOKEN)を貼り付けてください — 月次およびリフレッシュのクレジットプールを表示します。セッション Cookie は期限切れになるため、更新が止まったら貼り直してください。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",
