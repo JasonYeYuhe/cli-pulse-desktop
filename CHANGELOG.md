@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Volcano Engine (火山引擎 / 豆包) Ark collector** (v0.17 — port of macOS `VolcanoEngineCollector`).
+  Adds Volcano Engine as a 22nd provider. **Dual-mode:** when the Ark response carries `{total,
+  remaining}` it renders a real **"Ark Plan"** quota gauge ("700/1000 used"); otherwise the models-list
+  endpoint is a connectivity probe and it degrades to a status-only line ("N models available" /
+  "Connected") via `status_text`, with no gauge. Reads the api-key (Settings, or env `ARK_API_KEY` /
+  `VOLC_ACCESSKEY` / `VOLCANO_ENGINE_API_KEY`), fetches `GET ark.cn-beijing.volces.com/api/v3/models`
+  (host overridable via `ARK_API_HOST`), and parses three shapes (top-level quota, models array,
+  `result`/`Response` wrapper) in the Mac's precedence order.
+  - `src-tauri/src/quota/volcano.rs` (6 shape / gauge / status unit tests) + `collect_all` wiring +
+    `PROVIDER_VOLCANO = "Volcano Engine"` (validated against the Mac `ProviderKind` snapshot).
+    `volcano_api_key` cred through `provider_creds` + a **Settings → Integrations** input row
+    (+2 i18n keys × 3).
+  - **Verification posture:** shape detection / gauge / status formatting fully unit-tested; the **live
+    fetch needs a real Ark key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 - **GLM (Zhipu / 智谱) status-only collector** (v0.17 — port of macOS `GLMCollector`, the first
   status-only provider). Adds GLM as a 21st provider, now that the `status_text` line gives status-only
   providers a render path. GLM has no quota/limit endpoint, so it's a **connectivity probe**: reads the

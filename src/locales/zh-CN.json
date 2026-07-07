@@ -325,7 +325,9 @@
       "grok_cookie_label": "Grok 会话 Cookie",
       "grok_cookie_help": "粘贴你的 grok.com 会话 Cookie(GROK_COOKIE),或设置 GROK_TOKEN —— 显示你的积分用量。Cookie 会过期,失效后重新粘贴。",
       "glm_api_key_label": "GLM API 密钥",
-      "glm_api_key_help": "来自智谱 / GLM 的 Bearer 密钥(GLM_API_KEY)—— 仅状态(无配额接口);显示连接状态及可用余额。"
+      "glm_api_key_help": "来自智谱 / GLM 的 Bearer 密钥(GLM_API_KEY)—— 仅状态(无配额接口);显示连接状态及可用余额。",
+      "volcano_api_key_label": "火山引擎 API 密钥",
+      "volcano_api_key_help": "来自火山引擎 / Ark 的 Bearer 密钥(ARK_API_KEY)—— 显示套餐配额(若可用),否则显示连接状态。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

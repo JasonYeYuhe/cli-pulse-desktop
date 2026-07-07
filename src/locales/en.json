@@ -331,7 +331,9 @@
       "grok_cookie_label": "Grok session cookie",
       "grok_cookie_help": "Paste your grok.com session cookie (GROK_COOKIE), or set GROK_TOKEN — shows your credit usage. Cookies expire; re-paste to refresh.",
       "glm_api_key_label": "GLM API key",
-      "glm_api_key_help": "Bearer key from Zhipu / GLM (GLM_API_KEY) — status-only (no quota endpoint); shows connectivity + balance if available."
+      "glm_api_key_help": "Bearer key from Zhipu / GLM (GLM_API_KEY) — status-only (no quota endpoint); shows connectivity + balance if available.",
+      "volcano_api_key_label": "Volcano Engine API key",
+      "volcano_api_key_help": "Bearer key from Volcano Engine / Ark (ARK_API_KEY) — shows plan quota if available, else connectivity."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

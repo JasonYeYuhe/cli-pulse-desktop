@@ -46,6 +46,7 @@ pub mod perplexity;
 pub mod stepfun;
 pub mod t3chat;
 pub mod venice;
+pub mod volcano;
 pub mod warp;
 pub mod zai;
 
@@ -79,6 +80,7 @@ pub const PROVIDER_WARP: &str = "Warp";
 pub const PROVIDER_KIMI: &str = "Kimi";
 pub const PROVIDER_GROK: &str = "Grok";
 pub const PROVIDER_GLM: &str = "GLM";
+pub const PROVIDER_VOLCANO: &str = "Volcano Engine";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -246,6 +248,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_KIMI, tokio::spawn(kimi::collect())),     // @allow tokio-spawn
         (PROVIDER_GROK, tokio::spawn(grok::collect())),     // @allow tokio-spawn
         (PROVIDER_GLM, tokio::spawn(glm::collect())),       // @allow tokio-spawn
+        (PROVIDER_VOLCANO, tokio::spawn(volcano::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -397,6 +400,7 @@ mod tests {
             ("kimi", PROVIDER_KIMI),
             ("grok", PROVIDER_GROK),
             ("glm", PROVIDER_GLM),
+            ("volcanoEngine", PROVIDER_VOLCANO),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -446,6 +450,7 @@ mod tests {
             PROVIDER_KIMI,
             PROVIDER_GROK,
             PROVIDER_GLM,
+            PROVIDER_VOLCANO,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),
