@@ -145,10 +145,19 @@ fn map_to_snapshot(balances: &[Balance]) -> QuotaSnapshot {
             }
         })
         .collect();
-    let primary_cents = select_primary(balances)
-        .map(|b| to_cents(b.total))
-        .unwrap_or(0);
+    let primary = select_primary(balances);
+    let primary_cents = primary.map(|b| to_cents(b.total)).unwrap_or(0);
+    // Readable balance line (the gauge shows raw cents) — "$12.34 balance" for
+    // USD, "88.00 CNY balance" otherwise.
+    let status_text = primary.map(|b| {
+        if b.currency == "USD" {
+            format!("${:.2} balance", b.total.max(0.0))
+        } else {
+            format!("{:.2} {} balance", b.total.max(0.0), b.currency)
+        }
+    });
     QuotaSnapshot {
+        status_text,
         plan_type: "API key".to_string(),
         remaining: primary_cents,
         quota: primary_cents,
@@ -218,6 +227,8 @@ mod tests {
                                                    // Top-level gauge mirrors the USD-positive primary.
         assert_eq!(snap.quota, 1234);
         assert_eq!(snap.remaining, 1234);
+        // Readable balance line (the gauge shows raw cents).
+        assert_eq!(snap.status_text.as_deref(), Some("$12.34 balance"));
     }
 
     #[test]

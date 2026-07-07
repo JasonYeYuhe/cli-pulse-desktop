@@ -229,6 +229,7 @@ fn map_to_snapshot(c: &CustomerData) -> QuotaSnapshot {
     ];
 
     QuotaSnapshot {
+        status_text: None,
         // Headline = the 4-hour window.
         plan_type: c.plan_name().unwrap_or_else(|| "T3 Chat".to_string()),
         remaining: r4h,

@@ -11,6 +11,26 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Provider `status_text` — a readable local status line** (v0.17 — macOS parity, ports the Mac
+  `ProviderUsage.status_text`). Fixes the long-standing balance-display gap: uncapped-balance providers
+  (DeepSeek, Moonshot, Venice, Kimi K2, Crof credits) rendered their gauge as a raw scaled integer
+  ("1234" cents, "500000" units) with no currency — meaningless to read. Each such collector now emits a
+  human-readable line ("$12.34 balance", "Balance: $5.00", "$12.34 USD balance", "5.00 / 8.00 credits",
+  "$12.00 credits · 750 requests left"), rendered as a muted secondary line on the provider card. Grok's
+  status-only fallback now shows "Connected" instead of an empty 0/0 gauge.
+  - **LOCAL-ONLY, never synced** — verified against both repos: the Mac's `helper_sync` RPC and the
+    Supabase `provider_quotas` table have no `status_text` column (the Mac even hardcodes "Operational"
+    for cloud-fetched rows), so the desktop keeps it display-only. `QuotaSnapshot` gains
+    `status_text: Option<String>` (`skip_serializing_if` None), surfaced to the frontend via the existing
+    `get_last_collector_status` channel (`CollectorStatusView.status_text`) — NOT added to the
+    `p_provider_tiers` upload payload.
+  - **Rust:** `status_text` threaded through all 21 collector `QuotaSnapshot` literals (populated on the
+    balance/status-only ones, `None` on real-gauge providers to avoid a redundant line under the bar) +
+    6 new test assertions pinning the exact format strings. **React:** `CollectorStatus.status_text` type
+    + a conditional muted line on the provider card, sourced from `statusByProvider` (the same map that
+    drives the error badge). This is the foundation that unblocks the deferred status-only providers
+    (GLM, Volcano Engine, Groq, Mistral, Deepgram), which now have a meaningful way to render.
+
 - **Alert lifecycle** (macOS parity — ports `AlertsTab.swift`). When
   paired, the Alerts tab now shows persisted SERVER alerts with an
   Open / Resolved / All filter, severity summary badges, a Resolve-all

@@ -387,6 +387,7 @@ fn map_to_snapshot(usage: &UsageResponse) -> QuotaSnapshot {
     let outer_remaining = tiers.first().map(|t| t.remaining).unwrap_or(100);
 
     QuotaSnapshot {
+        status_text: None,
         plan_type,
         remaining: outer_remaining,
         quota: 100,

@@ -166,6 +166,7 @@ fn map_to_snapshot(rli: &RequestLimitInfo, grants: &[BonusGrant]) -> QuotaSnapsh
     };
 
     QuotaSnapshot {
+        status_text: None,
         plan_type: if rli.is_unlimited {
             "Unlimited".to_string()
         } else {

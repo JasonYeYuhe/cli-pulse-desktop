@@ -1879,6 +1879,10 @@ type CollectorStatus = {
   ok: boolean;
   /// One-line failure message; null on success or "user not configured".
   error: string | null;
+  /// LOCAL-ONLY human-readable status line from the collector snapshot
+  /// (e.g. "$12.34 balance", "Connected"). Absent when the collector has
+  /// nothing to say beyond the gauge. Never comes from the server.
+  status_text?: string | null;
 };
 
 type DailyUsageRow = {
@@ -2535,6 +2539,19 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                       </>
                     )}
                   </div>
+                  {/* LOCAL-ONLY status line (e.g. "$12.34 balance",
+                      "Connected") from the collector snapshot via
+                      get_last_collector_status. Reserved for balance /
+                      status-only providers whose raw gauge is meaningless;
+                      real-gauge providers leave it unset. Never synced. */}
+                  {(() => {
+                    const stx = statusByProvider.get(v.provider)?.status_text;
+                    return stx ? (
+                      <div className="text-xs text-neutral-400 mt-0.5 tabular-nums">
+                        {stx}
+                      </div>
+                    ) : null;
+                  })()}
                   <div className="mt-2 h-1 bg-neutral-800 rounded overflow-hidden max-w-xs">
                     <div
                       className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"

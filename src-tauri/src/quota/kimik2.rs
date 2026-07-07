@@ -170,7 +170,20 @@ fn map_to_snapshot(c: &Credits) -> QuotaSnapshot {
         });
     }
 
+    // Readable line (the gauge shows raw ×100_000 units) — mirrors the Mac's
+    // "X / Y credits" using the pre-scale dollar figures.
+    let status_text = if total > 0.0 {
+        Some(format!(
+            "{:.2} / {:.2} credits",
+            c.remaining.max(0.0),
+            total
+        ))
+    } else {
+        None
+    };
+
     QuotaSnapshot {
+        status_text,
         plan_type: "Credits".to_string(),
         remaining: remaining_units,
         quota: total_units,
@@ -195,6 +208,7 @@ mod tests {
         assert_eq!(snap.tiers[0].name, "Credits");
         assert_eq!(snap.tiers[0].quota, 800_000);
         assert_eq!(snap.tiers[0].remaining, 500_000);
+        assert_eq!(snap.status_text.as_deref(), Some("5.00 / 8.00 credits"));
     }
 
     #[test]

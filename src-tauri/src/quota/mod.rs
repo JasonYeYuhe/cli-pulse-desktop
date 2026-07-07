@@ -114,6 +114,17 @@ pub struct QuotaSnapshot {
     /// Mirrors Mac's per-provider conventions.
     pub session_reset: Option<String>,
     pub tiers: Vec<TierEntry>,
+    /// LOCAL-ONLY human-readable status line (e.g. `"$12.34 balance"`,
+    /// `"3 models available"`). Mirrors the Mac `ProviderUsage.status_text`,
+    /// which is display-only — the server's `provider_quotas` table has no
+    /// such column and `helper_sync` ignores it (verified 2026-07-06), so
+    /// this is NEVER uploaded; it flows to the frontend via
+    /// `get_last_collector_status` for the provider card's secondary line.
+    /// Reserved for providers whose gauge is misleading (uncapped balances)
+    /// or absent (status-only) — real-gauge providers leave it `None` to
+    /// avoid a redundant line under the bar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

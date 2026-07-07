@@ -128,6 +128,7 @@ fn map_to_snapshot(c: &CreditsResponse, sub: Option<&SubscriptionResponse>) -> Q
     }
 
     QuotaSnapshot {
+        status_text: None,
         plan_type: plan,
         remaining,
         quota: total,

@@ -131,7 +131,19 @@ fn map_to_snapshot(u: &CrofUsage, now: DateTime<Utc>) -> QuotaSnapshot {
         });
     }
 
+    // Readable line surfacing the uncapped credit balance alongside the
+    // requests gauge (mirrors the Mac's "$X credits · N requests left").
+    let credits = u.credits.max(0.0);
+    let status_text = if credits > 0.0 {
+        Some(format!(
+            "${credits:.2} credits · {remaining_int} requests left"
+        ))
+    } else {
+        None
+    };
+
     QuotaSnapshot {
+        status_text,
         plan_type: "API key".to_string(),
         remaining: remaining_int,
         quota: quota_int,
@@ -167,6 +179,10 @@ mod tests {
         assert_eq!(snap.tiers[1].quota, 12);
         assert_eq!(snap.tiers[1].remaining, 12);
         assert!(snap.tiers[1].reset_time.is_none());
+        assert_eq!(
+            snap.status_text.as_deref(),
+            Some("$12.00 credits · 750 requests left")
+        );
     }
 
     #[test]

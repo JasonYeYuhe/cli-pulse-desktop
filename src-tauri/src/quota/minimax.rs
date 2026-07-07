@@ -134,6 +134,7 @@ fn map_to_snapshot(m: &MiniMaxRemains) -> QuotaSnapshot {
     }
 
     QuotaSnapshot {
+        status_text: None,
         plan_type: "Coding Plan".to_string(),
         remaining,
         quota: total,

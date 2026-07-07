@@ -182,6 +182,7 @@ fn map_to_snapshot(credits: &CreditsData, key_info: Option<&KeyData>) -> QuotaSn
     }
 
     QuotaSnapshot {
+        status_text: None,
         plan_type: "Credits".to_string(),
         remaining: credits_remaining,
         quota: credits_quota,

@@ -140,6 +140,7 @@ fn map_to_snapshot(usage: &UsageResponse) -> QuotaSnapshot {
         .unwrap_or((0, 0));
 
     QuotaSnapshot {
+        status_text: None,
         plan_type,
         remaining: outer.1,
         quota: outer.0,

@@ -394,6 +394,7 @@ fn build_snapshot(s: &Snapshot) -> QuotaSnapshot {
             let clamped = used.clamp(0.0, 100.0);
             let remaining = (100.0 - clamped).round() as i64;
             QuotaSnapshot {
+                status_text: None,
                 plan_type: "Grok".to_string(),
                 remaining,
                 quota: 100,
@@ -407,7 +408,9 @@ fn build_snapshot(s: &Snapshot) -> QuotaSnapshot {
             }
         }
         None => QuotaSnapshot {
-            // Auth succeeded but no usable usage field ⇒ status-only (no gauge).
+            // Auth succeeded but no usable usage field ⇒ status-only (no gauge):
+            // surface "Connected" as the status line (mirrors the Mac).
+            status_text: Some("Connected".to_string()),
             plan_type: "Grok".to_string(),
             remaining: 0,
             quota: 0,
@@ -534,6 +537,8 @@ mod tests {
         assert_eq!(out.remaining, 0);
         assert!(out.tiers.is_empty());
         assert!(out.session_reset.is_some());
+        // Status-only providers surface a "Connected" line instead of a gauge.
+        assert_eq!(out.status_text.as_deref(), Some("Connected"));
     }
 
     #[test]

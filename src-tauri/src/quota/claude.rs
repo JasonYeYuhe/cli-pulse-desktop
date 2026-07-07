@@ -477,6 +477,7 @@ fn map_to_snapshot(oauth: &ClaudeOAuthInner, usage: &UsageResponse) -> QuotaSnap
     let remaining = tiers.iter().map(|t| t.remaining).min().unwrap_or(100);
     let session_reset = usage.five_hour.as_ref().and_then(|w| w.resets_at.clone());
     QuotaSnapshot {
+        status_text: None,
         plan_type: format_plan(oauth.rate_limit_tier.as_deref()),
         remaining,
         quota: 100,

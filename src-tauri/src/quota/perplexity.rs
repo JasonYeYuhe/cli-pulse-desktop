@@ -234,6 +234,7 @@ fn map_to_snapshot(a: &Attributed) -> QuotaSnapshot {
 
     let total_cents = a.recurring_total + a.promo_total + a.purchased_total;
     QuotaSnapshot {
+        status_text: None,
         plan_type: a.plan_name().unwrap_or_else(|| "Unknown".to_string()),
         remaining: units_from_cents(a.balance_cents),
         quota: units_from_cents(total_cents),

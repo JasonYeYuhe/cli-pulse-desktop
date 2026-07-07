@@ -295,6 +295,7 @@ fn map_to_snapshot(rate: &Rate, plan: Option<String>) -> QuotaSnapshot {
     ];
 
     QuotaSnapshot {
+        status_text: None,
         // Headline = the 5-hour window.
         plan_type: plan.unwrap_or_else(|| "StepFun".to_string()),
         remaining: fh,

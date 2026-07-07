@@ -456,6 +456,7 @@ fn map_to_snapshot(tier: &TierInfo, quota: &QuotaResponse) -> QuotaSnapshot {
     let outer_reset = outer.and_then(|t| t.reset_time);
 
     QuotaSnapshot {
+        status_text: None,
         plan_type,
         remaining: outer_remaining,
         quota: 100,

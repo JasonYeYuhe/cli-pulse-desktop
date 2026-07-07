@@ -192,7 +192,22 @@ fn map_to_snapshot(r: &BalanceResponse) -> QuotaSnapshot {
         (diem_cents, diem_cents)
     };
 
+    // Readable balance line (the gauge shows raw cents). Prefer USD, then a
+    // cap-aware DIEM (X / Y), then a plain DIEM balance.
+    let usd = r.balances.usd.unwrap_or(0.0);
+    let diem = r.balances.diem.unwrap_or(0.0);
+    let status_text = if usd > 0.0 {
+        Some(format!("${:.2} USD balance", usd))
+    } else if let Some(alloc) = r.diem_epoch_allocation.filter(|a| *a > 0.0) {
+        Some(format!("DIEM {:.2} / {:.2}", diem.max(0.0), alloc))
+    } else if diem > 0.0 {
+        Some(format!("DIEM {diem:.2} balance"))
+    } else {
+        None
+    };
+
     QuotaSnapshot {
+        status_text,
         plan_type: "API key".to_string(),
         remaining,
         quota,
@@ -220,6 +235,7 @@ mod tests {
         // USD is the primary top-level gauge (no cap-aware DIEM present).
         assert_eq!(snap.quota, 1234);
         assert_eq!(snap.remaining, 1234);
+        assert_eq!(snap.status_text.as_deref(), Some("$12.34 USD balance"));
     }
 
     #[test]

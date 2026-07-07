@@ -1806,6 +1806,11 @@ struct CollectorStatusView {
     /// badge tooltip. `None` when the collector returned `Ok` (success
     /// or "user not configured" — both surface as no badge).
     error: Option<String>,
+    /// LOCAL-ONLY human-readable status line from the snapshot (e.g.
+    /// `"$12.34 balance"`). Display-only — never uploaded. Rendered as the
+    /// provider card's secondary line for balance/status-only providers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_text: Option<String>,
 }
 
 #[tauri::command]
@@ -1815,6 +1820,7 @@ fn get_last_collector_status() -> Vec<CollectorStatusView> {
         .map(|o| CollectorStatusView {
             provider: o.provider,
             ok: o.snapshot.is_some(),
+            status_text: o.snapshot.and_then(|s| s.status_text),
             error: o.error.map(|e| e.message().to_string()),
         })
         .collect()

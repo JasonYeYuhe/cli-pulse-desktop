@@ -169,7 +169,14 @@ fn map_to_snapshot(d: &BalanceData) -> QuotaSnapshot {
     // Uncapped balance ⇒ full-bar gauge of the available balance (the desktop
     // snapshot can't carry the Mac's nil gauge — same convention as DeepSeek).
     let available = units(d.available_balance);
+    // Readable balance line (mirrors the Mac's "Balance: $X" status_text) — the
+    // gauge shows raw ×100_000 units, so this is how the user reads the dollars.
+    let mut status = format!("Balance: ${:.2}", d.available_balance.max(0.0));
+    if d.cash_balance < 0.0 {
+        status.push_str(&format!(" · ${:.2} in deficit", d.cash_balance.abs()));
+    }
     QuotaSnapshot {
+        status_text: Some(status),
         plan_type: "API key".to_string(),
         remaining: available,
         quota: available,
@@ -204,6 +211,7 @@ mod tests {
         assert_eq!(snap.tiers[0].remaining, 200_000);
         assert_eq!(snap.tiers[1].name, "Cash");
         assert_eq!(snap.tiers[1].quota, 300_000);
+        assert_eq!(snap.status_text.as_deref(), Some("Balance: $5.00"));
     }
 
     #[test]

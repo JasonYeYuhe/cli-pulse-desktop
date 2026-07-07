@@ -186,6 +186,7 @@ fn map_to_snapshot(u: &Usage) -> QuotaSnapshot {
     }
 
     QuotaSnapshot {
+        status_text: None,
         // Mac uses a nil plan_type here.
         plan_type: String::new(),
         remaining: weekly_remaining.unwrap_or(0).max(0),

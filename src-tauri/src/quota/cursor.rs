@@ -155,6 +155,7 @@ fn map_to_snapshot(usage: &UsageResponse) -> QuotaSnapshot {
     };
 
     QuotaSnapshot {
+        status_text: None,
         plan_type,
         remaining: outer_remaining,
         quota: plan.limit,

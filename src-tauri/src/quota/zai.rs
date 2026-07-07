@@ -138,6 +138,7 @@ fn map_to_snapshot(data: &Data) -> QuotaSnapshot {
     let primary = data.limits.first();
     let total = primary.map(|p| p.usage + p.remaining).unwrap_or(0);
     QuotaSnapshot {
+        status_text: None,
         plan_type: data.plan_name.clone().unwrap_or_default(),
         remaining: primary.map(|p| p.remaining).unwrap_or(0),
         quota: if total > 0 {
