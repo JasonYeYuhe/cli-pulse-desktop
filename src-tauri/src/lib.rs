@@ -13,6 +13,7 @@ pub mod crash_recovery;
 pub mod creds;
 pub mod cwd_hmac;
 pub mod diagnostic_bundle;
+pub mod fx;
 pub mod install_hook;
 pub mod keychain;
 pub mod machine;
@@ -1141,6 +1142,14 @@ async fn get_devices() -> Result<Vec<supabase::DeviceHealthRow>, String> {
 #[tauri::command]
 async fn get_service_statuses() -> Result<Vec<service_status::ServiceStatus>, String> {
     Ok(service_status::get_statuses().await)
+}
+
+/// Multi-currency support: USD→{other} daily FX rates for cost display. Costs
+/// stay USD everywhere; the frontend converts for display only. Read-only public
+/// data (see `fx.rs`); cached ~6 h.
+#[tauri::command]
+async fn get_fx_rates() -> Result<fx::FxRates, String> {
+    fx::get_rates().await
 }
 
 /// v0.5.2 — top-projects aggregation. See `top_projects.rs` for
@@ -3016,6 +3025,7 @@ pub fn run() {
             get_devices,
             // v0.14 — provider service-status badges (public Statuspage)
             get_service_statuses,
+            get_fx_rates,
             // v0.5.6 — Tray mini-metrics force-refresh (language change path)
             force_tray_menu_refresh,
             // v0.6.0 — Remote Approvals (app-side view + decide)

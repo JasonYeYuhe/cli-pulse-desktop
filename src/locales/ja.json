@@ -251,6 +251,8 @@
     "sync_heading": "同期",
     "auto_sync_hint": "2 分ごとに自動同期 (ローカルスキャン + helper_sync)。",
     "last_sync": "最終同期 {{time}} — {{sessions}} セッション · {{cost}} / {{files}} ファイル",
+    "currency_heading": "表示通貨",
+    "currency_hint": "コストは USD で計算され、ここでは表示方法のみを変更します。レートは毎日更新されます。",
     "export_heading": "エクスポート",
     "export_hint": "直近 {{days}} 日間のスキャン結果をスプレッドシートで保存します。",
     "export_csv": "CSV 出力",

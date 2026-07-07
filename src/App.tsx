@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -7,7 +16,6 @@ import { SUPPORTED_LANGS, setLang, type LangCode } from "./i18n";
 import {
   formatBytes,
   formatInt,
-  formatUSD,
   formatRelativeMinutes,
   formatRelativeShort,
   formatRelativeShortParts,
@@ -23,6 +31,7 @@ import {
 } from "./lib/providerVisibility";
 import { providerColor, providerMonogram } from "./lib/providerTheme";
 import { activityLevel, buildActivity, cacheHitRate, computeStreaks } from "./lib/activity";
+import { CURRENCIES, formatMoney, loadCurrency, saveCurrency, type FxRates } from "./lib/money";
 import {
   DEFAULT_WARN_THRESHOLDS,
   warningFractions,
@@ -30,6 +39,28 @@ import {
 } from "./lib/quotaMarkers";
 import appIcon from "./assets/app-icon.png";
 import "./App.css";
+
+// Multi-currency display: a context carrying `fmt(usd)` (converts a USD cost to
+// the user's chosen currency) plus the current currency + setter (for the
+// Settings selector). Defaults to plain USD so any consumer rendered outside the
+// provider (or before FX rates load) still shows USD.
+type MoneyCtx = {
+  fmt: (usd: number) => string;
+  currency: string;
+  setCurrency: (code: string) => void;
+};
+const MoneyContext = createContext<MoneyCtx>({
+  fmt: (usd) => formatMoney(usd, "USD", null),
+  currency: "USD",
+  setCurrency: () => {},
+});
+function useMoney(): (usd: number) => string {
+  return useContext(MoneyContext).fmt;
+}
+function useCurrencySetting(): { currency: string; setCurrency: (code: string) => void } {
+  const { currency, setCurrency } = useContext(MoneyContext);
+  return { currency, setCurrency };
+}
 
 type DailyEntry = {
   date: string;
@@ -213,6 +244,32 @@ export default function App() {
     { key: "settings", label: t("tab.settings") },
   ];
   const [tab, setTab] = useState<TabKey>("overview");
+  // Multi-currency display (A2). Currency choice persists in localStorage; FX
+  // rates are fetched once on mount (Rust caches ~6 h). `fmt` converts a USD
+  // cost to the chosen currency; provided app-wide via MoneyContext.
+  const [currency, setCurrency] = useState<string>(loadCurrency);
+  const [fxRates, setFxRates] = useState<FxRates | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<FxRates>("get_fx_rates")
+      .then((r) => {
+        if (!cancelled) setFxRates(r);
+      })
+      .catch(() => {
+        // Keep the USD fallback — a failed/slow FX fetch never blanks costs.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const fmt = useCallback(
+    (usd: number) => formatMoney(usd, currency, fxRates?.rates ?? null),
+    [currency, fxRates],
+  );
+  function changeCurrency(code: string) {
+    setCurrency(code);
+    saveCurrency(code);
+  }
   // v0.10.0 — keyboard shortcut help overlay. Triggered by
   // Ctrl/Cmd + Shift + / (the ?-menu binding power users expect).
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -603,6 +660,7 @@ export default function App() {
   }, [tab, refreshAlerts]);
 
   return (
+    <MoneyContext.Provider value={{ fmt, currency, setCurrency: changeCurrency }}>
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
       <header className="border-b border-neutral-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -815,6 +873,7 @@ export default function App() {
         <ShortcutHelpOverlay onClose={() => setShortcutHelpOpen(false)} />
       )}
     </div>
+    </MoneyContext.Provider>
   );
 }
 
@@ -1114,6 +1173,7 @@ function Overview({
   // App-level `alerts` state for the full list (different lifecycle,
   // 30 s polling on tab focus), but Overview no longer needs it.
   const { t } = useTranslation();
+  const fmt = useMoney();
   const today = useMemo(() => {
     if (!scan) return null;
     const todays = scan.entries.filter((e) => e.date === scan.today_key);
@@ -1189,7 +1249,7 @@ function Overview({
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <StatCard
               label={t("overview.tile_today_cost")}
-              value={formatUSD(serverDash.today_cost)}
+              value={fmt(serverDash.today_cost)}
             />
             <StatCard
               label={t("overview.tile_today_usage")}
@@ -1223,12 +1283,12 @@ function Overview({
           </h2>
         )}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <StatCard label={t("overview.today_cost")} value={today ? formatUSD(today.cost) : "—"} hint={scan.today_key} />
+          <StatCard label={t("overview.today_cost")} value={today ? fmt(today.cost) : "—"} hint={scan.today_key} />
           <StatCard label={t("overview.today_tokens")} value={today ? formatInt(today.tokens) : "—"} hint={t("overview.tokens_hint")} />
           <StatCard label={t("overview.today_messages")} value={today ? formatInt(today.msgs) : "—"} hint={t("overview.claude_only_hint")} />
           <StatCard
             label={t("overview.last_n_days_cost", { days: scan.days_scanned })}
-            value={formatUSD(scan.total_cost_usd)}
+            value={fmt(scan.total_cost_usd)}
             hint={t("overview.files_scanned_hint", { n: scan.files_scanned })}
           />
         </div>
@@ -1275,7 +1335,7 @@ function Overview({
                       {t("providers.io_tokens", { value: formatInt(p.tokens) })}
                     </span>
                     <span className="text-xs font-mono text-neutral-300 w-16 text-right shrink-0">
-                      {formatUSD(p.cost)}
+                      {fmt(p.cost)}
                     </span>
                   </div>
                 );
@@ -1326,6 +1386,7 @@ function Overview({
 /// even if Supabase is unreachable.
 function CostForecastCard({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
+  const fmt = useMoney();
   const [forecast, setForecast] = useState<CostForecast | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -1384,12 +1445,12 @@ function CostForecastCard({ paired }: { paired: boolean }) {
       {loaded && !error && forecast && (
         <>
           <div className="text-2xl font-semibold tabular-nums">
-            {formatUSD(forecast.predicted_month_total)}
+            {fmt(forecast.predicted_month_total)}
           </div>
           <div className="text-xs text-neutral-500 mt-0.5 tabular-nums">
             {t("overview.forecast_bounds", {
-              lower: formatUSD(forecast.lower_bound),
-              upper: formatUSD(forecast.upper_bound),
+              lower: fmt(forecast.lower_bound),
+              upper: fmt(forecast.upper_bound),
             })}
           </div>
           <div className="text-xs text-neutral-600 mt-1">
@@ -1569,6 +1630,7 @@ function severityRank(s: Alert["severity"] | string): number {
 /// label so we don't show literal angle brackets in the UI.
 function TopProjectsCard({ paired }: { paired: boolean }) {
   const { t } = useTranslation();
+  const fmt = useMoney();
   const [projects, setProjects] = useState<TopProject[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -1635,7 +1697,7 @@ function TopProjectsCard({ paired }: { paired: boolean }) {
                     : p.project}
                 </span>
                 <span className="text-xs text-neutral-300 tabular-nums">
-                  {formatUSD(p.cost_usd)}
+                  {fmt(p.cost_usd)}
                 </span>
                 {parts && (
                   <span className="text-[10px] text-neutral-600 tabular-nums">
@@ -1748,6 +1810,7 @@ function SeverityIcon({
 
 function CostTrendChart({ scan }: { scan: ScanResult }) {
   const { t } = useTranslation();
+  const fmt = useMoney();
   const days = useMemo(() => {
     // Build the last 7 ISO dates relative to today_key
     const baseDate = new Date(scan.today_key + "T00:00:00Z");
@@ -1887,7 +1950,7 @@ function CostTrendChart({ scan }: { scan: ScanResult }) {
         <LegendDot color="#10b981" label="Claude" />
         <LegendDot color="#06b6d4" label="Codex" />
         <LegendDot color="#a855f7" label="Other" />
-        <span className="ml-auto font-mono">{t("overview.max_per_day", { value: formatUSD(maxCost) })}</span>
+        <span className="ml-auto font-mono">{t("overview.max_per_day", { value: fmt(maxCost) })}</span>
       </div>
     </div>
   );
@@ -2070,6 +2133,7 @@ function serviceStatusColor(indicator: ServiceStatusRow["indicator"]): string | 
 
 function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
   const { t } = useTranslation();
+  const fmt = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // v0.13.0 — per-provider 30-day usage history (server read; sign-in
   // required). Fetched once when paired; the chart renders in each provider's
@@ -2631,7 +2695,7 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-mono text-lg">{formatUSD(v.cost)}</div>
+                <div className="font-mono text-lg">{fmt(v.cost)}</div>
                 <div className="text-xs text-neutral-500">
                   {t("providers.io_tokens", { value: formatInt(v.input + v.output) })}
                 </div>
@@ -2743,7 +2807,7 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                         <td className="py-1.5 font-mono truncate max-w-[22ch]">{model}</td>
                         <td className="py-1.5 text-right font-mono">{formatInt(m.input)}</td>
                         <td className="py-1.5 text-right font-mono">{formatInt(m.output)}</td>
-                        <td className="py-1.5 text-right font-mono">{formatUSD(m.cost)}</td>
+                        <td className="py-1.5 text-right font-mono">{fmt(m.cost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -2828,6 +2892,7 @@ function Settings({
   onSynced: (r: SyncReport) => void;
 }) {
   const { t } = useTranslation();
+  const fmt = useMoney();
   const [code, setCode] = useState("");
   const [deviceName, setDeviceName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3185,7 +3250,7 @@ function Settings({
               {t("settings.last_sync", {
                 time: lastSync.at.toLocaleTimeString(),
                 sessions: lastSync.report.live_sessions_sent,
-                cost: formatUSD(lastSync.report.total_cost_usd),
+                cost: fmt(lastSync.report.total_cost_usd),
                 files: lastSync.report.files_scanned,
               })}
             </div>
@@ -3211,6 +3276,8 @@ function Settings({
           </p>
         </section>
       )}
+
+      <CurrencySection />
 
       <ExportSection scan={scan} />
 
@@ -3897,6 +3964,30 @@ function IntegrationsSection() {
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+// Settings → Display currency. Costs are computed + stored in USD; this only
+// changes how they're shown (converted via daily FX rates; see lib/money.ts).
+function CurrencySection() {
+  const { t } = useTranslation();
+  const { currency, setCurrency } = useCurrencySetting();
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-2">
+      <h2 className="text-sm font-semibold text-neutral-300">{t("settings.currency_heading")}</h2>
+      <p className="text-xs text-neutral-500">{t("settings.currency_hint")}</p>
+      <select
+        value={currency}
+        onChange={(e) => setCurrency(e.target.value)}
+        className="px-3 py-2 rounded-md bg-neutral-800 border border-neutral-700 text-sm text-neutral-100"
+      >
+        {CURRENCIES.map((c) => (
+          <option key={c.code} value={c.code}>
+            {c.code === "USD" ? c.code : `${c.code} (${c.symbol})`}
+          </option>
+        ))}
+      </select>
     </section>
   );
 }
@@ -7320,6 +7411,7 @@ function EmptyAlertsHint() {
 
 function EntriesTable({ entries }: { entries: DailyEntry[] }) {
   const { t } = useTranslation();
+  const fmt = useMoney();
   if (entries.length === 0) {
     return <div className="text-sm text-neutral-500 italic">{t("overview.no_usage_today")}</div>;
   }
@@ -7344,7 +7436,7 @@ function EntriesTable({ entries }: { entries: DailyEntry[] }) {
               <td className="px-3 py-2 text-right font-mono">{formatInt(e.input_tokens)}</td>
               <td className="px-3 py-2 text-right font-mono">{formatInt(e.output_tokens)}</td>
               <td className="px-3 py-2 text-right font-mono">
-                {e.cost_usd != null ? formatUSD(e.cost_usd) : "—"}
+                {e.cost_usd != null ? fmt(e.cost_usd) : "—"}
               </td>
             </tr>
           ))}

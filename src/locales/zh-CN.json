@@ -251,6 +251,8 @@
     "sync_heading": "同步",
     "auto_sync_hint": "每 2 分钟自动同步。本地扫描 + helper_sync。",
     "last_sync": "上次同步 {{time}} — {{sessions}} 个实时会话 · {{cost}},共 {{files}} 个文件",
+    "currency_heading": "显示货币",
+    "currency_hint": "成本以美元计算,这里只改变显示方式。汇率每日更新。",
     "export_heading": "导出",
     "export_hint": "将近 {{days}} 天的扫描数据导出为电子表格。",
     "export_csv": "导出 CSV",

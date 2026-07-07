@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Multi-currency cost display (USD / CNY / EUR / GBP / JPY)** — costs are computed and stored in **USD**
+  everywhere, but you can now pick a **display currency** in Settings and every cost figure converts to it
+  (Overview tiles, provider breakdown, forecast, top-projects, trend chart, model tables, entries table).
+  Learned from `javis603/token-monitor`'s multi-currency support (`DEV_PLAN_2026-07-07_competitive_learnings.md`
+  §3a A2).
+  - **FX rates** are fetched by a new Rust `fx` module from `open.er-api.com` (free, no API key,
+    daily-updated), cached ~6 h; **read-only public data** — the request sends nothing about the user, and
+    on a fetch failure the last good rates (or plain USD) are served so a cost never blanks. Override the
+    source with `FX_RATES_URL`. `src-tauri/src/fx.rs` (4 parse tests) + a `get_fx_rates` command.
+  - **Frontend:** `src/lib/money.ts` `formatMoney` (deterministic — no ICU-dependent `Intl` currency
+    formatting — so it's unit-tested; 7 tests) + a `MoneyContext` providing `fmt(usd)` app-wide, so
+    changing the currency re-renders every cost. USD keeps its existing sub-cent precision; a missing rate
+    falls back to USD. The choice persists in `localStorage`. New **Settings → Display currency** selector;
+    2 i18n keys × 3 locales (heading pinned).
+  - **Note:** exports (CSV/JSON) stay in **USD** deliberately — they're data, not display.
+
 - **Cache hit-rate on the Overview** — the Overview activity row now shows the prompt-**cache hit rate**
   over the scan window (`cached ÷ (input + cached)` tokens), so you can see how much prompt caching is
   saving you (learned from `javis603/token-monitor`'s cache-hit analytics,

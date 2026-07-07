@@ -257,6 +257,8 @@
     "sync_heading": "Sync",
     "auto_sync_hint": "Auto-sync runs every 2 minutes. Local scan + helper_sync.",
     "last_sync": "Last sync {{time}} — {{sessions}} live sessions · {{cost}} over {{files}} files",
+    "currency_heading": "Display currency",
+    "currency_hint": "Costs are computed in USD; choose how to display them. Rates update daily.",
     "export_heading": "Export",
     "export_hint": "Download the last {{days}} days of scanned usage as a spreadsheet.",
     "export_csv": "Export CSV",
