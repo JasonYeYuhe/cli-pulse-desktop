@@ -40,6 +40,7 @@ pub mod gemini_refresh;
 pub mod glm;
 pub mod grok;
 pub mod groq;
+pub mod kilo;
 pub mod kimi;
 pub mod kimik2;
 pub mod minimax;
@@ -91,6 +92,7 @@ pub const PROVIDER_MISTRAL: &str = "Mistral";
 pub const PROVIDER_DEEPGRAM: &str = "Deepgram";
 pub const PROVIDER_ELEVENLABS: &str = "ElevenLabs";
 pub const PROVIDER_OLLAMA: &str = "Ollama";
+pub const PROVIDER_KILO: &str = "Kilo";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -264,6 +266,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_DEEPGRAM, tokio::spawn(deepgram::collect())), // @allow tokio-spawn
         (PROVIDER_ELEVENLABS, tokio::spawn(elevenlabs::collect())), // @allow tokio-spawn
         (PROVIDER_OLLAMA, tokio::spawn(ollama::collect())), // @allow tokio-spawn
+        (PROVIDER_KILO, tokio::spawn(kilo::collect())),     // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -421,6 +424,7 @@ mod tests {
             ("deepgram", PROVIDER_DEEPGRAM),
             ("elevenLabs", PROVIDER_ELEVENLABS),
             ("ollama", PROVIDER_OLLAMA),
+            ("kilo", PROVIDER_KILO),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -476,6 +480,7 @@ mod tests {
             PROVIDER_DEEPGRAM,
             PROVIDER_ELEVENLABS,
             PROVIDER_OLLAMA,
+            PROVIDER_KILO,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

@@ -335,7 +335,9 @@
       "deepgram_api_key_label": "Deepgram API 密钥",
       "deepgram_api_key_help": "来自 Deepgram 的 API 密钥(DEEPGRAM_API_KEY)—— 仅状态;显示用量(请求 · 音频小时 · 令牌)。可用 DEEPGRAM_PROJECT_ID 指定单个项目。",
       "elevenlabs_api_key_label": "ElevenLabs API 密钥",
-      "elevenlabs_api_key_help": "来自 ElevenLabs 的 API 密钥(ELEVENLABS_API_KEY 或 XI_API_KEY)—— 显示每月字符配额(已用 / 上限)及续期时间,以及语音位档位。"
+      "elevenlabs_api_key_help": "来自 ElevenLabs 的 API 密钥(ELEVENLABS_API_KEY 或 XI_API_KEY)—— 显示每月字符配额(已用 / 上限)及续期时间,以及语音位档位。",
+      "kilo_api_key_label": "Kilo API 密钥",
+      "kilo_api_key_help": "来自 Kilo 的 API 密钥(KILO_API_KEY)—— 以美元金额显示信用余额和 Kilo Pass 订阅用量。未设置密钥时回退到 Kilo CLI 登录(~/.local/share/kilo/auth.json)。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

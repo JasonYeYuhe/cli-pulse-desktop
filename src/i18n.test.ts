@@ -142,6 +142,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // ElevenLabs collector — real character quota (used / limit) + voice slots.
     "settings.integrations.elevenlabs_api_key_label",
     "settings.integrations.elevenlabs_api_key_help",
+    // Kilo collector — credit balance + Kilo Pass subscription ($ figure).
+    "settings.integrations.kilo_api_key_label",
+    "settings.integrations.kilo_api_key_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

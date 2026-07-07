@@ -11,6 +11,26 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Kilo credit + subscription collector** (port of macOS `KiloCollector`). Adds Kilo as a **28th
+  provider**. A single **tRPC batch** GET
+  `https://app.kilo.ai/api/trpc/user.getCreditBlocks,kiloPass.getState?batch=1` (two procedures, one
+  request → JSON array of two `{result:{data:{json:…}}}` envelopes) authed with `Authorization: Bearer`.
+  Token resolves from env `KILO_API_KEY`, the Settings `kilo_api_key`, **or** the Kilo CLI session file
+  `~/.local/share/kilo/auth.json` (`json.kilo.access`) so CLI users get it zero-config. Money arrives as
+  **micro-USD** integers; the display convention mirrors the Mac (micro-USD → USD ÷1e6 → display units at
+  `$1 = 100_000`, truncating like Swift `Int()`) so a dual-writer converges on the shared row. A
+  **Credits** tier (summed credit blocks) + optional **Kilo Pass** subscription tier (base+bonus − usage,
+  with `nextBillingAt` reset); `plan_type` maps `tier_19/49/199` → Starter/Pro/Expert (unknown tiers pass
+  through). The readable dollar figure lives in `status_text` "$remaining / $total" since the ×100_000
+  units are meaningless raw.
+  - `src-tauri/src/quota/kilo.rs` (5 unit tests — block summing + display scale, Credits/Kilo-Pass tier
+    build, credits-only-no-subscription, unknown-tier passthrough + empty-credits zero-quota,
+    non-array-body schema error) + `collect_all` wiring + `PROVIDER_KILO = "Kilo"` in both contract-test
+    arrays (case `"kilo"`). `kilo_api_key` cred through `provider_creds` + **Settings → Integrations**
+    input row + 2 i18n keys × 3 locales.
+  - **Verification posture:** parse / scale / tier / plan-map fully unit-tested; the live tRPC fetch needs
+    a real Kilo key so it can't be CI-verified — endpoint/auth ported from the proven Mac collector.
+
 - **Ollama local-server status collector** (port of macOS `OllamaCollector`). Adds Ollama as a **27th
   provider** — and the **only credential-free one**: it probes the local Ollama daemon, so a developer
   running Ollama gets it **zero-config** (no Settings row, no key). `GET http://localhost:11434/api/tags`

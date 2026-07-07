@@ -335,7 +335,9 @@
       "deepgram_api_key_label": "Deepgram API キー",
       "deepgram_api_key_help": "Deepgram の API キー(DEEPGRAM_API_KEY)— ステータスのみ;利用件数(リクエスト · 音声時間 · トークン)を表示します。DEEPGRAM_PROJECT_ID で単一プロジェクトを指定できます。",
       "elevenlabs_api_key_label": "ElevenLabs API キー",
-      "elevenlabs_api_key_help": "ElevenLabs の API キー(ELEVENLABS_API_KEY または XI_API_KEY)— 月間の文字数クォータ(使用量 / 上限)と更新日、および音声スロットの階層を表示します。"
+      "elevenlabs_api_key_help": "ElevenLabs の API キー(ELEVENLABS_API_KEY または XI_API_KEY)— 月間の文字数クォータ(使用量 / 上限)と更新日、および音声スロットの階層を表示します。",
+      "kilo_api_key_label": "Kilo API キー",
+      "kilo_api_key_help": "Kilo の API キー(KILO_API_KEY)— クレジット残高と Kilo Pass サブスクリプションの使用量を金額で表示します。キー未設定時は Kilo CLI のログイン(~/.local/share/kilo/auth.json)にフォールバックします。"
     },
     "privacy_heading": "プライバシーとリモート コントロール",
     "privacy_body": "このアカウントが複数デバイス間の承認に参加できるようにします。有効にすると、他のデバイスの Claude / Codex フックがこの Windows アプリから承認をリクエストできます。",

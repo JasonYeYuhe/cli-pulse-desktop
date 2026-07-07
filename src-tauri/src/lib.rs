@@ -1603,6 +1603,7 @@ struct ProviderCredsView {
     mistral_cookie_set: bool,
     deepgram_api_key_set: bool,
     elevenlabs_api_key_set: bool,
+    kilo_api_key_set: bool,
     /// Optional override for OpenRouter's API URL — NOT secret, returned
     /// plaintext so the Settings UI can show the current custom endpoint
     /// (or empty if using default openrouter.ai).
@@ -1637,6 +1638,7 @@ struct ProviderCredsView {
     env_override_mistral: bool,
     env_override_deepgram: bool,
     env_override_elevenlabs: bool,
+    env_override_kilo: bool,
     /// v0.4.20 — surface the active storage backend ("os_keychain" or
     /// "file") inside the Settings → Integrations panel itself. v0.4.16
     /// already exposed this on `DiagnosticSnapshot`, but a Linux user
@@ -1676,6 +1678,7 @@ struct ProviderCredsUpdate {
     mistral_cookie: Option<String>,
     deepgram_api_key: Option<String>,
     elevenlabs_api_key: Option<String>,
+    kilo_api_key: Option<String>,
 }
 
 fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCredsView {
@@ -1713,6 +1716,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
             .elevenlabs_api_key
             .as_deref()
             .is_some_and(|s| !s.is_empty()),
+        kilo_api_key_set: c.kilo_api_key.as_deref().is_some_and(|s| !s.is_empty()),
         openrouter_base_url: c.openrouter_base_url.clone(),
         env_override_cursor: env_set("CURSOR_COOKIE"),
         env_override_copilot: env_set("COPILOT_API_TOKEN"),
@@ -1745,6 +1749,7 @@ fn build_provider_creds_view(c: &provider_creds::ProviderCreds) -> ProviderCreds
         env_override_mistral: env_set("MISTRAL_COOKIE") || env_set("MISTRAL_SESSION_TOKEN"),
         env_override_deepgram: env_set("DEEPGRAM_API_KEY"),
         env_override_elevenlabs: env_set("ELEVENLABS_API_KEY") || env_set("XI_API_KEY"),
+        env_override_kilo: env_set("KILO_API_KEY"),
         storage_backend: provider_creds::current_backend(),
     }
 }
@@ -1834,6 +1839,9 @@ async fn set_provider_creds(
     }
     if let Some(v) = update.elevenlabs_api_key {
         current.elevenlabs_api_key = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = update.kilo_api_key {
+        current.kilo_api_key = if v.is_empty() { None } else { Some(v) };
     }
     provider_creds::save(&current).map_err(|e| e.to_string())?;
     // Emit event so the background sync loop (or any other listener) can
