@@ -3239,6 +3239,7 @@ type ProviderCredsView = {
   kilo_api_key_set: boolean;
   alibaba_api_key_set: boolean;
   openai_admin_key_set: boolean;
+  codebuff_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3267,6 +3268,7 @@ type ProviderCredsView = {
   env_override_kilo: boolean;
   env_override_alibaba: boolean;
   env_override_openai_admin: boolean;
+  env_override_codebuff: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3302,7 +3304,8 @@ type ProviderCredsUpdateKey =
   | "elevenlabs_api_key"
   | "kilo_api_key"
   | "alibaba_api_key"
-  | "openai_admin_key";
+  | "openai_admin_key"
+  | "codebuff_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3598,6 +3601,15 @@ function IntegrationsSection() {
       isSet: view.openai_admin_key_set,
       envOverride: view.env_override_openai_admin,
       envVar: "OPENAI_ADMIN_KEY",
+    },
+    {
+      provider: "Codebuff",
+      key: "codebuff_api_key",
+      labelKey: "settings.integrations.codebuff_api_key_label",
+      helpKey: "settings.integrations.codebuff_api_key_help",
+      isSet: view.codebuff_api_key_set,
+      envOverride: view.env_override_codebuff,
+      envVar: "CODEBUFF_API_KEY",
     },
   ];
 

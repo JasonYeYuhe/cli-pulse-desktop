@@ -151,6 +151,9 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     // OpenAI Admin collector — org month-to-date spend (admin key).
     "settings.integrations.openai_admin_key_label",
     "settings.integrations.openai_admin_key_help",
+    // Codebuff collector — credit balance quota gauge + weekly window.
+    "settings.integrations.codebuff_api_key_label",
+    "settings.integrations.codebuff_api_key_help",
     // v0.4.20 — per-provider error badge on Providers tab.
     "providers.error_badge",
     "providers.error_tooltip",

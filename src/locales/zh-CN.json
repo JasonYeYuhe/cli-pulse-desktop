@@ -341,7 +341,9 @@
       "alibaba_api_key_label": "阿里云编程套餐 API 密钥",
       "alibaba_api_key_help": "阿里云(百炼 / Model Studio)编程套餐的 API 密钥(ALIBABA_CODING_PLAN_API_KEY)—— 显示 5 小时、每周和每月的请求配额。优先访问国际站,失败时回退到中国大陆。",
       "openai_admin_key_label": "OpenAI Admin 密钥",
-      "openai_admin_key_help": "OpenAI 组织管理员密钥(sk-admin-…,OPENAI_ADMIN_KEY),用于组织成本 API —— 显示本月的总支出。与 Codex CLI 不同;普通 sk- 密钥无法使用。"
+      "openai_admin_key_help": "OpenAI 组织管理员密钥(sk-admin-…,OPENAI_ADMIN_KEY),用于组织成本 API —— 显示本月的总支出。与 Codex CLI 不同;普通 sk- 密钥无法使用。",
+      "codebuff_api_key_label": "Codebuff API 密钥",
+      "codebuff_api_key_help": "来自 Codebuff 的 API 密钥(CODEBUFF_API_KEY)—— 以配额条形式显示信用余额及重置时间,并尽力附带每周窗口和套餐等级。"
     },
     "privacy_heading": "隐私与远程控制",
     "privacy_body": "允许此账号参与跨设备审批。启用后,你在其他设备上的 Claude / Codex hook 可以从此 Windows 应用请求审批权限。",

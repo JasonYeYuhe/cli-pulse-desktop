@@ -347,7 +347,9 @@
       "alibaba_api_key_label": "Alibaba coding-plan API key",
       "alibaba_api_key_help": "API key for the Alibaba (Model Studio / Bailian) coding plan (ALIBABA_CODING_PLAN_API_KEY) — shows 5-hour, weekly, and monthly request quotas. Routes to the International console first, falling back to China mainland.",
       "openai_admin_key_label": "OpenAI Admin key",
-      "openai_admin_key_help": "Organization admin key (sk-admin-…, OPENAI_ADMIN_KEY) for the OpenAI org cost API — shows this month's total spend. Distinct from the Codex CLI; a regular sk- key won't work."
+      "openai_admin_key_help": "Organization admin key (sk-admin-…, OPENAI_ADMIN_KEY) for the OpenAI org cost API — shows this month's total spend. Distinct from the Codex CLI; a regular sk- key won't work.",
+      "codebuff_api_key_label": "Codebuff API key",
+      "codebuff_api_key_help": "API key from Codebuff (CODEBUFF_API_KEY) — shows your credit balance as a quota gauge with reset, plus a best-effort weekly window and plan tier."
     },
     "privacy_heading": "Privacy & Remote Control",
     "privacy_body": "Allow this account to participate in cross-device approvals. When enabled, your other devices' Claude / Codex hooks can ask you to approve permission requests from this Windows app.",

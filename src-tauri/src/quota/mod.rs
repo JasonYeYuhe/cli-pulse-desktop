@@ -29,6 +29,7 @@ pub mod alibaba;
 pub mod augment;
 pub mod claude;
 pub mod claude_refresh;
+pub mod codebuff;
 pub mod codex;
 pub mod copilot;
 pub mod crof;
@@ -97,6 +98,7 @@ pub const PROVIDER_OLLAMA: &str = "Ollama";
 pub const PROVIDER_KILO: &str = "Kilo";
 pub const PROVIDER_ALIBABA: &str = "Alibaba";
 pub const PROVIDER_OPENAI_ADMIN: &str = "OpenAI Admin";
+pub const PROVIDER_CODEBUFF: &str = "Codebuff";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -273,6 +275,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_KILO, tokio::spawn(kilo::collect())),     // @allow tokio-spawn
         (PROVIDER_ALIBABA, tokio::spawn(alibaba::collect())), // @allow tokio-spawn
         (PROVIDER_OPENAI_ADMIN, tokio::spawn(openai_admin::collect())), // @allow tokio-spawn
+        (PROVIDER_CODEBUFF, tokio::spawn(codebuff::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -433,6 +436,7 @@ mod tests {
             ("kilo", PROVIDER_KILO),
             ("alibaba", PROVIDER_ALIBABA),
             ("openaiAdmin", PROVIDER_OPENAI_ADMIN),
+            ("codebuff", PROVIDER_CODEBUFF),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -491,6 +495,7 @@ mod tests {
             PROVIDER_KILO,
             PROVIDER_ALIBABA,
             PROVIDER_OPENAI_ADMIN,
+            PROVIDER_CODEBUFF,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

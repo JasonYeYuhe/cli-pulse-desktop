@@ -11,6 +11,28 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Codebuff credit-quota collector** (port of macOS `CodebuffCollector`, derived from steipete/CodexBar,
+  MIT). Adds Codebuff as a **31st provider** — the first of the MEDIUM (multi-call) tranche. A required
+  `POST https://www.codebuff.com/api/v1/usage` (body `{"fingerprintId":"clipulse-usage"}`, Bearer) returns
+  credits used/total/remaining + next reset; a best-effort `GET /api/user/subscription` adds a weekly
+  window + plan tier. The two run **concurrently** (`tokio::join!`), with the subscription bounded to a
+  **2-second per-request timeout** so a slow secondary can never stall the required usage render (mirrors
+  the Mac's grace window) — a subscription failure/timeout just drops the weekly enrichment. Credits have
+  a hard cap + reset, so a positive total maps to a real **`.quota`** ("Credits" gauge); a degenerate
+  `total ≤ 0` falls back to status-only (a 0/healthy gauge would mislead). Flexible JSON throughout
+  (number|string amounts; ISO8601 | epoch-seconds | epoch-millis reset dates). `status_text` = "N credits
+  remaining" (+ " · auto top-up" when enabled); `plan_type` = the title-cased subscription tier or
+  "API key".
+  - `src-tauri/src/quota/codebuff.rs` (6 unit tests — quota gauge + auto-top-up, total derived from
+    used+remaining with string numbers, weekly tier + title-cased plan, degenerate→status-only, epoch-ms
+    reset, compact-credits formatting) + `collect_all` wiring + `PROVIDER_CODEBUFF = "Codebuff"` in both
+    contract-test arrays (case `"codebuff"`). `codebuff_api_key` cred through `provider_creds` + **Settings
+    → Integrations** input row + 2 i18n keys × 3 locales.
+  - **Divergence from the Mac:** the auth-file token fallback (`~/.codebuff/…`) is not ported (env +
+    Settings is the documented path).
+  - **Verification posture:** parse / derivations / tier / formatting fully unit-tested; the live fetch
+    needs a real Codebuff key (not CI-verifiable) — ported from the proven Mac collector.
+
 - **OpenAI Admin org-spend collector** (port of macOS `OpenAIAdminCollector`, itself derived from
   steipete/CodexBar, MIT). Adds OpenAI Admin as a **30th provider** — and **completes the api-key-REST
   batch** of remaining Mac collectors (ElevenLabs, Ollama, Kilo, Alibaba, OpenAI Admin all ported). A
