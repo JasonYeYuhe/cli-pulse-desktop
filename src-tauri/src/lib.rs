@@ -38,6 +38,7 @@ pub mod smoke;
 pub mod supabase;
 pub mod top_projects;
 pub mod tray;
+pub mod wsl;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};

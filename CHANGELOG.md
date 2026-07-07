@@ -11,6 +11,25 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **WSL usage merge on Windows** — Windows developers often run Claude Code / Codex **inside a WSL
+  distro**, where the logs live under the Linux home (`/home/<user>/.claude`, …) that the native Windows
+  scanner never saw. We now enumerate the home dirs of **running** WSL distros (via the
+  `\\wsl.localhost\<distro>\` UNC share) and scan them alongside the native roots, so that usage **merges
+  into the same per-provider totals**. Learned from `javis603/token-monitor` (see
+  `DEV_PLAN_2026-07-07_competitive_learnings.md` §3a A1 — the top P0 gap).
+  - Running-distros-only (`wsl.exe -l --running -q`) so a stopped distro's file server isn't woken on every
+    scan; best-effort + fail-safe (no `wsl.exe` / nothing running / unreadable share → empty list), so
+    macOS/Linux and Windows-without-WSL are completely unaffected. Docker/Rancher internal distros are
+    skipped; the `wsl.exe` spawn uses `CREATE_NO_WINDOW` (no console flash); only the `\\wsl.localhost\`
+    prefix is used (never the aliased `\\wsl$\`) so a distro is never double-counted.
+  - `src-tauri/src/wsl.rs` (5 unit tests — UTF-16LE distro-list parse with BOM/CRLF, blank + internal-distro
+    filtering, empty output, names-with-spaces, off-Windows empty) + `paths.rs` appends each WSL home's
+    `.claude`/`.codex` roots to the scan lists. The scanner + cache merge them automatically (distinct
+    path keys, same day/model buckets).
+  - **Verification posture:** the UTF-16 parse / filtering / path construction is unit-tested; the **live
+    WSL merge needs a Windows VM with a running WSL distro** (not CI-verifiable — the Windows CI runner has
+    no WSL). The pure functions are covered; distro enumeration + FS access is Windows-only `cfg` code.
+
 - **Abacus AI compute-points collector** (port of macOS `AbacusCollector`, derived from steipete/CodexBar,
   MIT). Adds Abacus AI as a **33rd provider** — a second cookie-authed MEDIUM collector. Two calls run
   concurrently: a required `GET apps.abacus.ai/api/_getOrganizationComputePoints`
