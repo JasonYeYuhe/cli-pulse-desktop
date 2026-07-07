@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Ollama local-server status collector** (port of macOS `OllamaCollector`). Adds Ollama as a **27th
+  provider** — and the **only credential-free one**: it probes the local Ollama daemon, so a developer
+  running Ollama gets it **zero-config** (no Settings row, no key). `GET http://localhost:11434/api/tags`
+  (installed models) + best-effort `/api/ps` (running) — override the base with `OLLAMA_HOST`. Ollama has
+  no quota model, so it's **status-only** (`quota`/`remaining` = 0, no tiers): the whole signal is the
+  `status_text` line "N running, M installed" (or "M models installed" when idle), `plan_type = "Local"`.
+  The Mac's raw `AF_INET` socket pre-probe is replaced with a plain short-timeout `reqwest` GET whose
+  **connection error is the "not running" signal** → the collector returns `Ok(None)` (provider absent,
+  no error badge) rather than failing. Because it rides the existing status-only render path, it needs no
+  frontend, cred, or i18n changes — just the collector + `collect_all` wiring.
+  - `src-tauri/src/quota/ollama.rs` (3 unit tests — model-name parse skips unnamed entries, missing
+    `models` key is empty-not-error, running/idle `status_text` forms) + `collect_all` wiring +
+    `PROVIDER_OLLAMA = "Ollama"` in both contract-test arrays (case `"ollama"`).
+  - **Verification posture:** parse + status-text fully unit-tested; the live probe hits `localhost:11434`
+    so it's exercised whenever a dev has Ollama running (CI has none → `Ok(None)`, correctly absent).
+
 - **ElevenLabs character-quota collector** (port of macOS `ElevenLabsCollector`). Adds ElevenLabs as a
   **26th provider** and opens the api-key REST batch of remaining Mac collectors with the highest-value
   one: a **real depleting `.quota`** (not status-only). A single `GET /v1/user/subscription` — authed
