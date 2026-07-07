@@ -34,6 +34,7 @@ pub mod crof;
 pub mod cursor;
 pub mod deepgram;
 pub mod deepseek;
+pub mod elevenlabs;
 pub mod gemini;
 pub mod gemini_refresh;
 pub mod glm;
@@ -87,6 +88,7 @@ pub const PROVIDER_VOLCANO: &str = "Volcano Engine";
 pub const PROVIDER_GROQ: &str = "Groq";
 pub const PROVIDER_MISTRAL: &str = "Mistral";
 pub const PROVIDER_DEEPGRAM: &str = "Deepgram";
+pub const PROVIDER_ELEVENLABS: &str = "ElevenLabs";
 
 /// v0.4.19 — proactive pre-expiry refresh buffer (epoch milliseconds).
 ///
@@ -258,6 +260,7 @@ pub async fn collect_all() -> Vec<CollectorOutcome> {
         (PROVIDER_GROQ, tokio::spawn(groq::collect())),     // @allow tokio-spawn
         (PROVIDER_MISTRAL, tokio::spawn(mistral::collect())), // @allow tokio-spawn
         (PROVIDER_DEEPGRAM, tokio::spawn(deepgram::collect())), // @allow tokio-spawn
+        (PROVIDER_ELEVENLABS, tokio::spawn(elevenlabs::collect())), // @allow tokio-spawn
     ];
     let mut out = Vec::with_capacity(tasks.len());
     for (name, task) in tasks {
@@ -413,6 +416,7 @@ mod tests {
             ("groq", PROVIDER_GROQ),
             ("mistral", PROVIDER_MISTRAL),
             ("deepgram", PROVIDER_DEEPGRAM),
+            ("elevenLabs", PROVIDER_ELEVENLABS),
         ];
         for (case_name, rust_value) in rust_consts {
             let mac_entry = MAC_PROVIDER_KIND_SNAPSHOT
@@ -466,6 +470,7 @@ mod tests {
             PROVIDER_GROQ,
             PROVIDER_MISTRAL,
             PROVIDER_DEEPGRAM,
+            PROVIDER_ELEVENLABS,
         ] {
             assert!(
                 MAC_PROVIDER_KIND_SNAPSHOT.iter().any(|(_, n)| *n == want),

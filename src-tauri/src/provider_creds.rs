@@ -78,6 +78,7 @@ const ACCT_VOLCANO: &str = "volcano-api-key";
 const ACCT_GROQ: &str = "groq-api-key";
 const ACCT_MISTRAL: &str = "mistral-cookie";
 const ACCT_DEEPGRAM: &str = "deepgram-api-key";
+const ACCT_ELEVENLABS: &str = "elevenlabs-api-key";
 
 /// On-disk schema. Same shape as v0.4.6 — `version` field discriminates
 /// "values inline" (1) from "values in keychain, file is breadcrumb" (2).
@@ -163,6 +164,8 @@ pub struct ProviderCreds {
     /// `ProviderCredsView`.
     #[serde(default)]
     pub deepgram_api_key: Option<String>,
+    #[serde(default)]
+    pub elevenlabs_api_key: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -196,6 +199,7 @@ impl Default for ProviderCreds {
             groq_api_key: None,
             mistral_cookie: None,
             deepgram_api_key: None,
+            elevenlabs_api_key: None,
         }
     }
 }
@@ -316,6 +320,7 @@ fn load_from_keychain() -> anyhow::Result<ProviderCreds> {
         groq_api_key: keychain::read_at(ACCT_GROQ).ok().flatten(),
         mistral_cookie: keychain::read_at(ACCT_MISTRAL).ok().flatten(),
         deepgram_api_key: keychain::read_at(ACCT_DEEPGRAM).ok().flatten(),
+        elevenlabs_api_key: keychain::read_at(ACCT_ELEVENLABS).ok().flatten(),
     })
 }
 
@@ -369,6 +374,7 @@ fn save_to_keychain(creds: &ProviderCreds) -> anyhow::Result<()> {
     set_or_clear_keychain(ACCT_GROQ, creds.groq_api_key.as_deref())?;
     set_or_clear_keychain(ACCT_MISTRAL, creds.mistral_cookie.as_deref())?;
     set_or_clear_keychain(ACCT_DEEPGRAM, creds.deepgram_api_key.as_deref())?;
+    set_or_clear_keychain(ACCT_ELEVENLABS, creds.elevenlabs_api_key.as_deref())?;
     Ok(())
 }
 
@@ -467,6 +473,7 @@ pub fn wipe() -> anyhow::Result<()> {
         ACCT_GROQ,
         ACCT_MISTRAL,
         ACCT_DEEPGRAM,
+        ACCT_ELEVENLABS,
     ] {
         if let Err(e) = keychain::delete_at(account) {
             log::warn!("[ProviderCreds] wipe: keychain delete {account} failed: {e}");
@@ -583,6 +590,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
             v1.groq_api_key.as_deref(),
             v1.mistral_cookie.as_deref(),
             v1.deepgram_api_key.as_deref(),
+            v1.elevenlabs_api_key.as_deref(),
         ]
         .iter()
         .filter(|v| v.map(|s| !s.is_empty()).unwrap_or(false))
@@ -619,6 +627,7 @@ fn migrate_v1_file_to_keychain_if_needed() -> anyhow::Result<()> {
         groq_api_key: None,
         mistral_cookie: None,
         deepgram_api_key: None,
+        elevenlabs_api_key: None,
     };
     save_to_file(&v2)?;
     log::info!(
@@ -671,6 +680,7 @@ mod tests {
             groq_api_key: None,
             mistral_cookie: None,
             deepgram_api_key: None,
+            elevenlabs_api_key: None,
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -762,6 +772,7 @@ mod tests {
             groq_api_key: None,
             mistral_cookie: None,
             deepgram_api_key: None,
+            elevenlabs_api_key: None,
         };
         let json = serde_json::to_string(&v2).unwrap();
         let parsed: ProviderCreds = serde_json::from_str(&json).unwrap();
@@ -828,6 +839,7 @@ mod tests {
                 groq_api_key: None,
                 mistral_cookie: None,
                 deepgram_api_key: None,
+                elevenlabs_api_key: None,
             },
         );
         assert!(path.exists());
@@ -869,6 +881,7 @@ mod tests {
                 groq_api_key: None,
                 mistral_cookie: None,
                 deepgram_api_key: None,
+                elevenlabs_api_key: None,
             },
         );
         assert!(path.exists());
@@ -926,6 +939,7 @@ mod tests {
                 groq_api_key: None,
                 mistral_cookie: None,
                 deepgram_api_key: None,
+                elevenlabs_api_key: None,
             },
         );
         assert!(path_v1.exists());

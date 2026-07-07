@@ -11,6 +11,25 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **ElevenLabs character-quota collector** (port of macOS `ElevenLabsCollector`). Adds ElevenLabs as a
+  **26th provider** and opens the api-key REST batch of remaining Mac collectors with the highest-value
+  one: a **real depleting `.quota`** (not status-only). A single `GET /v1/user/subscription` — authed
+  with the custom **`xi-api-key`** header (NOT `Authorization: Bearer`), env `ELEVENLABS_API_KEY` /
+  `XI_API_KEY` or Settings — returns the monthly **character** cap. Mapped to `remaining =
+  max(0, character_limit − character_count)`, `quota = character_limit`, renewal from
+  `next_character_count_reset_unix`, plus optional **Voice slots** / **Professional voices** sub-tiers.
+  The local status line reads "X / Y characters" (+ a "(Overage: amount currency)" suffix when billing
+  overage is present); `plan_type` is the title-cased tier with a "· {status}" suffix for non-active
+  subscriptions.
+  - `src-tauri/src/quota/elevenlabs.rs` (5 unit tests — quota + voice-tier mapping, overage suffix,
+    `display_tier` variants incl. active-suppression, no-limit → "API key" fallback, thousands grouping)
+    + `collect_all` wiring + `PROVIDER_ELEVENLABS = "ElevenLabs"` in both contract-test arrays (case
+    `"elevenLabs"`). `elevenlabs_api_key` cred through `provider_creds` + a **Settings → Integrations**
+    input row (+2 i18n keys × 3 locales).
+  - **Verification posture:** parse / quota-map / tier / formatting fully unit-tested; the **live fetch
+    needs a real ElevenLabs key so it can't be CI-verified** — endpoint/auth ported from the proven Mac
+    collector. Configure a key in Settings to exercise it live.
+
 - **Deepgram usage collector** (v0.17 — port of macOS `DeepgramCollector`, status-only). Adds Deepgram
   as a 25th provider — and **completes the status-only batch** (GLM, Volcano, Groq, Mistral, Deepgram all
   ported). Deepgram exposes no quota/credits denominator — only absolute usage counts — so it's

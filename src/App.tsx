@@ -3235,6 +3235,7 @@ type ProviderCredsView = {
   groq_api_key_set: boolean;
   mistral_cookie_set: boolean;
   deepgram_api_key_set: boolean;
+  elevenlabs_api_key_set: boolean;
   openrouter_base_url: string | null;
   env_override_cursor: boolean;
   env_override_copilot: boolean;
@@ -3259,6 +3260,7 @@ type ProviderCredsView = {
   env_override_groq: boolean;
   env_override_mistral: boolean;
   env_override_deepgram: boolean;
+  env_override_elevenlabs: boolean;
   // v0.4.20 — active credentials backend, surfaced as a Storage line
   // at the top of the Integrations panel. Mirrors the diagnostic-snapshot
   // field of the same name. Per Gemini 3.1 Pro v0.4.20 review: degraded
@@ -3290,7 +3292,8 @@ type ProviderCredsUpdateKey =
   | "volcano_api_key"
   | "groq_api_key"
   | "mistral_cookie"
-  | "deepgram_api_key";
+  | "deepgram_api_key"
+  | "elevenlabs_api_key";
 
 function IntegrationsSection() {
   const { t } = useTranslation();
@@ -3550,6 +3553,15 @@ function IntegrationsSection() {
       isSet: view.deepgram_api_key_set,
       envOverride: view.env_override_deepgram,
       envVar: "DEEPGRAM_API_KEY",
+    },
+    {
+      provider: "ElevenLabs",
+      key: "elevenlabs_api_key",
+      labelKey: "settings.integrations.elevenlabs_api_key_label",
+      helpKey: "settings.integrations.elevenlabs_api_key_help",
+      isSet: view.elevenlabs_api_key_set,
+      envOverride: view.env_override_elevenlabs,
+      envVar: "ELEVENLABS_API_KEY",
     },
   ];
 
