@@ -34,4 +34,10 @@ describe("placeOnRemainingBar", () => {
     expect(placeOnRemainingBar(-0.5)).toBe(1);
     expect(placeOnRemainingBar(1.5)).toBe(0);
   });
+
+  it("treats non-finite input as 0 (never returns NaN for a CSS position)", () => {
+    expect(placeOnRemainingBar(NaN)).toBe(1);
+    expect(placeOnRemainingBar(Infinity)).toBe(1);
+    expect(placeOnRemainingBar(-Infinity)).toBe(1);
+  });
 });

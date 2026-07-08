@@ -52,6 +52,12 @@ import {
   warningFractions,
   placeOnRemainingBar,
 } from "./lib/quotaMarkers";
+import {
+  windowMinutesForTier,
+  computePace,
+  parseResetMs,
+  type PaceStatus,
+} from "./lib/pace";
 import appIcon from "./assets/app-icon.png";
 import "./App.css";
 
@@ -2179,6 +2185,40 @@ function QuotaBarTicks({ thresholds = DEFAULT_WARN_THRESHOLDS }: { thresholds?: 
   );
 }
 
+// v1.38 F1/F2b — expected-pace marker on a REMAINING-oriented quota bar. Sits at
+// `placeOnRemainingBar(expectedFraction)` = where the remaining fill WOULD be if
+// usage exactly tracked elapsed time. If the actual fill is left of the marker
+// you're using ahead of pace; right of it, under. Distinct sky-blue vs the
+// neutral warning ticks. Only rendered when a pace is computable (known window +
+// reset timestamp — see lib/pace.ts). Render inside the `relative` bar, after
+// the fill + ticks.
+function QuotaPaceMarker({ expectedFraction }: { expectedFraction: number }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="absolute top-0 bottom-0 w-0.5 bg-sky-300"
+      style={{ left: `${placeOnRemainingBar(expectedFraction) * 100}%` }}
+      title={t("providers.pace_marker_hint", {
+        pct: Math.round(expectedFraction * 100),
+      })}
+      aria-hidden="true"
+    />
+  );
+}
+
+// i18n key + text color for a pace status. "ahead" (burning faster than time) is
+// the only cautionary one → amber; on-track green; under-pace muted.
+function paceLabel(status: PaceStatus): { key: string; className: string } {
+  switch (status) {
+    case "ahead":
+      return { key: "providers.pace_ahead", className: "text-amber-400" };
+    case "under":
+      return { key: "providers.pace_under", className: "text-neutral-500" };
+    default:
+      return { key: "providers.pace_on_track", className: "text-emerald-400" };
+  }
+}
+
 type ServiceStatusRow = {
   provider: string;
   indicator: "operational" | "maintenance" | "minor" | "major" | "critical" | "unknown";
@@ -2798,10 +2838,36 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                           : remainingPct <= 40
                             ? "from-amber-400 to-orange-500"
                             : "from-emerald-500 to-cyan-500";
+                      // v1.38 F1/F2b — usage pace vs the reset window. Null
+                      // (no marker/text) unless the tier name encodes a known
+                      // fixed window AND a reset timestamp is present; see
+                      // lib/pace.ts (we never assume a default window).
+                      const usedFraction =
+                        tier.quota > 0 ? (tier.quota - remaining) / tier.quota : 0;
+                      const pace = computePace({
+                        usedFraction,
+                        windowMinutes: windowMinutesForTier(tier.name),
+                        resetTimeMs: parseResetMs(tier.reset_time),
+                        nowMs: Date.now(),
+                      });
+                      const paceMeta = pace ? paceLabel(pace.status) : null;
                       return (
                         <div key={tier.name} className="text-xs">
                           <div className="flex justify-between text-neutral-400 mb-0.5">
-                            <span>{tier.name}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span>{tier.name}</span>
+                              {pace && paceMeta && (
+                                <span
+                                  className={`text-[10px] ${paceMeta.className}`}
+                                  title={t("providers.pace_hint", {
+                                    used: Math.round(pace.usedFraction * 100),
+                                    expected: Math.round(pace.expectedFraction * 100),
+                                  })}
+                                >
+                                  {t(paceMeta.key)}
+                                </span>
+                              )}
+                            </span>
                             <span className="font-mono">
                               {t("providers.tier_left", {
                                 remaining: formatInt(tier.remaining),
@@ -2815,6 +2881,9 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                               style={{ width: `${Math.min(100, remainingPct)}%` }}
                             />
                             <QuotaBarTicks />
+                            {pace && (
+                              <QuotaPaceMarker expectedFraction={pace.expectedFraction} />
+                            )}
                           </div>
                         </div>
                       );

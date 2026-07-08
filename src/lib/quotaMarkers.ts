@@ -8,9 +8,10 @@
  * sits at `1 − f` on a remaining bar (so a "95% used" critical marker sits
  * near the empty end of a countdown bar).
  *
- * NOTE: the *expected-pace* marker + pace text are deliberately NOT here — they
- * need per-tier `windowMinutes`, which the desktop's `TierEntry` doesn't carry
- * yet (the Mac sets it per-collector). That's a gated follow-up (plan §5).
+ * NOTE: the *expected-pace* marker + pace text live in {@link ./pace} (v1.38
+ * F1/F2b), which derives the per-tier window length from the tier name rather
+ * than a wire-format `windowMinutes` (the desktop's `TierEntry` still carries
+ * only a reset timestamp). This module keeps just the warning-threshold ticks.
  */
 
 /** Mac default warning thresholds (percent used). */
@@ -32,9 +33,13 @@ export function warningFractions(thresholdsPercent: number[]): number[] {
 
 /**
  * Place an as-used fraction onto a **remaining** bar: a used fraction `f`
- * fills to `1 − f` (headroom). Clamped to 0..1.
+ * fills to `1 − f` (headroom). Clamped to 0..1; non-finite input (NaN/±∞) is
+ * treated as 0 so callers can safely feed the result straight into a CSS
+ * `left: N%` without ever emitting `NaN%`.
  */
 export function placeOnRemainingBar(usedFraction: number): number {
-  const f = Math.max(0, Math.min(1, usedFraction));
+  const f = Number.isFinite(usedFraction)
+    ? Math.max(0, Math.min(1, usedFraction))
+    : 0;
   return 1 - f;
 }

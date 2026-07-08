@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Usage-pace text + expected-pace marker on the quota bars (F1/F2b parity)** — each Providers-tab quota
+  tier now shows whether you're **ahead of pace / on track / under pace** and draws a sky-blue **expected-pace
+  marker** on the bar (where the remaining fill *would* be if usage tracked elapsed time). Closes
+  `DEV_PLAN_2026-07-08_desktop_next_phase.md` §3 P1.3, extending the v1.30 F2a 80/95% warning ticks.
+  - **Client-local, no schema change** (the plan's §7 Q1 preference): the tier data reaching the frontend
+    (server `provider_summary`) carries only the reset *end* timestamp and the fill %, not a window length. So
+    `src/lib/pace.ts` derives the window length from the tier name — **exactly** for recognizable fixed
+    windows ("5h Window" → 300 min, "4-hour" → 240, "Weekly" → 10 080; "hourly"/"daily" words) and **`null`**
+    for everything else ("Monthly" is calendar-variable, "Sonnet only"/"Designs"/"Daily Routines" are
+    nicknames). It **never** assumes a default window — the Mac's C3 fix showed an assumed window yields a
+    wrong pace, so we show *no* pace rather than a misleading one. `computePace` (linear expected-fraction vs.
+    a 5-pp on-track band) + `windowMinutesForTier` + `parseResetMs` are pure and fully unit-tested (14 cases).
+  - The marker reuses `placeOnRemainingBar`, so it's consistent with the warning ticks. New `providers.pace_*`
+    keys across all 3 locales; the three status labels are pinned in the critical-labels gate. Pace is only
+    shown for tiers with a known window **and** a reset timestamp, so unnamed / flat-quota bars are unchanged.
+
 - **Per-provider prompt-cache hit rate on the Overview** — the Overview provider-usage breakdown now shows a
   compact **"N% cache"** per provider row (its `cached ÷ (input + cached)` over the scan window), next to the
   I/O-token and cost columns, so you can see which providers benefit most from prompt caching — not just the

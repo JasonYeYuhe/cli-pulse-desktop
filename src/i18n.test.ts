@@ -176,6 +176,10 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "providers.all_hidden",
     // v1.30 F2a — quota-bar warning-threshold tick tooltip.
     "providers.warn_threshold",
+    // v1.38 F1/F2b — quota-bar usage-pace text.
+    "providers.pace_ahead",
+    "providers.pace_on_track",
+    "providers.pace_under",
     // v0.13.0 — per-provider 30-day usage chart.
     "providers.chart_title",
     "providers.chart_no_history",
