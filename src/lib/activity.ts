@@ -91,6 +91,19 @@ export function computeStreaks(
 }
 
 /**
+ * Prompt-cache hit rate from raw token sums: `cached / (input + cached)` as a
+ * percentage, or `null` when there are no input+cached tokens (avoids 0/0). The
+ * single source of the cache-rate formula — used account-wide (`cacheHitRate`)
+ * and per-provider (the Overview breakdown). Tolerates NaN/undefined sums.
+ */
+export function cacheHitRateOf(input: number, cached: number): number | null {
+  const i = input || 0;
+  const c = cached || 0;
+  const denom = i + c;
+  return denom > 0 ? (c / denom) * 100 : null;
+}
+
+/**
  * Prompt-cache hit rate over the window: `cached / (input + cached)` as a
  * percentage. `null` when there are no input+cached tokens (avoids 0/0) — e.g.
  * a window whose only rows are Claude message buckets with no token detail.
@@ -102,8 +115,7 @@ export function cacheHitRate(entries: ReadonlyArray<ActivityEntry>): number | nu
     cached += e.cached_tokens || 0;
     input += e.input_tokens || 0;
   }
-  const denom = input + cached;
-  return denom > 0 ? (cached / denom) * 100 : null;
+  return cacheHitRateOf(input, cached);
 }
 
 /**

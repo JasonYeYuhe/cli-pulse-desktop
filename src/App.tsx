@@ -30,7 +30,13 @@ import {
   toggleHiddenProvider,
 } from "./lib/providerVisibility";
 import { providerColor, providerMonogram } from "./lib/providerTheme";
-import { activityLevel, buildActivity, cacheHitRate, computeStreaks } from "./lib/activity";
+import {
+  activityLevel,
+  buildActivity,
+  cacheHitRate,
+  cacheHitRateOf,
+  computeStreaks,
+} from "./lib/activity";
 import { CURRENCIES, formatMoney, loadCurrency, saveCurrency, type FxRates } from "./lib/money";
 import {
   RANGE_PRESETS,
@@ -1238,16 +1244,29 @@ function Overview({
   // cost shown as a secondary figure. Top 6 by tokens.
   const byProvider = useMemo(() => {
     if (!scan) return [];
-    const m = new Map<string, { tokens: number; cost: number }>();
+    // Track input + cached separately (alongside the input+output `tokens`
+    // headline) so each row can show a prompt-cache hit rate. `tokens` stays
+    // input+output for the bar/label; `cachePct` uses cached / (input+cached).
+    const m = new Map<
+      string,
+      { tokens: number; cost: number; input: number; cached: number }
+    >();
     for (const e of scan.entries) {
       if (e.model === CLAUDE_MSG_BUCKET) continue;
-      const cur = m.get(e.provider) ?? { tokens: 0, cost: 0 };
+      const cur = m.get(e.provider) ?? { tokens: 0, cost: 0, input: 0, cached: 0 };
       cur.tokens += e.input_tokens + e.output_tokens;
       cur.cost += e.cost_usd ?? 0;
+      cur.input += e.input_tokens;
+      cur.cached += e.cached_tokens;
       m.set(e.provider, cur);
     }
     return Array.from(m.entries())
-      .map(([provider, v]) => ({ provider, tokens: v.tokens, cost: v.cost }))
+      .map(([provider, v]) => ({
+        provider,
+        tokens: v.tokens,
+        cost: v.cost,
+        cachePct: cacheHitRateOf(v.input, v.cached),
+      }))
       .filter((p) => p.tokens > 0)
       .sort((a, b) => b.tokens - a.tokens)
       .slice(0, 6);
@@ -1376,6 +1395,17 @@ function Overview({
                     </div>
                     <span className="text-xs text-neutral-400 tabular-nums w-32 text-right shrink-0">
                       {t("providers.io_tokens", { value: formatInt(p.tokens) })}
+                    </span>
+                    {/* Prompt-cache hit rate for this provider over the window.
+                        A fixed-width slot (kept even when null) so the token/
+                        cost columns stay aligned across rows. */}
+                    <span
+                      className="text-xs text-neutral-500 tabular-nums w-16 text-right shrink-0"
+                      title={t("overview.cache_hit_hint")}
+                    >
+                      {p.cachePct !== null
+                        ? t("overview.cache_hit", { pct: Math.round(p.cachePct) })
+                        : ""}
                     </span>
                     <span className="text-xs font-mono text-neutral-300 w-16 text-right shrink-0">
                       {fmt(p.cost)}

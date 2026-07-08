@@ -4,6 +4,7 @@ import {
   aggregateByDate,
   buildActivity,
   cacheHitRate,
+  cacheHitRateOf,
   computeStreaks,
   type ActivityEntry,
   type DayActivity,
@@ -80,6 +81,21 @@ describe("cacheHitRate", () => {
   it("is null when there are no input+cached tokens", () => {
     expect(cacheHitRate([])).toBeNull();
     expect(cacheHitRate([entry("d1", 0, 5, 0)])).toBeNull(); // message-only day
+  });
+});
+
+describe("cacheHitRateOf", () => {
+  it("computes cached / (input + cached) as a percentage", () => {
+    expect(cacheHitRateOf(300, 700)).toBeCloseTo(70);
+    expect(cacheHitRateOf(1, 0)).toBeCloseTo(0);
+    expect(cacheHitRateOf(0, 1)).toBeCloseTo(100);
+  });
+  it("is null when input + cached is zero", () => {
+    expect(cacheHitRateOf(0, 0)).toBeNull();
+  });
+  it("tolerates NaN / undefined-ish sums as zero", () => {
+    expect(cacheHitRateOf(NaN, 0)).toBeNull();
+    expect(cacheHitRateOf(NaN, 500)).toBeCloseTo(100);
   });
 });
 

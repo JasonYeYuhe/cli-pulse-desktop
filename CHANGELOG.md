@@ -11,6 +11,18 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Per-provider prompt-cache hit rate on the Overview** — the Overview provider-usage breakdown now shows a
+  compact **"N% cache"** per provider row (its `cached ÷ (input + cached)` over the scan window), next to the
+  I/O-token and cost columns, so you can see which providers benefit most from prompt caching — not just the
+  single account-wide figure. Closes `DEV_PLAN_2026-07-08_desktop_next_phase.md` §3 P0.2 (extends the A6
+  cache-hit analytics into the breakdown).
+  - Frontend-only, no Rust/wire change: the raw `input_tokens` + `cached_tokens` already reach the frontend on
+    each `DailyEntry`; the Overview `byProvider` reducer now sums them per provider. The cache-rate formula is
+    factored into a single pure `cacheHitRateOf(input, cached)` helper in `src/lib/activity.ts` (the existing
+    account-wide `cacheHitRate` now delegates to it; +3 Vitest cases). Reuses the existing `overview.cache_hit`
+    / `overview.cache_hit_hint` keys — no new i18n strings. The chip's column slot is kept even when a provider
+    has no cache data, so the token/cost columns stay aligned.
+
 - **Date-range picker (7 / 30 / 90 / custom)** — the local usage scan window is no longer hard-wired to 30
   days. A new **Settings → Date range** selector (one-tap 7/30/90 presets plus a custom 1–180 day field)
   drives the whole local-scan surface — Overview tiles, the activity heat strip + streaks, the provider-usage
