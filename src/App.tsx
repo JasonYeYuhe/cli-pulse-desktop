@@ -109,6 +109,13 @@ type DailyEntry = {
   message_count: number;
 };
 
+type OriginUsage = {
+  kind: string; // "native" | "wsl"
+  distro: string | null;
+  tokens: number;
+  files: number;
+};
+
 type ScanResult = {
   entries: DailyEntry[];
   total_cost_usd: number;
@@ -116,6 +123,7 @@ type ScanResult = {
   today_key: string;
   days_scanned: number;
   files_scanned: number;
+  origin_usage?: OriginUsage[];
 };
 
 type ConfigView = {
@@ -863,7 +871,11 @@ export default function App() {
           />
         )}
         {tab === "machine" && (
-          <MachineTab paired={!!config?.paired} currentDeviceId={config?.device_id ?? null} />
+          <MachineTab
+            paired={!!config?.paired}
+            currentDeviceId={config?.device_id ?? null}
+            scan={scan}
+          />
         )}
         {tab === "swarm" && (
           <Swarm
@@ -6855,9 +6867,11 @@ function FleetHealth({ currentDeviceId }: { currentDeviceId: string | null }) {
 function MachineTab({
   paired,
   currentDeviceId,
+  scan,
 }: {
   paired: boolean;
   currentDeviceId: string | null;
+  scan: ScanResult | null;
 }) {
   const { t } = useTranslation();
   const [snap, setSnap] = useState<MachineSnapshot | null>(null);
@@ -7016,7 +7030,62 @@ function MachineTab({
         <p className="mt-2 text-[11px] text-neutral-600">{t("machine.local_note")}</p>
       </div>
 
+      {scan && <UsageSourcesSection scan={scan} />}
+
       {paired && <FleetHealth currentDeviceId={currentDeviceId} />}
+    </div>
+  );
+}
+
+// Native-vs-WSL usage split (Windows). Surfaces the otherwise-silent WSL merge:
+// when the CLIs run inside a WSL distro, their logs live under the
+// \\wsl.localhost\<distro>\ share and get scanned + merged into the totals. We
+// derive the origin from each cached file's path (see scanner::origin_usage), so
+// this needs no cache-schema change. Rendered ONLY when a WSL origin is actually
+// present, so Mac / Linux / Windows-without-WSL users never see it.
+function UsageSourcesSection({ scan }: { scan: ScanResult }) {
+  const { t } = useTranslation();
+  const origins = scan.origin_usage ?? [];
+  const hasWsl = origins.some((o) => o.kind === "wsl");
+  if (!hasWsl) return null;
+  const total = origins.reduce((s, o) => s + o.tokens, 0);
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
+      <h3 className="text-xs font-semibold text-neutral-300 mb-1">
+        {t("machine.sources_heading")}
+      </h3>
+      <p className="text-[11px] text-neutral-500 mb-3">{t("machine.sources_hint")}</p>
+      <div className="space-y-2">
+        {origins.map((o) => {
+          const label =
+            o.kind === "wsl"
+              ? t("machine.source_wsl", { distro: o.distro ?? "WSL" })
+              : t("machine.source_native");
+          const pct = total > 0 ? (o.tokens / total) * 100 : 0;
+          return (
+            <div
+              key={`${o.kind}:${o.distro ?? ""}`}
+              className="flex items-center gap-3 text-xs"
+            >
+              <span
+                className="w-28 shrink-0 truncate text-neutral-300"
+                title={label}
+              >
+                {label}
+              </span>
+              <div className="flex-1 h-2 bg-neutral-800 rounded overflow-hidden">
+                <div
+                  className="h-full rounded bg-gradient-to-r from-sky-500 to-cyan-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="w-32 text-right tabular-nums text-neutral-400 shrink-0">
+                {t("machine.source_tokens", { value: formatInt(o.tokens) })}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

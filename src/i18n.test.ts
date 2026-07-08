@@ -235,6 +235,8 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "machine.col_cpu",
     "machine.col_mem",
     "machine.local_note",
+    // v1.38 P1.4 — native-vs-WSL usage split.
+    "machine.sources_heading",
     // Capability-gated sensors (temps + battery).
     "machine.battery",
     "machine.batt_charging",

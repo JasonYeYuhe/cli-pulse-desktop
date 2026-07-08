@@ -3437,6 +3437,7 @@ mod tests {
             days_scanned: 30,
             files_scanned: 1,
             files_cached: 0,
+            origin_usage: vec![],
         };
         record_local_tray_snapshot(&scan);
 
@@ -3485,6 +3486,7 @@ mod tests {
             days_scanned: 30,
             files_scanned: 0,
             files_cached: 0,
+            origin_usage: vec![],
         };
         record_local_tray_snapshot(&scan);
 

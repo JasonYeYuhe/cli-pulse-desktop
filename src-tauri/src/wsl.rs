@@ -19,6 +19,41 @@
 
 use std::path::PathBuf;
 
+/// Where a scanned log file physically lives. Derived purely from the file's
+/// path (WSL files sit under the `\\wsl.localhost\<distro>\` UNC share we add in
+/// `paths.rs`), so it survives the incremental cache — the cache is keyed by
+/// absolute path, and origin is re-derivable from that key at emit time with no
+/// cache-schema change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// A native Windows / macOS / Linux home directory.
+    Native,
+    /// Inside a running WSL distro (the captured name, e.g. "Ubuntu").
+    Wsl(String),
+}
+
+/// Classify a scanned file path as native vs. a WSL distro. Pure + case- and
+/// slash-tolerant. Recognizes the `\\wsl.localhost\<distro>\` share we scan (and
+/// the legacy `\\wsl$\<distro>\` alias, for robustness); the first path segment
+/// after the prefix is the distro name. Everything else is `Native`.
+pub fn classify_origin(path: &str) -> Origin {
+    // Normalize forward slashes so a UNC that came back with `/` still matches;
+    // ASCII-lowercase for the case-insensitive prefix test (length-preserving,
+    // so byte indices stay valid in the original-case `norm`).
+    let norm = path.replace('/', "\\");
+    let lower = norm.to_ascii_lowercase();
+    for prefix in [r"\\wsl.localhost\", r"\\wsl$\"] {
+        if let Some(idx) = lower.find(prefix) {
+            let after = &norm[idx + prefix.len()..];
+            let distro = after.split('\\').next().unwrap_or("").trim();
+            if !distro.is_empty() {
+                return Origin::Wsl(distro.to_string());
+            }
+        }
+    }
+    Origin::Native
+}
+
 /// Home directories inside running WSL distros to also scan for Claude/Codex
 /// logs. Windows-only; empty everywhere else.
 #[cfg(windows)]
@@ -129,5 +164,53 @@ mod tests {
     #[test]
     fn home_roots_empty_off_windows() {
         assert!(wsl_home_roots().is_empty());
+    }
+
+    #[test]
+    fn classify_origin_native_paths() {
+        assert_eq!(
+            classify_origin(r"C:\Users\jason\.claude\projects\p\f.jsonl"),
+            Origin::Native
+        );
+        assert_eq!(
+            classify_origin("/home/jason/.codex/sessions/f.jsonl"),
+            Origin::Native
+        );
+        assert_eq!(classify_origin(""), Origin::Native);
+    }
+
+    #[test]
+    fn classify_origin_wsl_extracts_distro() {
+        assert_eq!(
+            classify_origin(r"\\wsl.localhost\Ubuntu\home\jason\.claude\projects\p\f.jsonl"),
+            Origin::Wsl("Ubuntu".to_string())
+        );
+        assert_eq!(
+            classify_origin(r"\\wsl.localhost\Debian-12\root\.codex\sessions\f.jsonl"),
+            Origin::Wsl("Debian-12".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_origin_is_case_and_slash_tolerant() {
+        // Some APIs return the share prefix lowercased or with forward slashes.
+        assert_eq!(
+            classify_origin(r"\\WSL.LOCALHOST\Ubuntu\home\u\f"),
+            Origin::Wsl("Ubuntu".to_string())
+        );
+        assert_eq!(
+            classify_origin("//wsl.localhost/Ubuntu/home/u/f"),
+            Origin::Wsl("Ubuntu".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_origin_handles_legacy_wsl_dollar_and_missing_distro() {
+        assert_eq!(
+            classify_origin(r"\\wsl$\Alpine\home\u\f"),
+            Origin::Wsl("Alpine".to_string())
+        );
+        // Prefix present but no distro segment → not a real WSL path → Native.
+        assert_eq!(classify_origin(r"\\wsl.localhost\"), Origin::Native);
     }
 }

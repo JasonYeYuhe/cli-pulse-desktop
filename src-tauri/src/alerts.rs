@@ -285,6 +285,7 @@ mod tests {
             days_scanned: 2,
             files_scanned: 1,
             files_cached: 0,
+            origin_usage: vec![],
         }
     }
 

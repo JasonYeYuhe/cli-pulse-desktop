@@ -11,6 +11,22 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Native-vs-WSL usage split on the Machine tab** — Windows developers often run Claude Code / Codex
+  **inside a WSL distro**, whose logs we already scan via the `\\wsl.localhost\<distro>\` share and merge into
+  the totals — but that merge was **silent**. The Machine tab now shows a **"Usage sources"** breakdown
+  (Native vs. each WSL distro, by tokens) whenever WSL usage is present, so you can see how much of your usage
+  comes from there. Closes `DEV_PLAN_2026-07-08_desktop_next_phase.md` §3 P1.4.
+  - **No cache-schema change** (the invasive option the audit flagged): origin is derived from each **cached
+    file's absolute path** at emit time (`wsl::classify_origin` — pure, case/slash-tolerant, unit-tested), so
+    it survives warm/incremental scans (the cache is keyed by path and retains every tracked file) without
+    bumping `CACHE_SCHEMA_VERSION` or forcing a full rescan. `scanner::origin_usage` walks the per-file cache
+    entries and sums the token slots per provider (Codex `[input, cached, output]`; Claude excludes the
+    `cost_nanos`/`msgs` slots), returning a new `ScanResult.origin_usage` (`#[serde(default)]`, so old callers
+    are unaffected). Both are unit-tested (native/WSL classification + a mixed-provider split + out-of-range
+    exclusion). The section is **only** rendered when a WSL origin is actually present, so macOS / Linux /
+    Windows-without-WSL users see nothing new. New `machine.source_*` keys × 3 locales;
+    `machine.sources_heading` pinned in the critical-labels gate.
+
 - **Usage-pace text + expected-pace marker on the quota bars (F1/F2b parity)** — each Providers-tab quota
   tier now shows whether you're **ahead of pace / on track / under pace** and draws a sky-blue **expected-pace
   marker** on the bar (where the remaining fill *would* be if usage tracked elapsed time). Closes

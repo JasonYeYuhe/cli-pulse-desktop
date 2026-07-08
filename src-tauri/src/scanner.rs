@@ -31,6 +31,7 @@ use walkdir::WalkDir;
 use crate::cache::{self, CodexTotals, CostUsageCache, FileAction, FileEntry, Packed};
 use crate::paths;
 use crate::pricing;
+use crate::wsl::{classify_origin, Origin};
 
 pub const CLAUDE_MSG_BUCKET_MODEL: &str = "__claude_msg__";
 const CLAUDE_COST_SCALE: f64 = 1_000_000_000.0;
@@ -47,6 +48,22 @@ pub struct DailyEntry {
     pub message_count: i64,
 }
 
+/// Per-origin usage totals (native Windows/macOS/Linux vs. a WSL distro). Lets
+/// the UI surface the otherwise-silent WSL merge — Windows users running the
+/// CLIs inside WSL can see how much of their usage comes from there. `tokens` is
+/// the sum of all token slots (input + cached + output; Claude cache_read +
+/// cache_create both count as cached) over the scan window.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OriginUsage {
+    /// "native" or "wsl".
+    pub kind: String,
+    /// The distro name for `kind == "wsl"`; `None` for native.
+    pub distro: Option<String>,
+    pub tokens: i64,
+    /// Number of tracked files contributing (with in-range tokens).
+    pub files: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanResult {
     pub entries: Vec<DailyEntry>,
@@ -59,6 +76,11 @@ pub struct ScanResult {
     /// therefore skipped entirely. Useful for benchmarking the incremental
     /// path and reported in the scan report.
     pub files_cached: u32,
+    /// Usage split by physical origin (native vs. each WSL distro), derived
+    /// from the cached file paths. Empty when nothing has usage; the UI only
+    /// surfaces the split when a WSL entry is present. See `origin_usage`.
+    #[serde(default)]
+    pub origin_usage: Vec<OriginUsage>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +146,7 @@ pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
         scan_claude_provider(&opts, &range)?;
 
     let entries = emit_entries(&codex_cache, &claude_cache, &range);
+    let origin_usage = origin_usage(&codex_cache, &claude_cache, &range);
 
     let total_cost_usd: f64 = entries.iter().filter_map(|e| e.cost_usd).sum();
     let total_tokens: i64 = entries
@@ -139,7 +162,77 @@ pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
         days_scanned: opts.days,
         files_scanned: codex_files_scanned + claude_files_scanned,
         files_cached: codex_files_cached + claude_files_cached,
+        origin_usage,
     })
+}
+
+/// Sum a single cached file's in-range token slots. `token_slots` is how many of
+/// the packed slots are token counts for that provider (Codex `[input, cached,
+/// output]` → 3; Claude `[input, cache_read, cache_create, output, cost_nanos,
+/// msgs]` → 4 — cost_nanos + msgs are NOT tokens). Cost/msg slots are excluded.
+fn sum_file_tokens(entry: &FileEntry, token_slots: usize, range: &DateRange) -> i64 {
+    let mut total = 0i64;
+    for (day, models) in &entry.days {
+        if !in_range(day, range) {
+            continue;
+        }
+        for packed in models.values() {
+            for slot in packed.iter().take(token_slots) {
+                total += *slot;
+            }
+        }
+    }
+    total
+}
+
+/// Split token usage by physical origin (native vs. each WSL distro) by walking
+/// the per-file cache entries and classifying each file's absolute path. Because
+/// the cache retains every tracked file (including ones skipped as unchanged on
+/// a warm scan), this reflects the full window without a re-parse and needs no
+/// cache-schema change. Files with no in-range tokens (e.g. Claude's synthetic
+/// message bucket) contribute nothing. Sorted: native first, then distros by
+/// descending tokens then name, for a stable UI order.
+fn origin_usage(
+    codex_cache: &CostUsageCache,
+    claude_cache: &CostUsageCache,
+    range: &DateRange,
+) -> Vec<OriginUsage> {
+    // key: (kind, distro) -> (tokens, files)
+    let mut acc: HashMap<(String, Option<String>), (i64, u32)> = HashMap::new();
+    for (cache, token_slots) in [(codex_cache, 3usize), (claude_cache, 4usize)] {
+        for (path, entry) in &cache.files {
+            let tokens = sum_file_tokens(entry, token_slots, range);
+            if tokens == 0 {
+                continue;
+            }
+            let key = match classify_origin(path) {
+                Origin::Native => ("native".to_string(), None),
+                Origin::Wsl(distro) => ("wsl".to_string(), Some(distro)),
+            };
+            let slot = acc.entry(key).or_insert((0, 0));
+            slot.0 += tokens;
+            slot.1 += 1;
+        }
+    }
+    let mut out: Vec<OriginUsage> = acc
+        .into_iter()
+        .map(|((kind, distro), (tokens, files))| OriginUsage {
+            kind,
+            distro,
+            tokens,
+            files,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        // native first, then WSL distros by tokens desc, then distro name.
+        let a_native = a.kind == "native";
+        let b_native = b.kind == "native";
+        b_native
+            .cmp(&a_native)
+            .then(b.tokens.cmp(&a.tokens))
+            .then(a.distro.cmp(&b.distro))
+    });
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -950,5 +1043,85 @@ mod tests {
         assert!(in_range("2026-04-25", &r));
         assert!(!in_range("2026-04-19", &r));
         assert!(!in_range("2026-04-26", &r));
+    }
+
+    fn file_entry_with(day: &str, model: &str, packed: Vec<i64>) -> FileEntry {
+        let mut models = HashMap::new();
+        models.insert(model.to_string(), packed);
+        let mut days = HashMap::new();
+        days.insert(day.to_string(), models);
+        FileEntry {
+            mtime_unix_ms: 0,
+            size: 0,
+            days,
+            parsed_bytes: None,
+            last_model: None,
+            last_totals: None,
+            session_id: None,
+        }
+    }
+
+    #[test]
+    fn origin_usage_splits_native_and_wsl() {
+        let range = DateRange {
+            since_key: "2026-04-01".into(),
+            until_key: "2026-04-30".into(),
+        };
+        let mut codex = CostUsageCache::default();
+        // Native Codex file: [input, cached, output] = 100+20+30 = 150 tokens.
+        codex.files.insert(
+            r"C:\Users\jason\.codex\sessions\a.jsonl".into(),
+            file_entry_with("2026-04-10", "gpt-5", vec![100, 20, 30]),
+        );
+        // WSL Codex file (Ubuntu): 10+0+5 = 15 tokens.
+        codex.files.insert(
+            r"\\wsl.localhost\Ubuntu\home\jason\.codex\sessions\b.jsonl".into(),
+            file_entry_with("2026-04-11", "gpt-5", vec![10, 0, 5]),
+        );
+
+        let mut claude = CostUsageCache::default();
+        // WSL Claude file (Ubuntu): [input, cache_read, cache_create, output,
+        // cost_nanos, msgs] — tokens = 40+10+5+20 = 75 (cost_nanos + msgs excluded).
+        claude.files.insert(
+            r"\\wsl.localhost\Ubuntu\home\jason\.claude\projects\p\c.jsonl".into(),
+            file_entry_with("2026-04-12", "sonnet", vec![40, 10, 5, 20, 999, 3]),
+        );
+        // Native Claude synthetic message bucket: no tokens → excluded entirely.
+        claude.files.insert(
+            r"C:\Users\jason\.claude\projects\p\d.jsonl".into(),
+            file_entry_with(
+                "2026-04-13",
+                CLAUDE_MSG_BUCKET_MODEL,
+                vec![0, 0, 0, 0, 0, 7],
+            ),
+        );
+
+        let out = origin_usage(&codex, &claude, &range);
+        // Native (150 tokens, 1 file) sorts first; WSL Ubuntu = 15 + 75 = 90 (2 files).
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].kind, "native");
+        assert_eq!(out[0].distro, None);
+        assert_eq!(out[0].tokens, 150);
+        assert_eq!(out[0].files, 1);
+        assert_eq!(out[1].kind, "wsl");
+        assert_eq!(out[1].distro.as_deref(), Some("Ubuntu"));
+        assert_eq!(out[1].tokens, 90);
+        assert_eq!(out[1].files, 2);
+    }
+
+    #[test]
+    fn origin_usage_excludes_out_of_range_and_empty() {
+        let range = DateRange {
+            since_key: "2026-04-01".into(),
+            until_key: "2026-04-30".into(),
+        };
+        let mut codex = CostUsageCache::default();
+        // Out-of-range day → contributes nothing.
+        codex.files.insert(
+            r"C:\x\a.jsonl".into(),
+            file_entry_with("2026-01-01", "gpt-5", vec![100, 0, 0]),
+        );
+        let out = origin_usage(&codex, &CostUsageCache::default(), &range);
+        assert!(out.is_empty());
     }
 }
