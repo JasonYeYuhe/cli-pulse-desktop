@@ -4,10 +4,13 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
-**v0.10.1 sprint (in progress).** Two threads: the deferred v0.10.0
-items (per-provider visibility done; date range picker + export +
-compare still to come) and a macOS/iOS parity pass driven by a gap
-audit against the Mac app (v1.28).
+## [0.10.1] — 2026-07-09
+
+**Parity-closeout sprint.** Two threads: the deferred v0.10.0 items (per-provider visibility, **date-range
+picker**, and **export** all now done) and a macOS/iOS parity pass driven by a gap audit against the Mac app
+(v1.28) — closing the remaining verifiable gaps (per-provider cache hit-rate, usage-pace markers, native-vs-WSL
+split, refresh-on-focus, auto-export) plus the optional always-on-top window mode. (`compare` mode remains the
+one deferred v0.10.0 item.)
 
 ### Added
 
