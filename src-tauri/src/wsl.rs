@@ -34,8 +34,10 @@ pub enum Origin {
 
 /// Classify a scanned file path as native vs. a WSL distro. Pure + case- and
 /// slash-tolerant. Recognizes the `\\wsl.localhost\<distro>\` share we scan (and
-/// the legacy `\\wsl$\<distro>\` alias, for robustness); the first path segment
-/// after the prefix is the distro name. Everything else is `Native`.
+/// the legacy `\\wsl$\<distro>\` alias, for robustness); the first NON-EMPTY path
+/// segment after the prefix is the distro name (skipping a stray doubled
+/// separator so a distro is never silently reclassified as native). Everything
+/// else is `Native`.
 pub fn classify_origin(path: &str) -> Origin {
     // Normalize forward slashes so a UNC that came back with `/` still matches;
     // ASCII-lowercase for the case-insensitive prefix test (length-preserving,
@@ -45,8 +47,7 @@ pub fn classify_origin(path: &str) -> Origin {
     for prefix in [r"\\wsl.localhost\", r"\\wsl$\"] {
         if let Some(idx) = lower.find(prefix) {
             let after = &norm[idx + prefix.len()..];
-            let distro = after.split('\\').next().unwrap_or("").trim();
-            if !distro.is_empty() {
+            if let Some(distro) = after.split('\\').map(str::trim).find(|s| !s.is_empty()) {
                 return Origin::Wsl(distro.to_string());
             }
         }
@@ -212,5 +213,15 @@ mod tests {
         );
         // Prefix present but no distro segment → not a real WSL path → Native.
         assert_eq!(classify_origin(r"\\wsl.localhost\"), Origin::Native);
+    }
+
+    #[test]
+    fn classify_origin_skips_a_doubled_separator() {
+        // A stray doubled separator right after the share prefix must NOT blank
+        // the distro (which would misclassify a real WSL file as native).
+        assert_eq!(
+            classify_origin(r"\\wsl.localhost\\Ubuntu\home\u\f"),
+            Origin::Wsl("Ubuntu".to_string())
+        );
     }
 }

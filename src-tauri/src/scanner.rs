@@ -51,8 +51,8 @@ pub struct DailyEntry {
 /// Per-origin usage totals (native Windows/macOS/Linux vs. a WSL distro). Lets
 /// the UI surface the otherwise-silent WSL merge — Windows users running the
 /// CLIs inside WSL can see how much of their usage comes from there. `tokens` is
-/// the sum of all token slots (input + cached + output; Claude cache_read +
-/// cache_create both count as cached) over the scan window.
+/// I/O tokens (input + output, EXCLUDING cached) over the scan window, matching
+/// `ScanResult.total_tokens` and the Overview so the figures reconcile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OriginUsage {
     /// "native" or "wsl".
@@ -166,42 +166,49 @@ pub fn scan_with_options(opts: ScanOptions) -> anyhow::Result<ScanResult> {
     })
 }
 
-/// Sum a single cached file's in-range token slots. `token_slots` is how many of
-/// the packed slots are token counts for that provider (Codex `[input, cached,
-/// output]` → 3; Claude `[input, cache_read, cache_create, output, cost_nanos,
-/// msgs]` → 4 — cost_nanos + msgs are NOT tokens). Cost/msg slots are excluded.
-fn sum_file_tokens(entry: &FileEntry, token_slots: usize, range: &DateRange) -> i64 {
+/// Sum a single cached file's in-range **I/O tokens** (input + output). `io_slots`
+/// are the packed indices holding input and output for that provider — Codex
+/// `[input, cached, output]` → `[0, 2]`; Claude `[input, cache_read, cache_create,
+/// output, cost_nanos, msgs]` → `[0, 3]`. Cached tokens are deliberately EXCLUDED
+/// to match the app-wide "tokens" convention (`ScanResult.total_tokens` and the
+/// Overview both count input+output only; cached is a separate metric), so the
+/// origin split reconciles with every other token figure in the UI.
+fn sum_file_tokens(entry: &FileEntry, io_slots: &[usize], range: &DateRange) -> i64 {
     let mut total = 0i64;
     for (day, models) in &entry.days {
         if !in_range(day, range) {
             continue;
         }
         for packed in models.values() {
-            for slot in packed.iter().take(token_slots) {
-                total += *slot;
+            for &i in io_slots {
+                total += packed.get(i).copied().unwrap_or(0);
             }
         }
     }
     total
 }
 
-/// Split token usage by physical origin (native vs. each WSL distro) by walking
-/// the per-file cache entries and classifying each file's absolute path. Because
-/// the cache retains every tracked file (including ones skipped as unchanged on
-/// a warm scan), this reflects the full window without a re-parse and needs no
-/// cache-schema change. Files with no in-range tokens (e.g. Claude's synthetic
-/// message bucket) contribute nothing. Sorted: native first, then distros by
-/// descending tokens then name, for a stable UI order.
+/// Split I/O-token usage by physical origin (native vs. each WSL distro) by
+/// walking the per-file cache entries and classifying each file's absolute path.
+/// Because the cache retains every tracked file (including ones skipped as
+/// unchanged on a warm scan), this reflects the full window without a re-parse
+/// and needs no cache-schema change. Files with no in-range tokens (e.g. Claude's
+/// synthetic message bucket) contribute nothing. Sorted: native first, then
+/// distros by descending tokens then name, for a stable UI order.
 fn origin_usage(
     codex_cache: &CostUsageCache,
     claude_cache: &CostUsageCache,
     range: &DateRange,
 ) -> Vec<OriginUsage> {
-    // key: (kind, distro) -> (tokens, files)
+    // key: (kind, distro) -> (tokens, files). I/O slots per provider: Codex
+    // input=0/output=2; Claude input=0/output=3 (cached + cost + msgs excluded).
     let mut acc: HashMap<(String, Option<String>), (i64, u32)> = HashMap::new();
-    for (cache, token_slots) in [(codex_cache, 3usize), (claude_cache, 4usize)] {
+    for (cache, io_slots) in [
+        (codex_cache, [0usize, 2usize].as_slice()),
+        (claude_cache, [0usize, 3usize].as_slice()),
+    ] {
         for (path, entry) in &cache.files {
-            let tokens = sum_file_tokens(entry, token_slots, range);
+            let tokens = sum_file_tokens(entry, io_slots, range);
             if tokens == 0 {
                 continue;
             }
@@ -1068,25 +1075,26 @@ mod tests {
             until_key: "2026-04-30".into(),
         };
         let mut codex = CostUsageCache::default();
-        // Native Codex file: [input, cached, output] = 100+20+30 = 150 tokens.
+        // Native Codex [input, cached, output] → I/O = input+output = 100+30 = 130
+        // (cached 20 EXCLUDED, matching the app-wide "tokens" definition).
         codex.files.insert(
             r"C:\Users\jason\.codex\sessions\a.jsonl".into(),
             file_entry_with("2026-04-10", "gpt-5", vec![100, 20, 30]),
         );
-        // WSL Codex file (Ubuntu): 10+0+5 = 15 tokens.
+        // WSL Codex (Ubuntu): I/O = 10 + 5 = 15.
         codex.files.insert(
             r"\\wsl.localhost\Ubuntu\home\jason\.codex\sessions\b.jsonl".into(),
             file_entry_with("2026-04-11", "gpt-5", vec![10, 0, 5]),
         );
 
         let mut claude = CostUsageCache::default();
-        // WSL Claude file (Ubuntu): [input, cache_read, cache_create, output,
-        // cost_nanos, msgs] — tokens = 40+10+5+20 = 75 (cost_nanos + msgs excluded).
+        // WSL Claude (Ubuntu): [input, cache_read, cache_create, output, cost_nanos,
+        // msgs] → I/O = input+output = 40 + 20 = 60 (cache/cost/msgs excluded).
         claude.files.insert(
             r"\\wsl.localhost\Ubuntu\home\jason\.claude\projects\p\c.jsonl".into(),
             file_entry_with("2026-04-12", "sonnet", vec![40, 10, 5, 20, 999, 3]),
         );
-        // Native Claude synthetic message bucket: no tokens → excluded entirely.
+        // Native Claude synthetic message bucket: no I/O tokens → excluded entirely.
         claude.files.insert(
             r"C:\Users\jason\.claude\projects\p\d.jsonl".into(),
             file_entry_with(
@@ -1097,15 +1105,15 @@ mod tests {
         );
 
         let out = origin_usage(&codex, &claude, &range);
-        // Native (150 tokens, 1 file) sorts first; WSL Ubuntu = 15 + 75 = 90 (2 files).
+        // Native (130 I/O tokens, 1 file) sorts first; WSL Ubuntu = 15 + 60 = 75 (2 files).
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].kind, "native");
         assert_eq!(out[0].distro, None);
-        assert_eq!(out[0].tokens, 150);
+        assert_eq!(out[0].tokens, 130);
         assert_eq!(out[0].files, 1);
         assert_eq!(out[1].kind, "wsl");
         assert_eq!(out[1].distro.as_deref(), Some("Ubuntu"));
-        assert_eq!(out[1].tokens, 90);
+        assert_eq!(out[1].tokens, 75);
         assert_eq!(out[1].files, 2);
     }
 

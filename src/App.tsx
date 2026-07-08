@@ -4252,6 +4252,19 @@ function DateRangeSection() {
   const { t } = useTranslation();
   const { days, setDays } = useScanRange();
   const custom = !isPreset(days);
+  // Buffer the custom-day field in local text state and commit only on blur /
+  // Enter — so typing "70" doesn't fire a rescan per keystroke, and an
+  // intermediate value that happens to equal a preset (e.g. "7") doesn't blank
+  // the field mid-edit. Mirrors the Budget form's buffered-input convention.
+  const [draft, setDraft] = useState(custom ? String(days) : "");
+  useEffect(() => {
+    setDraft(custom ? String(days) : "");
+  }, [days, custom]);
+  const commitDraft = () => {
+    const n = Number.parseInt(draft, 10);
+    if (!Number.isNaN(n)) setDays(n);
+    else setDraft(custom ? String(days) : ""); // revert an empty/invalid entry
+  };
   return (
     <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-2">
       <h2 className="text-sm font-semibold text-neutral-300">
@@ -4288,13 +4301,15 @@ function DateRangeSection() {
             type="number"
             min={MIN_DAYS}
             max={MAX_DAYS}
-            value={custom ? days : ""}
+            value={draft}
             placeholder="…"
-            onChange={(e) => {
-              const n = Number.parseInt(e.target.value, 10);
-              // Ignore an empty / non-numeric field (keep the last value)
-              // rather than snapping to a clamped default mid-edit.
-              if (!Number.isNaN(n)) setDays(n);
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitDraft}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitDraft();
+                e.currentTarget.blur();
+              }
             }}
             className="w-14 bg-transparent border-0 border-b border-neutral-600 px-1 py-0 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500"
           />
@@ -4334,6 +4349,18 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
   const { settings: autoExport, setSettings: setAutoExport } = useAutoExport();
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
+  // Buffer the interval field (commit on blur / Enter) so typing "120" doesn't
+  // tear down + restart the auto-export setInterval on every keystroke, and a
+  // mid-edit pause can't arm the timer at an interim value.
+  const [intervalDraft, setIntervalDraft] = useState(String(autoExport.intervalMin));
+  useEffect(() => {
+    setIntervalDraft(String(autoExport.intervalMin));
+  }, [autoExport.intervalMin]);
+  const commitInterval = () => {
+    const n = Number.parseInt(intervalDraft, 10);
+    if (!Number.isNaN(n)) setAutoExport({ ...autoExport, intervalMin: clampInterval(n) });
+    else setIntervalDraft(String(autoExport.intervalMin));
+  };
 
   function triggerDownload(content: string, filename: string, mime: string) {
     const blob = new Blob([content], { type: mime });
@@ -4464,11 +4491,14 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
                 type="number"
                 min={MIN_INTERVAL_MIN}
                 max={MAX_INTERVAL_MIN}
-                value={autoExport.intervalMin}
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (!Number.isNaN(n))
-                    setAutoExport({ ...autoExport, intervalMin: clampInterval(n) });
+                value={intervalDraft}
+                onChange={(e) => setIntervalDraft(e.target.value)}
+                onBlur={commitInterval}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitInterval();
+                    e.currentTarget.blur();
+                  }
                 }}
                 className="w-16 px-2 py-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-100"
               />
