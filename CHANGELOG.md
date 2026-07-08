@@ -11,6 +11,25 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Auto-export + "Save to Downloads"** — the export section can now write your usage straight to a **folder**
+  (default Downloads), and optionally **auto-export on a schedule** (CSV / JSON / both, every N minutes) while
+  the app is open — so an external dashboard or billing sheet stays current without clicking Export. Closes the
+  deferred v0.10.0 export item + `DEV_PLAN_2026-07-08_desktop_next_phase.md` §3 P1.5 (export half).
+  - **No new plugin/capability:** a small Rust `write_export_file` command reuses `dirs::download_dir()` +
+    `std::fs::write` (the diagnostic-bundle precedent) — no `tauri-plugin-fs`/`-dialog`. The target directory
+    is **fixed to Downloads** (deliberately not caller-chosen, so the IPC command can't be turned into a
+    write-anywhere primitive), and the filename is sanitized to a bare basename: split on **both** `/` and `\`
+    host-independently AND reject any remaining `:` — a bare Windows drive/ADS prefix like `C:evil.txt` carries
+    no separator yet `PathBuf::join` treats it as a prefix that discards the base dir on Windows, which would
+    escape Downloads (found by an adversarial review; unit-tested). The CSV shape is factored into one pure
+    `buildUsageCsv` helper in `src/lib/autoExport.ts` (reused by the download button + auto-export; the old
+    inline CSV builder is gone). Settings persist in `localStorage` and **default to disabled**, with a
+    tolerant loader (bad JSON / unknown format / out-of-range interval all fail safe to off). Auto-export uses
+    stable filenames (overwrites the latest, no file pile-up), reads the live scan via a ref so its timer
+    isn't reset by every scan, and swallows write failures. New `settings.export_*` / `auto_export_*` keys ×3
+    locales; `settings.auto_export_label` pinned in the critical-labels gate. 12 new Vitest cases + a Rust
+    `sanitize_export_name` test.
+
 - **Refresh-on-focus** — the local usage scan now re-runs when the app window regains focus, so switching back
   to CLI Pulse shows fresh usage immediately instead of waiting up to 2 minutes for the next background tick.
   Learned from CodexBar's window-focus dimension (`DEV_PLAN_2026-07-07_competitive_learnings.md` §3b B1, the

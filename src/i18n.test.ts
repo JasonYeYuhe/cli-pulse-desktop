@@ -78,6 +78,7 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.range_heading",
     "settings.updates_heading",
     "settings.export_heading",
+    "settings.auto_export_label",
     "settings.language_heading",
     // v0.4.20 — storage backend visibility line in Settings → Integrations.
     "settings.integrations.storage_label",

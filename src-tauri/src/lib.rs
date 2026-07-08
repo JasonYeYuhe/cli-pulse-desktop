@@ -419,6 +419,43 @@ fn save_diagnostic_bundle(
     diagnostic_bundle::create_bundle(extras).map_err(|e| e.to_string())
 }
 
+/// Sanitize a caller-supplied export filename to a bare basename — strips any
+/// directory components and rejects empty / `.` / `..`, so a returned name is
+/// always safe to `join` onto a trusted export directory (no path traversal).
+/// Splits on BOTH `/` and `\` regardless of host OS (a Windows/WSL-style path
+/// may arrive with backslashes even on a Unix build, where `Path::file_name`
+/// would not treat `\` as a separator), and rejects any remaining `:` — a bare
+/// Windows drive/ADS prefix like `C:evil.txt` carries no separator yet
+/// `PathBuf::join` on Windows treats it as a prefix and DISCARDS the base dir,
+/// which would escape the target folder. A valid export basename has none of
+/// these.
+fn sanitize_export_name(filename: &str) -> Option<String> {
+    let name = filename.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains(':') {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// v0.10.1 — write a usage export to the OS Downloads folder. `content` is
+/// produced on the frontend (CSV via `buildUsageCsv`, or pretty JSON); this
+/// only performs the file write. A plain Rust command — no fs/dialog plugin or
+/// extra capability needed. The target directory is fixed to Downloads (same as
+/// the diagnostic bundle) — deliberately NOT caller-chosen, so this can't be
+/// turned into a write-anywhere primitive via the IPC bridge — and the filename
+/// is sanitized to a basename so it can't escape it. Returns the written path.
+#[tauri::command]
+fn write_export_file(filename: String, content: String) -> Result<String, String> {
+    let name =
+        sanitize_export_name(&filename).ok_or_else(|| "invalid export filename".to_string())?;
+    let base =
+        dirs::download_dir().ok_or_else(|| "no Downloads directory available".to_string())?;
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    let path = base.join(&name);
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// v0.4.22 — fire a tagged test event into Sentry for ingestion
 /// verification. Lets the user (or the VM verifier) confirm the
 /// instrumentation chain (init → DSN → network → org-side intake) is
@@ -2982,6 +3019,8 @@ pub fn run() {
             smoke_mark_frontend_ready,
             smoke_is_active,
             scan_usage,
+            // v0.10.1 — write a usage export (CSV/JSON) to a folder
+            write_export_file,
             list_sessions,
             // System Monitor "Machine" tab (local CPU/mem + top-N processes)
             get_machine_snapshot,
@@ -3099,6 +3138,38 @@ mod tests {
     //! advances when all tasks block — no real wall-clock wait.
 
     use super::*;
+
+    #[test]
+    fn sanitize_export_name_strips_paths_and_rejects_traversal() {
+        assert_eq!(
+            sanitize_export_name("cli-pulse-usage.csv").as_deref(),
+            Some("cli-pulse-usage.csv")
+        );
+        // Directory components are stripped down to the basename.
+        assert_eq!(
+            sanitize_export_name("/etc/passwd").as_deref(),
+            Some("passwd")
+        );
+        assert_eq!(
+            sanitize_export_name(r"..\..\windows\system32\x.txt").as_deref(),
+            Some("x.txt")
+        );
+        assert_eq!(
+            sanitize_export_name("sub/dir/report.json").as_deref(),
+            Some("report.json")
+        );
+        // Empty / dot-only / whitespace names are rejected outright.
+        assert_eq!(sanitize_export_name(""), None);
+        assert_eq!(sanitize_export_name("   "), None);
+        assert_eq!(sanitize_export_name(".."), None);
+        assert_eq!(sanitize_export_name("."), None);
+        // A bare Windows drive/ADS prefix (no separator) must be rejected — it
+        // would otherwise survive the split and let PathBuf::join discard the
+        // Downloads base on Windows (escaping the target folder).
+        assert_eq!(sanitize_export_name("C:evil.txt"), None);
+        assert_eq!(sanitize_export_name("C:"), None);
+        assert_eq!(sanitize_export_name("report.csv:hidden"), None);
+    }
 
     #[test]
     fn adaptive_sync_interval_backs_off_on_battery() {

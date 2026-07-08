@@ -22,7 +22,6 @@ import {
   formatRelativeShortParts,
   isStaleProviderRow,
   lastNLocalDates,
-  rowsToCsv,
   secondsToShortParts,
 } from "./lib/format";
 import {
@@ -48,6 +47,17 @@ import {
   loadRangeDays,
   saveRangeDays,
 } from "./lib/dateRange";
+import {
+  loadAutoExport,
+  saveAutoExport,
+  buildUsageCsv,
+  EXPORT_FORMATS,
+  MIN_INTERVAL_MIN,
+  MAX_INTERVAL_MIN,
+  clampInterval,
+  type AutoExportSettings,
+  type ExportFormat,
+} from "./lib/autoExport";
 import {
   DEFAULT_WARN_THRESHOLDS,
   warningFractions,
@@ -97,6 +107,21 @@ const ScanRangeContext = createContext<ScanRangeCtx>({
 });
 function useScanRange(): ScanRangeCtx {
   return useContext(ScanRangeContext);
+}
+
+// Auto-export setting: periodically write the usage export (CSV/JSON) to a
+// folder while the app runs. Provided app-wide so the Settings selector edits it
+// and the App-level interval effect reads it. See lib/autoExport.ts.
+type AutoExportCtx = {
+  settings: AutoExportSettings;
+  setSettings: (s: AutoExportSettings) => void;
+};
+const AutoExportContext = createContext<AutoExportCtx>({
+  settings: { enabled: false, format: "csv", intervalMin: 30 },
+  setSettings: () => {},
+});
+function useAutoExport(): AutoExportCtx {
+  return useContext(AutoExportContext);
 }
 
 type DailyEntry = {
@@ -324,6 +349,14 @@ export default function App() {
     const d = clampDays(days);
     setRangeDays(d);
     saveRangeDays(d);
+  }, []);
+  // Auto-export (periodic write of the usage export to a folder). Lazy-init +
+  // write-through, like the other persisted settings.
+  const [autoExport, setAutoExportState] =
+    useState<AutoExportSettings>(loadAutoExport);
+  const changeAutoExport = useCallback((s: AutoExportSettings) => {
+    setAutoExportState(s);
+    saveAutoExport(s);
   }, []);
   // v0.10.0 — keyboard shortcut help overlay. Triggered by
   // Ctrl/Cmd + Shift + / (the ?-menu binding power users expect).
@@ -560,6 +593,58 @@ export default function App() {
     };
   }, [runScan]);
 
+  // Keep the latest scan in a ref so the auto-export interval can read it
+  // without re-subscribing (which would reset the timer) every time a scan
+  // completes.
+  const scanRef = useRef<ScanResult | null>(null);
+  useEffect(() => {
+    scanRef.current = scan;
+  }, [scan]);
+
+  // Auto-export: while enabled, periodically write the usage export to the
+  // Downloads folder so an external dashboard / billing sheet stays current
+  // without manual clicks. Opt-in (default off). Stable filenames (overwrite the
+  // latest) so it never accumulates hundreds of files. Runs only while the app
+  // is open; failures are swallowed (a missing folder / permission issue must
+  // not spam the UI). Re-subscribes only when the toggle/format/interval change,
+  // not on every scan (scan is read via scanRef).
+  useEffect(() => {
+    if (!autoExport.enabled) return;
+    let cancelled = false;
+    const doExport = async () => {
+      const current = scanRef.current;
+      if (cancelled || !current) return;
+      // Each write in its own try, so one file failing (e.g. transient
+      // permission blip) doesn't skip the other. Best-effort — logged, not
+      // surfaced (this is the background path).
+      if (autoExport.format === "csv" || autoExport.format === "both") {
+        try {
+          await invoke("write_export_file", {
+            filename: "cli-pulse-usage.csv",
+            content: buildUsageCsv(current.entries, CLAUDE_MSG_BUCKET),
+          });
+        } catch (e) {
+          console.warn("auto-export (csv) failed", e);
+        }
+      }
+      if (autoExport.format === "json" || autoExport.format === "both") {
+        try {
+          await invoke("write_export_file", {
+            filename: "cli-pulse-usage.json",
+            content: JSON.stringify(current, null, 2),
+          });
+        } catch (e) {
+          console.warn("auto-export (json) failed", e);
+        }
+      }
+    };
+    const id = setInterval(doExport, autoExport.intervalMin * 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [autoExport.enabled, autoExport.format, autoExport.intervalMin]);
+
   // v0.5.6 — push localized tray copy on initial mount AND every
   // language change. Isolated into its own useEffect (NOT bundled
   // with the main mount effect above) so changing language doesn't
@@ -756,6 +841,7 @@ export default function App() {
   return (
     <MoneyContext.Provider value={{ fmt, currency, setCurrency: changeCurrency }}>
     <ScanRangeContext.Provider value={{ days: rangeDays, setDays: changeRangeDays }}>
+    <AutoExportContext.Provider value={{ settings: autoExport, setSettings: changeAutoExport }}>
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
       <header className="border-b border-neutral-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -972,6 +1058,7 @@ export default function App() {
         <ShortcutHelpOverlay onClose={() => setShortcutHelpOpen(false)} />
       )}
     </div>
+    </AutoExportContext.Provider>
     </ScanRangeContext.Provider>
     </MoneyContext.Provider>
   );
@@ -4244,6 +4331,9 @@ function CurrencySection() {
 
 function ExportSection({ scan }: { scan: ScanResult | null }) {
   const { t } = useTranslation();
+  const { settings: autoExport, setSettings: setAutoExport } = useAutoExport();
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   function triggerDownload(content: string, filename: string, mime: string) {
     const blob = new Blob([content], { type: mime });
@@ -4259,29 +4349,48 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
 
   function exportCsv() {
     if (!scan) return;
-    const rows: (string | number | null)[][] = [
-      ["date", "provider", "model", "input_tokens", "cached_tokens", "output_tokens", "cost_usd", "message_count"],
-      ...scan.entries
-        .filter((e) => e.model !== CLAUDE_MSG_BUCKET)
-        .map((e): (string | number | null)[] => [
-          e.date,
-          e.provider,
-          e.model,
-          e.input_tokens,
-          e.cached_tokens,
-          e.output_tokens,
-          e.cost_usd == null ? "" : e.cost_usd.toFixed(6),
-          e.message_count,
-        ]),
-    ];
     const stamp = new Date().toISOString().slice(0, 10);
-    triggerDownload(rowsToCsv(rows), `cli-pulse-usage-${stamp}.csv`, "text/csv");
+    triggerDownload(
+      buildUsageCsv(scan.entries, CLAUDE_MSG_BUCKET),
+      `cli-pulse-usage-${stamp}.csv`,
+      "text/csv",
+    );
   }
 
   function exportJson() {
     if (!scan) return;
     const stamp = new Date().toISOString().slice(0, 10);
     triggerDownload(JSON.stringify(scan, null, 2), `cli-pulse-usage-${stamp}.json`, "application/json");
+  }
+
+  // Write straight to the Downloads folder via the Rust command, using the same
+  // format the auto-export uses — a manual trigger for the same path. Each file
+  // is written independently so a partial success is reported accurately: if any
+  // file was written we surface its path, and we only show an error when a write
+  // actually failed (a "both" run where CSV succeeds but JSON fails shows both).
+  async function saveToFolder() {
+    if (!scan) return;
+    setSaveFailed(false);
+    setSavedPath(null);
+    const targets: [string, string][] = [];
+    if (autoExport.format === "csv" || autoExport.format === "both") {
+      targets.push(["cli-pulse-usage.csv", buildUsageCsv(scan.entries, CLAUDE_MSG_BUCKET)]);
+    }
+    if (autoExport.format === "json" || autoExport.format === "both") {
+      targets.push(["cli-pulse-usage.json", JSON.stringify(scan, null, 2)]);
+    }
+    let last = "";
+    let failed = false;
+    for (const [filename, content] of targets) {
+      try {
+        last = await invoke<string>("write_export_file", { filename, content });
+      } catch (e) {
+        failed = true;
+        console.warn("export write failed", filename, e);
+      }
+    }
+    if (last) setSavedPath(last);
+    if (failed) setSaveFailed(true);
   }
 
   const days = scan?.days_scanned ?? 30;
@@ -4291,7 +4400,7 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
     <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
       <h2 className="text-sm font-semibold text-neutral-300">{t("settings.export_heading")}</h2>
       <p className="text-xs text-neutral-500">{t("settings.export_hint", { days })}</p>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={exportCsv}
           disabled={disabled}
@@ -4306,6 +4415,67 @@ function ExportSection({ scan }: { scan: ScanResult | null }) {
         >
           {t("settings.export_json")}
         </button>
+        <button
+          onClick={saveToFolder}
+          disabled={disabled}
+          className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm border border-neutral-700 disabled:opacity-50"
+        >
+          {t("settings.export_save_folder")}
+        </button>
+      </div>
+      {savedPath && (
+        <p className="text-[11px] text-emerald-400/90 break-all">
+          {t("settings.export_saved", { path: savedPath })}
+        </p>
+      )}
+      {saveFailed && (
+        <p className="text-[11px] text-amber-400/90">{t("settings.export_save_failed")}</p>
+      )}
+
+      {/* Auto-export: periodic write to a folder while the app runs. */}
+      <div className="pt-3 border-t border-neutral-800 space-y-2">
+        <label className="flex items-center gap-2 text-xs text-neutral-300">
+          <input
+            type="checkbox"
+            checked={autoExport.enabled}
+            onChange={(e) => setAutoExport({ ...autoExport, enabled: e.target.checked })}
+          />
+          <span>{t("settings.auto_export_label")}</span>
+        </label>
+        <p className="text-[11px] text-neutral-500">{t("settings.auto_export_hint")}</p>
+        {autoExport.enabled && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <select
+              value={autoExport.format}
+              onChange={(e) =>
+                setAutoExport({ ...autoExport, format: e.target.value as ExportFormat })
+              }
+              className="px-2 py-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-100"
+            >
+              {EXPORT_FORMATS.map((f) => (
+                <option key={f} value={f}>
+                  {t(`settings.export_fmt_${f}`)}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5">
+              <span className="text-neutral-500">{t("settings.auto_export_every")}</span>
+              <input
+                type="number"
+                min={MIN_INTERVAL_MIN}
+                max={MAX_INTERVAL_MIN}
+                value={autoExport.intervalMin}
+                onChange={(e) => {
+                  const n = Number.parseInt(e.target.value, 10);
+                  if (!Number.isNaN(n))
+                    setAutoExport({ ...autoExport, intervalMin: clampInterval(n) });
+                }}
+                className="w-16 px-2 py-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-100"
+              />
+              <span className="text-neutral-500">{t("settings.auto_export_minutes")}</span>
+            </label>
+          </div>
+        )}
       </div>
     </section>
   );
