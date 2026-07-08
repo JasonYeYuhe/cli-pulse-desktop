@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useTranslation } from "react-i18next";
@@ -525,6 +526,38 @@ export default function App() {
   // re-running the config/sessions/alerts refetch or the one-shot update check.
   useEffect(() => {
     runScan();
+  }, [runScan]);
+
+  // Refresh the local scan when the window regains focus, so switching back to
+  // the app shows fresh usage without waiting for the 2-min background tick.
+  // Throttled (30s) so rapid alt-tabbing doesn't spam re-scans, and it only
+  // rescans the cheap LOCAL logs (not a full server sync), so it doesn't fight
+  // the power-adaptive background cadence. Best-effort: if the window API is
+  // unavailable it's silently skipped. (Headless CI never fires focus, so this
+  // is inert there — but must not throw on mount.)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    let lastFocusScan = 0;
+    (async () => {
+      try {
+        const fn = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+          if (!focused) return;
+          const now = Date.now();
+          if (now - lastFocusScan < 30_000) return;
+          lastFocusScan = now;
+          runScan();
+        });
+        if (disposed) fn();
+        else unlisten = fn;
+      } catch (e) {
+        console.warn("focus-refresh unavailable", e);
+      }
+    })();
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
   }, [runScan]);
 
   // v0.5.6 — push localized tray copy on initial mount AND every

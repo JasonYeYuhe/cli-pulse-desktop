@@ -11,6 +11,14 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Refresh-on-focus** — the local usage scan now re-runs when the app window regains focus, so switching back
+  to CLI Pulse shows fresh usage immediately instead of waiting up to 2 minutes for the next background tick.
+  Learned from CodexBar's window-focus dimension (`DEV_PLAN_2026-07-07_competitive_learnings.md` §3b B1, the
+  deferred focus half). Throttled to once per 30 s so rapid alt-tabbing doesn't spam re-scans, and it only
+  rescans the cheap **local** logs (not a full server sync), so it doesn't fight the power-adaptive background
+  cadence. Uses Tauri's `onFocusChanged`; best-effort (silently skipped if unavailable) and inert under the
+  headless launch-smoke. Closes `DEV_PLAN_2026-07-08_desktop_next_phase.md` §3 P1.5 (focus half).
+
 - **Native-vs-WSL usage split on the Machine tab** — Windows developers often run Claude Code / Codex
   **inside a WSL distro**, whose logs we already scan via the `\\wsl.localhost\<distro>\` share and merge into
   the totals — but that merge was **silent**. The Machine tab now shows a **"Usage sources"** breakdown
