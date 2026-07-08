@@ -76,6 +76,7 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.sync_heading",
     "settings.currency_heading",
     "settings.range_heading",
+    "settings.window_heading",
     "settings.updates_heading",
     "settings.export_heading",
     "settings.auto_export_label",

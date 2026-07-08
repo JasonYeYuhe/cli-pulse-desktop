@@ -58,6 +58,7 @@ import {
   type AutoExportSettings,
   type ExportFormat,
 } from "./lib/autoExport";
+import { loadAlwaysOnTop, saveAlwaysOnTop } from "./lib/windowPrefs";
 import {
   DEFAULT_WARN_THRESHOLDS,
   warningFractions,
@@ -592,6 +593,16 @@ export default function App() {
       if (unlisten) unlisten();
     };
   }, [runScan]);
+
+  // Apply the persisted always-on-top window preference at startup (P2). Only
+  // acts when the pref is on — a false pref leaves the OS default untouched.
+  // Best-effort: silently skipped if the window API is unavailable (headless CI).
+  useEffect(() => {
+    if (!loadAlwaysOnTop()) return;
+    getCurrentWindow()
+      .setAlwaysOnTop(true)
+      .catch((e) => console.warn("always-on-top apply failed", e));
+  }, []);
 
   // Keep the latest scan in a ref so the auto-export interval can read it
   // without re-subscribing (which would reset the timer) every time a scan
@@ -3555,6 +3566,8 @@ function Settings({
 
       <CurrencySection />
 
+      <WindowSection />
+
       <ExportSection scan={scan} />
 
       <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-3">
@@ -4316,6 +4329,40 @@ function DateRangeSection() {
           <span className="text-neutral-500">{t("settings.range_custom_unit")}</span>
         </label>
       </div>
+    </section>
+  );
+}
+
+// Settings → Window. P2 appearance/window modes — currently just always-on-top
+// (keep the monitor visible over other windows). Self-contained: reads/writes
+// localStorage (lib/windowPrefs.ts) and applies via the Tauri window API; the
+// persisted value is (re)applied at app startup by an effect in App().
+function WindowSection() {
+  const { t } = useTranslation();
+  const [onTop, setOnTop] = useState<boolean>(loadAlwaysOnTop);
+  const toggle = async (value: boolean) => {
+    setOnTop(value);
+    saveAlwaysOnTop(value);
+    try {
+      await getCurrentWindow().setAlwaysOnTop(value);
+    } catch (e) {
+      console.warn("always-on-top toggle failed", e);
+    }
+  };
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-2">
+      <h2 className="text-sm font-semibold text-neutral-300">
+        {t("settings.window_heading")}
+      </h2>
+      <label className="flex items-center gap-2 text-xs text-neutral-300">
+        <input
+          type="checkbox"
+          checked={onTop}
+          onChange={(e) => toggle(e.target.checked)}
+        />
+        <span>{t("settings.always_on_top")}</span>
+      </label>
+      <p className="text-[11px] text-neutral-500">{t("settings.always_on_top_hint")}</p>
     </section>
   );
 }

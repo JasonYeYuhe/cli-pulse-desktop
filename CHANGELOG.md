@@ -11,6 +11,13 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Always-on-top window mode** — a new **Settings → Window** toggle floats CLI Pulse above other windows so
+  the monitor stays visible while you work (the plan's optional P2 window-modes item). Persisted in
+  `localStorage` (`src/lib/windowPrefs.ts`, unit-tested) and applied via Tauri's `setAlwaysOnTop`; the saved
+  preference is re-applied at app startup. Added the minimal `core:window:allow-set-always-on-top` capability;
+  best-effort (silently skipped if the window API is unavailable, e.g. headless CI). New `settings.window_*` /
+  `always_on_top*` keys ×3 locales; `settings.window_heading` pinned in the critical-labels gate.
+
 - **Auto-export + "Save to Downloads"** — the export section can now write your usage straight to a **folder**
   (default Downloads), and optionally **auto-export on a schedule** (CSV / JSON / both, every N minutes) while
   the app is open — so an external dashboard or billing sheet stays current without clicking Export. Closes the
