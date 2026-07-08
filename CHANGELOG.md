@@ -11,6 +11,23 @@ audit against the Mac app (v1.28).
 
 ### Added
 
+- **Date-range picker (7 / 30 / 90 / custom)** — the local usage scan window is no longer hard-wired to 30
+  days. A new **Settings → Date range** selector (one-tap 7/30/90 presets plus a custom 1–180 day field)
+  drives the whole local-scan surface — Overview tiles, the activity heat strip + streaks, the provider-usage
+  breakdown, the Providers-tab per-provider aggregation, the entries table, and the CSV/JSON export — because
+  they all key off `scan.days_scanned`. Closes the deferred v0.10.0 date-range item
+  (`DEV_PLAN_2026-07-08_desktop_next_phase.md` §3 P0.1).
+  - **Client-local, no schema change:** the choice persists in `localStorage` (`cli-pulse.date-range-days`),
+    mirroring the display-currency pattern. The pure window-math (`clampDays` / `isPreset` / load / save) lives
+    in `src/lib/dateRange.ts` (14 Vitest cases) and mirrors the backend's own `scan_usage(days).clamp(1, 180)`
+    so the two never disagree. Exposed app-wide via a small `ScanRangeContext`; `runScan` reads it and re-scans
+    on change from a dedicated effect (so a range flip does **not** re-run the config/sessions/alerts refetch or
+    the one-shot update check). New `settings.range_*` keys across all 3 locales, `settings.range_heading`
+    pinned in the critical-labels gate.
+  - **Scope note:** the fixed "Last 7 days" cost trend chart (7-day by design) and the paired, server-backed
+    30-day per-provider history sparkline (its own `get_daily_usage` window, server-clamped to 90) keep their
+    own windows — they're semantically distinct from the local-scan date range.
+
 - **Multi-currency cost display (USD / CNY / EUR / GBP / JPY)** — costs are computed and stored in **USD**
   everywhere, but you can now pick a **display currency** in Settings and every cost figure converts to it
   (Overview tiles, provider breakdown, forecast, top-projects, trend chart, model tables, entries table).

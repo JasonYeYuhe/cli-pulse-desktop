@@ -33,6 +33,15 @@ import { providerColor, providerMonogram } from "./lib/providerTheme";
 import { activityLevel, buildActivity, cacheHitRate, computeStreaks } from "./lib/activity";
 import { CURRENCIES, formatMoney, loadCurrency, saveCurrency, type FxRates } from "./lib/money";
 import {
+  RANGE_PRESETS,
+  MIN_DAYS,
+  MAX_DAYS,
+  clampDays,
+  isPreset,
+  loadRangeDays,
+  saveRangeDays,
+} from "./lib/dateRange";
+import {
   DEFAULT_WARN_THRESHOLDS,
   warningFractions,
   placeOnRemainingBar,
@@ -60,6 +69,21 @@ function useMoney(): (usd: number) => string {
 function useCurrencySetting(): { currency: string; setCurrency: (code: string) => void } {
   const { currency, setCurrency } = useContext(MoneyContext);
   return { currency, setCurrency };
+}
+
+// Scan-window ("date range") setting: the number of days the local usage scan
+// looks back. Persisted in localStorage (see lib/dateRange.ts) and provided
+// app-wide so the Settings selector can change it and `runScan` reads it. The
+// window drives every local-scan surface (Overview tiles, activity heat strip,
+// provider breakdown, entries table, export) because they all key off
+// `scan.days_scanned`. Defaults to 30 for consumers outside the provider.
+type ScanRangeCtx = { days: number; setDays: (days: number) => void };
+const ScanRangeContext = createContext<ScanRangeCtx>({
+  days: 30,
+  setDays: () => {},
+});
+function useScanRange(): ScanRangeCtx {
+  return useContext(ScanRangeContext);
 }
 
 type DailyEntry = {
@@ -270,6 +294,16 @@ export default function App() {
     setCurrency(code);
     saveCurrency(code);
   }
+  // Scan-window ("date range") — how many days back the local scan reaches.
+  // Lazy-init from localStorage; write-through on change (clamped to the same
+  // 1..180 the backend accepts). `runScan` depends on this, so changing it
+  // re-scans and every `scan.days_scanned`-keyed surface updates.
+  const [rangeDays, setRangeDays] = useState<number>(loadRangeDays);
+  const changeRangeDays = useCallback((days: number) => {
+    const d = clampDays(days);
+    setRangeDays(d);
+    saveRangeDays(d);
+  }, []);
   // v0.10.0 — keyboard shortcut help overlay. Triggered by
   // Ctrl/Cmd + Shift + / (the ?-menu binding power users expect).
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -362,14 +396,14 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<ScanResult>("scan_usage", { days: 30 });
+      const result = await invoke<ScanResult>("scan_usage", { days: rangeDays });
       setScan(result);
     } catch (e: any) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rangeDays]);
 
   const refreshSessions = useCallback(async () => {
     setSessionsLoading(true);
@@ -440,7 +474,6 @@ export default function App() {
 
   useEffect(() => {
     refreshConfig();
-    runScan();
     refreshSessions();
     refreshAlerts();
 
@@ -464,7 +497,15 @@ export default function App() {
         console.warn("update check failed:", e);
       }
     })();
-  }, [refreshConfig, runScan, refreshSessions, refreshAlerts]);
+  }, [refreshConfig, refreshSessions, refreshAlerts]);
+
+  // Local usage scan — its own effect so it fires on mount AND whenever the
+  // date-range setting changes (runScan depends on rangeDays). Kept separate
+  // from the mount effect above so a date-range flip re-scans WITHOUT also
+  // re-running the config/sessions/alerts refetch or the one-shot update check.
+  useEffect(() => {
+    runScan();
+  }, [runScan]);
 
   // v0.5.6 — push localized tray copy on initial mount AND every
   // language change. Isolated into its own useEffect (NOT bundled
@@ -661,6 +702,7 @@ export default function App() {
 
   return (
     <MoneyContext.Provider value={{ fmt, currency, setCurrency: changeCurrency }}>
+    <ScanRangeContext.Provider value={{ days: rangeDays, setDays: changeRangeDays }}>
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
       <header className="border-b border-neutral-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -873,6 +915,7 @@ export default function App() {
         <ShortcutHelpOverlay onClose={() => setShortcutHelpOpen(false)} />
       )}
     </div>
+    </ScanRangeContext.Provider>
     </MoneyContext.Provider>
   );
 }
@@ -3277,6 +3320,8 @@ function Settings({
         </section>
       )}
 
+      <DateRangeSection />
+
       <CurrencySection />
 
       <ExportSection scan={scan} />
@@ -3964,6 +4009,67 @@ function IntegrationsSection() {
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+// Settings → Date range. Chooses how many days back the LOCAL usage scan
+// reaches; drives every `scan.days_scanned`-keyed surface (Overview tiles,
+// activity heat strip, provider breakdown, entries table, export). Persisted in
+// localStorage (lib/dateRange.ts); the backend clamps to 1..180 as well.
+function DateRangeSection() {
+  const { t } = useTranslation();
+  const { days, setDays } = useScanRange();
+  const custom = !isPreset(days);
+  return (
+    <section className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40 space-y-2">
+      <h2 className="text-sm font-semibold text-neutral-300">
+        {t("settings.range_heading")}
+      </h2>
+      <p className="text-xs text-neutral-500">{t("settings.range_hint")}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {RANGE_PRESETS.map((preset) => {
+          const active = days === preset;
+          return (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => setDays(preset)}
+              className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+                active
+                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                  : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:border-neutral-600"
+              }`}
+            >
+              {t("settings.range_option", { days: preset })}
+            </button>
+          );
+        })}
+        <label
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border ${
+            custom
+              ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+              : "border-neutral-700 bg-neutral-800 text-neutral-400"
+          }`}
+        >
+          <span>{t("settings.range_custom")}</span>
+          <input
+            type="number"
+            min={MIN_DAYS}
+            max={MAX_DAYS}
+            value={custom ? days : ""}
+            placeholder="…"
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              // Ignore an empty / non-numeric field (keep the last value)
+              // rather than snapping to a clamped default mid-edit.
+              if (!Number.isNaN(n)) setDays(n);
+            }}
+            className="w-14 bg-transparent border-0 border-b border-neutral-600 px-1 py-0 text-sm text-neutral-100 focus:outline-none focus:border-emerald-500"
+          />
+          <span className="text-neutral-500">{t("settings.range_custom_unit")}</span>
+        </label>
+      </div>
     </section>
   );
 }
