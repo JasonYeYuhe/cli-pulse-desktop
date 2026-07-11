@@ -302,6 +302,26 @@ fn scan_usage(days: Option<u32>) -> Result<ScanResult, String> {
     scanner::scan(days).map_err(|e| e.to_string())
 }
 
+/// Compare-mode baseline scan (v0.10.2). Returns a `ScanResult` spanning a
+/// fixed, wide 180-day window (the picker maximum, `2 × 90`) so the frontend can
+/// bucket its per-day `entries` into "current N days" vs "previous N days" and
+/// render period-over-period deltas. Uses a SEPARATE cache namespace
+/// (`cache::compare_cache_dir`) so it stays incrementally warm at full width
+/// instead of being pruned down to the main scan's narrower window — which would
+/// under-report the previous period (see `cache::compare_cache_dir`). The window
+/// is always the same 180 days regardless of the selected range, so changing the
+/// range never widens (and thus never prunes-then-under-reports) this cache; the
+/// frontend re-slices client-side. Only invoked while compare mode is enabled.
+#[tauri::command]
+fn scan_usage_baseline() -> Result<ScanResult, String> {
+    scanner::scan_with_options(scanner::ScanOptions {
+        days: 180,
+        cache_dir: cache::compare_cache_dir(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn list_sessions() -> Result<sessions::SessionsSnapshot, String> {
     async_runtime::spawn_blocking(sessions::collect_sessions)
@@ -3019,6 +3039,8 @@ pub fn run() {
             smoke_mark_frontend_ready,
             smoke_is_active,
             scan_usage,
+            // v0.10.2 — wide baseline scan for compare mode (period-over-period)
+            scan_usage_baseline,
             // v0.10.1 — write a usage export (CSV/JSON) to a folder
             write_export_file,
             list_sessions,

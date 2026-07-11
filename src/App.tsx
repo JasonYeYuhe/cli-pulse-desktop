@@ -48,6 +48,14 @@ import {
   saveRangeDays,
 } from "./lib/dateRange";
 import {
+  comparePeriods,
+  comparePeriodsByProvider,
+  compareAvailable,
+  computeDelta,
+  formatDeltaPercent,
+} from "./lib/compare";
+import { loadCompareMode, saveCompareMode } from "./lib/comparePrefs";
+import {
   loadAutoExport,
   saveAutoExport,
   buildUsageCsv,
@@ -101,10 +109,20 @@ function useCurrencySetting(): { currency: string; setCurrency: (code: string) =
 // window drives every local-scan surface (Overview tiles, activity heat strip,
 // provider breakdown, entries table, export) because they all key off
 // `scan.days_scanned`. Defaults to 30 for consumers outside the provider.
-type ScanRangeCtx = { days: number; setDays: (days: number) => void };
+type ScanRangeCtx = {
+  days: number;
+  setDays: (days: number) => void;
+  // v0.10.2 — compare mode ("period-over-period"). The DateRangeSection toggles
+  // it (co-located with the window it compares); Overview/Providers read it via
+  // props (they also need the baseline scan, which is App state, not context).
+  compare: boolean;
+  setCompare: (v: boolean) => void;
+};
 const ScanRangeContext = createContext<ScanRangeCtx>({
   days: 30,
   setDays: () => {},
+  compare: false,
+  setCompare: () => {},
 });
 function useScanRange(): ScanRangeCtx {
   return useContext(ScanRangeContext);
@@ -351,6 +369,19 @@ export default function App() {
     setRangeDays(d);
     saveRangeDays(d);
   }, []);
+  // v0.10.2 — compare mode. When on, a wide baseline scan (scan_usage_baseline,
+  // a fixed 180-day window in its own cache) is fetched and sliced into current-
+  // vs-previous N-day windows to render ▲/▼ deltas on Overview + Providers.
+  // Persisted like the other settings; defaults off.
+  const [compareMode, setCompareModeState] = useState<boolean>(loadCompareMode);
+  const changeCompareMode = useCallback((v: boolean) => {
+    setCompareModeState(v);
+    saveCompareMode(v);
+  }, []);
+  const [baselineScan, setBaselineScan] = useState<ScanResult | null>(null);
+  // Single-flight guard for the baseline scan: never run two at once (they'd
+  // race on one cache tmp path), and coalesce rapid scan-refresh triggers.
+  const baselineFetching = useRef(false);
   // Auto-export (periodic write of the usage export to a folder). Lazy-init +
   // write-through, like the other persisted settings.
   const [autoExport, setAutoExportState] =
@@ -459,6 +490,46 @@ export default function App() {
       setLoading(false);
     }
   }, [rangeDays]);
+
+  // v0.10.2 — fetch the wide baseline scan for compare mode and keep it in step
+  // with the main scan (refetch whenever `scan` refreshes) so the ▲/▼ deltas
+  // track rescans. Cleared when compare is off. Best-effort: a failure just
+  // hides the badges (compareData falls back to null). The baseline uses its own
+  // cache namespace, so it never fights the main scan's window pruning.
+  // Eligible = compare on AND the range narrow enough for an equal prior window
+  // (≤90d). Keyed on the boolean (not raw rangeDays) so switching between two
+  // comparable presets — e.g. 7d↔30d — doesn't refetch: the baseline is a fixed
+  // 180-day window re-sliced client-side by windowDays regardless of the range.
+  const compareEligible = compareMode && compareAvailable(rangeDays);
+  useEffect(() => {
+    if (!compareEligible) {
+      setBaselineScan(null);
+      return;
+    }
+    // Coalesce: if a baseline scan is already in flight (e.g. a focus-refresh
+    // minted a new `scan` mid-scan), skip — the in-flight result is fresh enough
+    // and the next refresh re-syncs. Also guarantees no two baseline scans run
+    // concurrently (they'd race on the compare cache's tmp path).
+    if (baselineFetching.current) return;
+    baselineFetching.current = true;
+    let cancelled = false;
+    invoke<ScanResult>("scan_usage_baseline")
+      .then((r) => {
+        if (!cancelled) setBaselineScan(r);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.warn("scan_usage_baseline failed", e);
+          setBaselineScan(null);
+        }
+      })
+      .finally(() => {
+        baselineFetching.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [compareEligible, scan]);
 
   const refreshSessions = useCallback(async () => {
     setSessionsLoading(true);
@@ -851,7 +922,14 @@ export default function App() {
 
   return (
     <MoneyContext.Provider value={{ fmt, currency, setCurrency: changeCurrency }}>
-    <ScanRangeContext.Provider value={{ days: rangeDays, setDays: changeRangeDays }}>
+    <ScanRangeContext.Provider
+      value={{
+        days: rangeDays,
+        setDays: changeRangeDays,
+        compare: compareMode,
+        setCompare: changeCompareMode,
+      }}
+    >
     <AutoExportContext.Provider value={{ settings: autoExport, setSettings: changeAutoExport }}>
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
       <header className="border-b border-neutral-800 px-6 py-3 flex items-center justify-between">
@@ -988,8 +1066,23 @@ export default function App() {
             {error}
           </div>
         )}
-        {tab === "overview" && <Overview scan={scan} loading={loading} paired={!!config?.paired} />}
-        {tab === "providers" && <Providers scan={scan} paired={!!config?.paired} />}
+        {tab === "overview" && (
+          <Overview
+            scan={scan}
+            loading={loading}
+            paired={!!config?.paired}
+            compare={compareMode && compareAvailable(rangeDays) ? baselineScan : null}
+            windowDays={rangeDays}
+          />
+        )}
+        {tab === "providers" && (
+          <Providers
+            scan={scan}
+            paired={!!config?.paired}
+            compare={compareMode && compareAvailable(rangeDays) ? baselineScan : null}
+            windowDays={rangeDays}
+          />
+        )}
         {tab === "sessions" && (
           <Sessions
             snapshot={sessions}
@@ -1361,10 +1454,16 @@ function Overview({
   scan,
   loading,
   paired,
+  compare,
+  windowDays,
 }: {
   scan: ScanResult | null;
   loading: boolean;
   paired: boolean;
+  // v0.10.2 — compare mode: the wide baseline scan when compare is on (else
+  // null), plus the current window length to slice it into current-vs-previous.
+  compare: ScanResult | null;
+  windowDays: number;
 }) {
   // v0.5.3 — `alerts` prop removed. RiskSignalsCard now fetches its
   // own data via `get_server_alerts`. The Alerts tab still uses
@@ -1372,6 +1471,27 @@ function Overview({
   // 30 s polling on tab focus), but Overview no longer needs it.
   const { t } = useTranslation();
   const fmt = useMoney();
+  // v0.10.2 — whole-account cost for the current vs previous window (for the
+  // "last N days cost" tile badge). Null when compare mode is off.
+  const costCompare = useMemo(() => {
+    if (!compare) return null;
+    const { current, previous } = comparePeriods(compare.entries, {
+      todayKey: compare.today_key,
+      windowDays,
+      msgBucket: CLAUDE_MSG_BUCKET,
+    });
+    return { current: current.cost, previous: previous.cost };
+  }, [compare, windowDays]);
+  // v0.10.2 — per-provider current-vs-previous I/O tokens, for the "Provider
+  // usage" bar badges. Null when compare mode is off.
+  const providerCompare = useMemo(() => {
+    if (!compare) return null;
+    return comparePeriodsByProvider(compare.entries, {
+      todayKey: compare.today_key,
+      windowDays,
+      msgBucket: CLAUDE_MSG_BUCKET,
+    });
+  }, [compare, windowDays]);
   const today = useMemo(() => {
     if (!scan) return null;
     const todays = scan.entries.filter((e) => e.date === scan.today_key);
@@ -1501,6 +1621,15 @@ function Overview({
             label={t("overview.last_n_days_cost", { days: scan.days_scanned })}
             value={fmt(scan.total_cost_usd)}
             hint={t("overview.files_scanned_hint", { n: scan.files_scanned })}
+            delta={
+              costCompare ? (
+                <CompareBadge
+                  current={costCompare.current}
+                  previous={costCompare.previous}
+                  days={windowDays}
+                />
+              ) : undefined
+            }
           />
         </div>
       </section>
@@ -1524,6 +1653,7 @@ function Overview({
               return byProvider.map((p) => {
                 const color = providerColor(p.provider);
                 const pct = (p.tokens / maxTokens) * 100;
+                const cmp = providerCompare?.get(p.provider);
                 return (
                   <div key={p.provider} className="flex items-center gap-3">
                     <span
@@ -1558,6 +1688,18 @@ function Overview({
                     </span>
                     <span className="text-xs font-mono text-neutral-300 w-16 text-right shrink-0">
                       {fmt(p.cost)}
+                    </span>
+                    {/* v0.10.2 — I/O-token change vs the previous window. Fixed-
+                        width slot so rows stay aligned whether or not a badge
+                        renders. */}
+                    <span className="w-12 text-right shrink-0">
+                      {cmp ? (
+                        <CompareBadge
+                          current={cmp.current.tokens}
+                          previous={cmp.previous.tokens}
+                          days={windowDays}
+                        />
+                      ) : null}
                     </span>
                   </div>
                 );
@@ -2387,7 +2529,19 @@ function serviceStatusColor(indicator: ServiceStatusRow["indicator"]): string | 
   }
 }
 
-function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean }) {
+function Providers({
+  scan,
+  paired,
+  compare,
+  windowDays,
+}: {
+  scan: ScanResult | null;
+  paired: boolean;
+  // v0.10.2 — compare mode: the wide baseline scan when compare is on (else
+  // null) + the current window length, for per-provider ▲/▼ deltas.
+  compare: ScanResult | null;
+  windowDays: number;
+}) {
   const { t } = useTranslation();
   const fmt = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -2684,6 +2838,17 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
     });
   }, [scan, serverRows]);
 
+  // v0.10.2 — per-provider current-vs-previous totals for the compare badges.
+  // Null when compare mode is off. Keyed by provider name (matches ProviderAgg).
+  const compareByProvider = useMemo(() => {
+    if (!compare) return null;
+    return comparePeriodsByProvider(compare.entries, {
+      todayKey: compare.today_key,
+      windowDays,
+      msgBucket: CLAUDE_MSG_BUCKET,
+    });
+  }, [compare, windowDays]);
+
   if (!grouped) return null;
 
   function toggle(provider: string) {
@@ -2787,6 +2952,7 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
           .slice(0, 10);
         const srv = serverByProvider.get(v.provider);
         const color = providerColor(v.provider);
+        const cmp = compareByProvider?.get(v.provider);
         return (
           <div
             key={v.provider}
@@ -2951,9 +3117,25 @@ function Providers({ scan, paired }: { scan: ScanResult | null; paired: boolean 
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-mono text-lg">{fmt(v.cost)}</div>
-                <div className="text-xs text-neutral-500">
+                <div className="font-mono text-lg flex items-center justify-end gap-1.5">
+                  {fmt(v.cost)}
+                  {cmp && (
+                    <CompareBadge
+                      current={cmp.current.cost}
+                      previous={cmp.previous.cost}
+                      days={windowDays}
+                    />
+                  )}
+                </div>
+                <div className="text-xs text-neutral-500 flex items-center justify-end gap-1.5">
                   {t("providers.io_tokens", { value: formatInt(v.input + v.output) })}
+                  {cmp && (
+                    <CompareBadge
+                      current={cmp.current.tokens}
+                      previous={cmp.previous.tokens}
+                      days={windowDays}
+                    />
+                  )}
                 </div>
               </div>
             </button>
@@ -4263,8 +4445,11 @@ function IntegrationsSection() {
 // localStorage (lib/dateRange.ts); the backend clamps to 1..180 as well.
 function DateRangeSection() {
   const { t } = useTranslation();
-  const { days, setDays } = useScanRange();
+  const { days, setDays, compare, setCompare } = useScanRange();
   const custom = !isPreset(days);
+  // v0.10.2 — compare mode needs an equal previous window within the scanner's
+  // 180-day cap, so it's only offered for ranges ≤ 90 days.
+  const canCompare = compareAvailable(days);
   // Buffer the custom-day field in local text state and commit only on blur /
   // Enter — so typing "70" doesn't fire a rescan per keystroke, and an
   // intermediate value that happens to equal a preset (e.g. "7") doesn't blank
@@ -4329,6 +4514,23 @@ function DateRangeSection() {
           <span className="text-neutral-500">{t("settings.range_custom_unit")}</span>
         </label>
       </div>
+      {/* v0.10.2 — compare-to-previous-period toggle, co-located with the window
+          it compares. Disabled (and force-unchecked in the UI) for ranges the
+          180-day scan can't give an equal prior window for. */}
+      <label className="flex items-center gap-2 text-xs text-neutral-300 pt-1">
+        <input
+          type="checkbox"
+          checked={compare && canCompare}
+          disabled={!canCompare}
+          onChange={(e) => setCompare(e.target.checked)}
+        />
+        <span className={canCompare ? "" : "text-neutral-500"}>
+          {t("settings.compare_label")}
+        </span>
+      </label>
+      <p className="text-[11px] text-neutral-500">
+        {canCompare ? t("settings.compare_hint") : t("settings.compare_unavailable")}
+      </p>
     </section>
   );
 }
@@ -8000,13 +8202,66 @@ function EntriesTable({ entries }: { entries: DailyEntry[] }) {
   );
 }
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function StatCard({
+  label,
+  value,
+  hint,
+  delta,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  // v0.10.2 — optional period-over-period badge shown beside the value.
+  delta?: React.ReactNode;
+}) {
   return (
     <div className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/40">
       <div className="text-xs text-neutral-500 mb-1">{label}</div>
-      <div className="text-2xl font-mono">{value}</div>
+      <div className="flex items-baseline gap-2">
+        <div className="text-2xl font-mono">{value}</div>
+        {delta}
+      </div>
       {hint && <div className="text-xs text-neutral-600 mt-1">{hint}</div>}
     </div>
+  );
+}
+
+// v0.10.2 — compact period-over-period delta badge for compare mode. Renders
+// nothing when there was no usage in either window (so a quiet metric stays
+// clean). Semantics for a spend/usage monitor: up (more) = amber, down (less) =
+// emerald, brand-new activity (no prior baseline) = sky, exactly flat = muted.
+function CompareBadge({
+  current,
+  previous,
+  days,
+}: {
+  current: number;
+  previous: number;
+  days: number;
+}) {
+  const { t } = useTranslation();
+  if (current === 0 && previous === 0) return null;
+  const delta = computeDelta(current, previous);
+  const pct = formatDeltaPercent(delta);
+  const color = delta.isNew
+    ? "text-sky-400"
+    : delta.direction === "up"
+      ? "text-amber-400"
+      : delta.direction === "down"
+        ? "text-emerald-400"
+        : "text-neutral-500";
+  const label = delta.isNew
+    ? t("compare.badge_new")
+    : delta.direction === "flat"
+      ? "0%"
+      : `${delta.direction === "up" ? "▲" : "▼"} ${pct}`;
+  return (
+    <span
+      className={`text-[10px] font-medium tabular-nums whitespace-nowrap ${color}`}
+      title={t("compare.badge_tooltip", { days })}
+    >
+      {label}
+    </span>
   );
 }
 

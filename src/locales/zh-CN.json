@@ -268,6 +268,9 @@
     "range_option": "近 {{days}} 天",
     "range_custom": "自定义",
     "range_custom_unit": "天",
+    "compare_label": "与上一周期对比",
+    "compare_hint": "在概览和提供商中显示相对于前一个等长周期的 ▲/▼ 变化。",
+    "compare_unavailable": "对比功能适用于 90 天以内的范围。",
     "window_heading": "窗口",
     "always_on_top": "窗口始终置顶",
     "always_on_top_hint": "让 CLI Pulse 浮于其他窗口之上,工作时保持可见。",
@@ -428,6 +431,10 @@
       "delete_phrase": "删除",
       "action_failed": "操作失败:{{err}}"
     }
+  },
+  "compare": {
+    "badge_new": "新增",
+    "badge_tooltip": "与前一等长周期对比（{{days}} 天）"
   },
   "updater": {
     "up_to_date": "已是最新版本。",

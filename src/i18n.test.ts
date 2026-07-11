@@ -76,6 +76,14 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "settings.sync_heading",
     "settings.currency_heading",
     "settings.range_heading",
+    // v0.10.2 — compare-mode toggle (Settings → Date range) + delta badge.
+    // A missing label would render a blank toggle / hint or a badge whose
+    // tooltip reads as the raw key. Pin all keys in all 3 languages.
+    "settings.compare_label",
+    "settings.compare_hint",
+    "settings.compare_unavailable",
+    "compare.badge_new",
+    "compare.badge_tooltip",
     "settings.window_heading",
     "settings.updates_heading",
     "settings.export_heading",

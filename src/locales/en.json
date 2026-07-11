@@ -274,6 +274,9 @@
     "range_option": "Last {{days}}d",
     "range_custom": "Custom",
     "range_custom_unit": "days",
+    "compare_label": "Compare to previous period",
+    "compare_hint": "Show ▲/▼ change vs the equal preceding period on Overview and Providers.",
+    "compare_unavailable": "Compare is available for ranges up to 90 days.",
     "window_heading": "Window",
     "always_on_top": "Keep window always on top",
     "always_on_top_hint": "Float CLI Pulse above other windows so it stays visible while you work.",
@@ -434,6 +437,10 @@
       "delete_phrase": "DELETE",
       "action_failed": "Operation failed: {{err}}"
     }
+  },
+  "compare": {
+    "badge_new": "new",
+    "badge_tooltip": "vs the previous period ({{days}}d)"
   },
   "updater": {
     "up_to_date": "You're on the latest version.",

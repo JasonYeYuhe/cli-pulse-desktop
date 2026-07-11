@@ -102,6 +102,20 @@ pub fn cache_path(provider: &str, override_dir: Option<&Path>) -> Option<PathBuf
     cache_root(override_dir).map(|d| d.join(format!("{}-v{}.json", provider, CACHE_SCHEMA_VERSION)))
 }
 
+/// Cache directory for the compare-mode **baseline** scan (v0.10.2). Compare
+/// mode needs a wide, fixed window (up to 180 days) so the frontend can slice
+/// "current N days" vs "previous N days". But the main scan prunes its cache to
+/// the currently-selected window on every run (`prune_days`), and unchanged
+/// files are skipped without re-parsing — so a baseline scan *sharing* the main
+/// cache would find the older days already pruned away and silently under-report
+/// the previous period. Giving the baseline its own namespace keeps it a stable,
+/// always-wide, incrementally-warmed cache that never fights the main scan's
+/// pruning. Returns `None` only when no OS cache dir is available (the scan then
+/// runs uncached but still correct).
+pub fn compare_cache_dir() -> Option<PathBuf> {
+    cache_root(None).map(|d| d.join("compare"))
+}
+
 pub fn load(provider: &str, override_dir: Option<&Path>) -> CostUsageCache {
     let path = match cache_path(provider, override_dir) {
         Some(p) => p,
@@ -469,5 +483,28 @@ mod tests {
         prune_days(&mut cache, "2026-04-01", "2026-04-30");
         assert_eq!(cache.days.len(), 1);
         assert!(cache.days.contains_key("2026-04-24"));
+    }
+
+    #[test]
+    fn compare_cache_dir_is_namespaced_beside_main_cache() {
+        // Skip when the OS provides no cache dir (compare_cache_dir → None, and
+        // the scan just runs uncached). Always Some on CI runners.
+        if let (Some(dir), Some(main)) = (compare_cache_dir(), cache_path("codex", None)) {
+            // The baseline lives in its own "compare" subfolder so it never
+            // shares — and never gets pruned by — the main scan's cache.
+            assert!(
+                dir.ends_with("compare"),
+                "expected .../compare, got {dir:?}"
+            );
+            // ...but under the SAME cost-usage root as the main provider caches
+            // (dir is `<root>/compare`, main is `<root>/codex-vN.json`).
+            assert_eq!(
+                dir.parent(),
+                main.parent(),
+                "compare dir must sit beside the main provider caches"
+            );
+            // And it must NOT collide with a real provider cache file.
+            assert_ne!(dir, main);
+        }
     }
 }
