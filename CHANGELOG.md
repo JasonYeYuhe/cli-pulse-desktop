@@ -4,6 +4,33 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-07-11
+
+**Compare mode (period-over-period).** Closes the last deferred v0.10.0 item. A new **Settings → Date range**
+toggle, *"Compare to previous period,"* adds a compact **▲/▼ N% vs prev** badge next to the window-level
+figures on **Overview** (the *Last N-days cost* tile + each provider-usage bar) and **Providers** (each
+provider's cost and I/O tokens). It compares the current N-day window against the equal-length window
+immediately before it (e.g. the last 30 days vs the 30 days before). Up (more spend/usage) reads amber, down
+reads emerald, brand-new activity reads "new," and a zero previous window never renders `+Infinity%`.
+
+### Added
+
+- **Compare-to-previous-period toggle + delta badges.** The window math lives in a pure, unit-tested
+  `src/lib/compare.ts` (21 Vitest cases): it slices per-day scan entries into current vs previous windows and
+  computes safe signed-percent deltas. It is **timezone-safe** — every boundary is a local `YYYY-MM-DD`
+  day-key shifted via UTC-noon arithmetic, so no host clock or DST transition can move a day (tests inject
+  `todayKey`). The toggle is persisted in `localStorage` (`src/lib/comparePrefs.ts`, unit-tested) and defaults
+  **off**. Compare is offered only for ranges **≤ 90 days** (a wider range can't get an equal prior window
+  inside the scanner's 180-day cap); the toggle disables itself with an explanatory hint beyond that.
+  - **Correct previous period without fighting the main scan's cache.** The main `scan_usage(days)` prunes its
+    cache to the selected window on every run and skips unchanged files, so naively widening the window on a
+    warm cache under-reports the older half. Compare mode instead uses a new **`scan_usage_baseline`** command
+    that scans a fixed **180-day** window into its **own cache namespace** (`cost-usage/compare`), so it stays
+    incrementally warm at full width and never gets pruned narrow — the previous period is always complete. It
+    runs only while compare is enabled and re-slices client-side as the range changes. No shared-schema or
+    server change. New `settings.compare_*` (×3) + `compare.badge_*` (×2) keys across all 3 locales;
+    `settings.compare_label` / `compare.badge_new` / `compare.badge_tooltip` pinned in the critical-labels gate.
+
 ## [0.10.1] — 2026-07-09
 
 **Parity-closeout sprint.** Two threads: the deferred v0.10.0 items (per-provider visibility, **date-range
