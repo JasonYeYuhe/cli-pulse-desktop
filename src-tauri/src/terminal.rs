@@ -147,14 +147,20 @@ impl LocalTerminalManager {
         Ok(StartInfo { id, pid })
     }
 
-    /// Close (and thus kill) a local terminal. Idempotent — closing an
-    /// unknown id is `Ok`. Removing the id drops the last `SessionHandle`
-    /// clone, which runs `HandleInner::Drop` → reader-stop + child kill +
-    /// (Windows) Job Object `KILL_ON_JOB_CLOSE`.
+    /// Close (and kill) a local terminal. Idempotent — closing an unknown
+    /// id is `Ok`.
+    ///
+    /// Teardown ACTIVELY kills the child via `terminate` rather than relying
+    /// on `HandleInner::Drop` alone. Drop fires only at the *last*
+    /// `Arc<HandleInner>` clone, and an in-flight blocking `terminal_write`
+    /// (on the spawn_blocking pool) holds a clone: if that write is parked on
+    /// a full stdin pipe, Drop-only teardown would never run — the child +
+    /// reader thread would leak and the write would never unblock (the child
+    /// is never killed, so it never drains). `terminate` locks the `child`
+    /// mutex (a DIFFERENT mutex than the write's `writer`, so it can't be
+    /// blocked by that write); killing the child closes the slave PTY, which
+    /// unblocks the write (EIO → returns 0 → its Arc drops → Drop completes).
     pub fn close(&self, id: &str) -> Result<(), TerminalError> {
-        // Remove under the lock, then RELEASE the lock before letting the
-        // handle drop — so the teardown (child kill + Job Object close in
-        // HandleInner::Drop) never runs while holding the registry lock.
         let removed = {
             let mut sessions = self
                 .sessions
@@ -162,6 +168,11 @@ impl LocalTerminalManager {
                 .map_err(|_| TerminalError::Internal("sessions mutex poisoned".to_string()))?;
             sessions.remove(id)
         };
+        // Kill outside the registry lock (terminate locks only the per-handle
+        // `child` mutex). Best-effort: a dead child is a no-op.
+        if let Some(session) = &removed {
+            let _ = self.transport.terminate(&session.handle);
+        }
         drop(removed);
         Ok(())
     }
@@ -195,6 +206,53 @@ impl LocalTerminalManager {
             running: exit.is_none(),
             exit_code: exit,
         })
+    }
+
+    /// Clone the cheap Arc handle for `id`, RELEASING the registry lock
+    /// before the caller touches the transport — the per-frame read/write
+    /// path must never hold the lock across a transport call.
+    fn handle_of(&self, id: &str) -> Result<SessionHandle, TerminalError> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| TerminalError::Internal("sessions mutex poisoned".to_string()))?;
+        sessions
+            .get(id)
+            .map(|s| s.handle.clone())
+            .ok_or_else(|| TerminalError::NotFound(id.to_string()))
+    }
+
+    /// Drain up to `max_bytes` of the terminal's buffered stdout (raw
+    /// bytes — no decode/strip; xterm.js handles UTF-8 + ANSI). Empty when
+    /// nothing is pending (and forever once the child has exited + drained).
+    /// `NotFound` for an unknown id.
+    pub fn read(&self, id: &str, max_bytes: usize) -> Result<Vec<u8>, TerminalError> {
+        let handle = self.handle_of(id)?;
+        Ok(self.transport.read_stdout(&handle, max_bytes)?)
+    }
+
+    /// Resize the terminal's PTY (best-effort). `NotFound` for an unknown
+    /// id; a transport-level `ResizeFailed` (e.g. EIO from resizing an
+    /// already-exited child) is swallowed — a per-`onResize` UI call can't
+    /// act on it, and the child is gone anyway.
+    pub fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<(), TerminalError> {
+        let handle = self.handle_of(id)?;
+        match self.transport.resize(&handle, rows, cols) {
+            Ok(()) | Err(TransportError::ResizeFailed(_)) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// The owned, `Send` `(transport, handle)` for `id`, so a caller can
+    /// run the potentially-blocking `write_stdin` OFF the async runtime via
+    /// `spawn_blocking` (a full stdin pipe can block if the child stops
+    /// reading — T0 P0#1). `NotFound` for an unknown id.
+    pub fn writable(
+        &self,
+        id: &str,
+    ) -> Result<(Arc<ConPtyTransport>, SessionHandle), TerminalError> {
+        let handle = self.handle_of(id)?;
+        Ok((Arc::clone(&self.transport), handle))
     }
 
     /// LOCAL count of terminals launched this process lifetime (telemetry
@@ -240,6 +298,23 @@ mod tests {
     fn status_unknown_id_is_not_found() {
         let m = LocalTerminalManager::new();
         assert!(matches!(m.status("nope"), Err(TerminalError::NotFound(_))));
+    }
+
+    #[test]
+    fn read_write_resize_unknown_id_are_not_found() {
+        let m = LocalTerminalManager::new();
+        assert!(matches!(
+            m.read("nope", 64),
+            Err(TerminalError::NotFound(_))
+        ));
+        assert!(matches!(
+            m.resize("nope", 24, 80),
+            Err(TerminalError::NotFound(_))
+        ));
+        assert!(matches!(
+            m.writable("nope"),
+            Err(TerminalError::NotFound(_))
+        ));
     }
 
     #[test]
@@ -332,6 +407,131 @@ mod tests {
             );
         }
         m.close(&info.id).unwrap();
+    }
+
+    /// Real-spawn: `read` captures a child's output through the manager.
+    /// `#[ignore]` (real PTY) like the others.
+    #[test]
+    #[ignore]
+    fn real_manager_read_captures_output() {
+        let m = LocalTerminalManager::new();
+        let argv: Vec<String> = if cfg!(target_os = "windows") {
+            vec![
+                "cmd.exe".to_string(),
+                "/c".to_string(),
+                "echo marker_xyz".to_string(),
+            ]
+        } else {
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "printf 'marker_xyz\\n'".to_string(),
+            ]
+        };
+        let info = match m.start(&argv, HashMap::new(), None) {
+            Ok(i) => i,
+            Err(_e) => return,
+        };
+        let started = Instant::now();
+        let mut got: Vec<u8> = Vec::new();
+        loop {
+            got.extend_from_slice(&m.read(&info.id, 4096).unwrap());
+            if got.windows(10).any(|w| w == b"marker_xyz") {
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(5) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            String::from_utf8_lossy(&got).contains("marker_xyz"),
+            "manager.read captured: {:?}",
+            String::from_utf8_lossy(&got)
+        );
+        m.close(&info.id).unwrap();
+    }
+
+    /// Real-spawn (unix): a byte written via `writable()`/`write_stdin`
+    /// round-trips back through `cat` and is read via `read`. `cat` has no
+    /// clean cmd.exe equivalent, so Windows is skipped (VM-covered).
+    #[test]
+    #[ignore]
+    fn real_manager_write_roundtrips() {
+        if cfg!(target_os = "windows") {
+            return;
+        }
+        let m = LocalTerminalManager::new();
+        let argv = vec!["/bin/sh".to_string(), "-c".to_string(), "cat".to_string()];
+        let info = match m.start(&argv, HashMap::new(), None) {
+            Ok(i) => i,
+            Err(_e) => return,
+        };
+        std::thread::sleep(Duration::from_millis(100)); // let cat start
+        let (transport, handle) = m.writable(&info.id).unwrap();
+        let n = transport.write_stdin(&handle, b"echo_me\n").unwrap();
+        assert!(n > 0, "write should send bytes");
+        let started = Instant::now();
+        let mut got: Vec<u8> = Vec::new();
+        loop {
+            got.extend_from_slice(&m.read(&info.id, 4096).unwrap());
+            if got.windows(7).any(|w| w == b"echo_me") {
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(5) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            String::from_utf8_lossy(&got).contains("echo_me"),
+            "written bytes should round-trip: {:?}",
+            String::from_utf8_lossy(&got)
+        );
+        m.close(&info.id).unwrap();
+    }
+
+    /// Real-spawn regression (T2.2b review Finding 1): `close` must kill the
+    /// child even when another `Arc<HandleInner>` clone is held (as an
+    /// in-flight blocking write would). A held clone defeats Drop-only
+    /// teardown, so `close` actively `terminate`s. `#[ignore]` (real PTY).
+    #[test]
+    #[ignore]
+    fn real_close_kills_child_with_lingering_handle() {
+        let m = LocalTerminalManager::new();
+        // Long-running child so we can tell whether close actually killed it.
+        let argv: Vec<String> = if cfg!(target_os = "windows") {
+            vec![
+                "cmd.exe".to_string(),
+                "/c".to_string(),
+                "ping -n 30 127.0.0.1 >nul".to_string(),
+            ]
+        } else {
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "sleep 30".to_string(),
+            ]
+        };
+        let info = match m.start(&argv, HashMap::new(), None) {
+            Ok(i) => i,
+            Err(_e) => return,
+        };
+        // Simulate an in-flight write task pinning an Arc<HandleInner> clone.
+        let (transport, lingering) = m.writable(&info.id).unwrap();
+        m.close(&info.id).unwrap();
+        // The lingering handle must observe the child exit promptly — proving
+        // close killed it rather than waiting for the last Arc to drop.
+        let started = Instant::now();
+        loop {
+            if let Ok(Some(_)) = transport.try_wait(&lingering) {
+                break; // killed — good
+            }
+            if started.elapsed() > Duration::from_secs(3) {
+                panic!("close did not kill the child while a handle clone was held");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Real-spawn cap: the 5th concurrent start is rejected; closing one

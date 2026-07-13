@@ -1569,6 +1569,54 @@ fn terminal_status(app: tauri::AppHandle, id: String) -> Result<terminal::Termin
     mgr.status(&id).map_err(|e| e.to_string())
 }
 
+/// Write `data` (keystrokes / paste) to a local terminal's stdin. Returns
+/// bytes written (0 if the child is gone). Runs `write_stdin` on the
+/// blocking pool so a full stdin pipe never parks the async runtime.
+#[tauri::command]
+async fn terminal_write(app: tauri::AppHandle, id: String, data: String) -> Result<usize, String> {
+    use crate::remote::SessionTransport;
+    use tauri::Manager;
+    let (transport, handle) = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?
+        .writable(&id)
+        .map_err(|e| e.to_string())?;
+    let bytes = data.into_bytes();
+    tauri::async_runtime::spawn_blocking(move || transport.write_stdin(&handle, &bytes))
+        .await
+        .map_err(|e| format!("write task join error: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// Drain pending stdout for a local terminal as a RAW binary ArrayBuffer
+/// (`ipc::Response` → `InvokeResponseBody::Raw`) — never a `Vec<u8>` (which
+/// serializes to a JSON number-array, ~4-7x bloat) and never a Rust-side
+/// `String` (which would split multi-byte UTF-8 / ANSI escapes straddling
+/// chunk boundaries). The xterm.js pane polls this and does its own decode.
+#[tauri::command]
+fn terminal_read(
+    app: tauri::AppHandle,
+    id: String,
+    max_bytes: usize,
+) -> Result<tauri::ipc::Response, String> {
+    use tauri::Manager;
+    let mgr = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?;
+    let bytes = mgr.read(&id, max_bytes).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Resize a local terminal's PTY to `rows` × `cols` (from xterm's onResize).
+#[tauri::command]
+fn terminal_resize(app: tauri::AppHandle, id: String, rows: u16, cols: u16) -> Result<(), String> {
+    use tauri::Manager;
+    let mgr = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?;
+    mgr.resize(&id, rows, cols).map_err(|e| e.to_string())
+}
+
 // ------------------------------------------------------------------------
 // v0.8.1 — `request_remote_session_start` and `agent_diagnostic` Tauri
 // commands shipped in v0.8.0 are removed in this revert; they were the
@@ -3158,6 +3206,10 @@ pub fn run() {
             terminal_start,
             terminal_close,
             terminal_status,
+            // v0.11.0 (T2.2b) — local in-app terminal streaming I/O
+            terminal_write,
+            terminal_read,
+            terminal_resize,
             // v0.9.3 — Save diagnostic bundle (zip) to ~/Downloads/
             save_diagnostic_bundle,
             // v0.7.0 — Install Claude hook + check current status

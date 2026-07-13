@@ -6,6 +6,14 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **Local terminal streaming I/O (T2.2b).** Three more Tauri commands on the `LocalTerminalManager`:
+  `terminal_write` (keystrokes/paste/Ctrl-C → stdin; runs `write_stdin` on the blocking pool so a full stdin
+  pipe never parks the async runtime), `terminal_read` (drains pending stdout as a **raw binary
+  `ipc::Response` ArrayBuffer** — never a `Vec<u8>` JSON number-array nor a Rust-side `String` that would split
+  UTF-8/ANSI across chunks; xterm.js decodes), and `terminal_resize` (best-effort — a `ResizeFailed` from
+  resizing an already-exited child is swallowed). Manager read/write/resize + NotFound cases unit-tested;
+  real-spawn read-capture + write-round-trip-through-`cat` tests added (ignored). The xterm.js pane that
+  consumes these is the next slice (T2.3); the raw-ArrayBuffer round-trip will be VM/UI-verified there.
 - **Local terminal registry + lifecycle (T2.2a).** A new `terminal.rs` `LocalTerminalManager` — the
   backend for an in-app terminal that spawns the user's own `claude` on **this** machine (a new local path
   reusing the `ConPtyTransport` PTY primitive but bypassing the Supabase remote-agent layer; a separate
