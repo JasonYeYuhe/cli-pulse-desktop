@@ -4,6 +4,26 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
+### Added — terminal epic (v0.11.0, in progress)
+
+- **PTY stdout streaming foundation (T0/T2 slice 1).** The managed-session PTY host
+  (`remote/transport.rs`, portable-pty) previously read the child's stdout on a dedicated
+  thread and **discarded** every chunk (`read_stdout` was an empty stub) — the host only
+  posted lifecycle events to Supabase for a *remote* controller; nothing streamed locally.
+  The reader thread now pumps output into a **bounded shared ring** (`STDOUT_BUF_CAP` = 256 KiB,
+  drop-oldest on overflow so a headless remote session that never reads stays memory-bounded),
+  and `read_stdout` drains it. This is the byte source a future in-app **xterm.js** terminal
+  polls (raw bytes, no ANSI strip / no decode — xterm handles that). Reused the existing
+  hardened transport (Ctrl-C via 0x03, Windows Job Objects, Drop teardown) — no rebuild.
+- **`terminal_smoke` streaming harness (T0).** A new `cargo run --bin terminal_smoke` spawns a
+  short child that emits lines over ~1.5 s and asserts the output arrives **incrementally**
+  (bytes seen while the child is still running, across multiple reads) — not drained at exit.
+  Cross-platform via portable-pty, so it proves streaming on Linux/macOS (POSIX openpty) and
+  Windows (ConPTY); asserts the **local** signal only (no async-Sentry dependency). Wired into
+  CI (advisory) on Windows + Linux; `scripts/vm-verify-terminal.ps1` runs it on the Windows VM.
+  Unit-tested `push_bounded` (drop-oldest bound) gates CI; the real-spawn read test is `#[ignore]`d
+  (CI ConPTY flake) like the existing one.
+
 ## [0.10.2] — 2026-07-11
 
 **Compare mode (period-over-period).** Closes the last deferred v0.10.0 item. A new **Settings → Date range**

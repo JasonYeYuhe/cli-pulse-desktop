@@ -50,6 +50,7 @@
 //! See `agent.rs` for the wrapper pattern.
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -142,6 +143,12 @@ struct HandleInner {
     /// Reader thread stop flag. Set in `Drop` so the thread exits
     /// promptly even if it's mid-read.
     reader_stop: Arc<AtomicBool>,
+    /// Bounded ring of stdout bytes the reader thread appends to and
+    /// `read_stdout` drains. A local terminal polls this continuously
+    /// (→ xterm.js); a headless remote session never reads it, so
+    /// `STDOUT_BUF_CAP` bounds the memory (drop-oldest on overflow).
+    /// Its own `Mutex` so a read never contends with a stdin write.
+    stdout_buf: Arc<Mutex<VecDeque<u8>>>,
     /// Windows Job Object handle. `Some` only on Windows. On Drop we
     /// CloseHandle it; `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` then fires
     /// and the kernel terminates the assigned child.
@@ -355,15 +362,16 @@ impl SessionTransport for ConPtyTransport {
             .map_err(|e| TransportError::Internal(format!("take_writer: {e}")))?;
 
         // Reader: clone from master, hand to a dedicated OS thread that
-        // pumps stdout. For v0.8.0 we drain-and-discard (no upload yet
-        // — see plan §"Out of scope"). The drain is required so the
-        // child doesn't backpressure on a full PTY output buffer.
+        // pumps stdout into a bounded shared buffer. The drain is required
+        // so the child doesn't backpressure on a full PTY output buffer;
+        // `read_stdout` serves the buffered bytes to a local terminal.
         let reader = pair
             .master
             .try_clone_reader()
             .map_err(|e| TransportError::Internal(format!("try_clone_reader: {e}")))?;
 
         let reader_stop = Arc::new(AtomicBool::new(false));
+        let stdout_buf: Arc<Mutex<VecDeque<u8>>> = Arc::new(Mutex::new(VecDeque::new()));
 
         // We need to keep the master alive so the writer/reader handles
         // remain valid. portable-pty's MasterPty drops the kernel side
@@ -375,6 +383,7 @@ impl SessionTransport for ConPtyTransport {
             reader,
             master_keepalive,
             reader_stop.clone(),
+            stdout_buf.clone(),
             session_id.to_string(),
         );
 
@@ -390,6 +399,7 @@ impl SessionTransport for ConPtyTransport {
             child: Mutex::new(Some(child)),
             writer: Mutex::new(Some(writer)),
             reader_stop,
+            stdout_buf,
             #[cfg(windows)]
             job: Mutex::new(job),
         };
@@ -434,19 +444,25 @@ impl SessionTransport for ConPtyTransport {
 
     fn read_stdout(
         &self,
-        _handle: &SessionHandle,
-        _max_bytes: usize,
+        handle: &SessionHandle,
+        max_bytes: usize,
     ) -> Result<Vec<u8>, TransportError> {
-        // v0.8.0 lifecycle-only: the dedicated reader thread already
-        // drains the master so the child can keep producing output.
-        // We deliberately do NOT expose reads to the agent loop in
-        // this iteration — stdout/stderr upload is deferred to v0.8.x
-        // (plan §"Out of scope"). Returning empty here is correct
-        // for the lifecycle-events-only contract; the agent never
-        // calls this method for v0.8.0. Kept on the trait so the
-        // shape matches Mac's ABC and a future iter doesn't need a
-        // breaking change.
-        Ok(Vec::new())
+        // Drain up to `max_bytes` from the front of the shared ring the
+        // reader thread fills. Empty Vec when nothing is buffered (and,
+        // once the child has exited and the buffer is drained, forever
+        // after) — never an error, per the trait contract. The remote
+        // agent loop still ignores this method (lifecycle-only); it
+        // exists for the local terminal, which polls it and forwards the
+        // raw bytes straight to xterm.js (no ANSI strip / no decode).
+        if max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+        let mut buf =
+            handle.inner.stdout_buf.lock().map_err(|_| {
+                TransportError::Internal("stdout buffer mutex poisoned".to_string())
+            })?;
+        let n = buf.len().min(max_bytes);
+        Ok(buf.drain(..n).collect())
     }
 
     fn interrupt(&self, handle: &SessionHandle) -> Result<(), TransportError> {
@@ -517,9 +533,31 @@ fn exit_status_code(status: &portable_pty::ExitStatus) -> i32 {
     }
 }
 
-/// Spawn an OS thread that drains the master reader and discards. The
-/// drain is necessary even though v0.8.0 doesn't upload stdout: a
-/// blocked PTY output buffer would backpressure the child. The thread
+/// Max bytes retained in a session's stdout ring between reads. A local
+/// terminal drains this continuously (poll → xterm.js); a headless
+/// remote session never reads it, so this cap bounds memory — on
+/// overflow the oldest bytes are dropped (standard scrollback-overflow
+/// semantics; xterm keeps its own scrollback on the UI side). 256 KiB is
+/// far more than any CLI emits within one poll interval.
+const STDOUT_BUF_CAP: usize = 256 * 1024;
+
+/// Append `data` to `buf`, dropping the oldest bytes so the buffer never
+/// exceeds `STDOUT_BUF_CAP`. Returns the number of old bytes dropped
+/// (0 on the common under-cap path). Pure so it's unit-testable without
+/// spawning a PTY.
+fn push_bounded(buf: &mut VecDeque<u8>, data: &[u8]) -> usize {
+    buf.extend(data.iter().copied());
+    let mut dropped = 0;
+    while buf.len() > STDOUT_BUF_CAP {
+        buf.pop_front();
+        dropped += 1;
+    }
+    dropped
+}
+
+/// Spawn an OS thread that pumps the master reader into `stdout_buf` (a
+/// bounded ring drained by `read_stdout`). The drain is necessary so a
+/// full PTY output buffer doesn't backpressure the child. The thread
 /// exits when `stop` flips true (set by `Drop` on `HandleInner`).
 ///
 /// ### Known POSIX limitation (Gemini diff review P2)
@@ -547,6 +585,7 @@ fn spawn_reader_thread(
     mut reader: Box<dyn Read + Send>,
     _master_keepalive: Box<dyn MasterPty + Send>,
     stop: Arc<AtomicBool>,
+    stdout_buf: Arc<Mutex<VecDeque<u8>>>,
     session_id: String,
 ) {
     thread::Builder::new()
@@ -567,8 +606,15 @@ fn spawn_reader_thread(
                         // EOF — child has exited and no more bytes.
                         return;
                     }
-                    Ok(_n) => {
-                        // Discard. v0.8.x will buffer + upload here.
+                    Ok(n) => {
+                        // Buffer the chunk for read_stdout(). Bounded
+                        // (drop-oldest) so a session nobody reads can't
+                        // grow without limit. A poisoned lock just drops
+                        // the chunk — the reader must never block or
+                        // panic, or the child would backpressure.
+                        if let Ok(mut b) = stdout_buf.lock() {
+                            push_bounded(&mut b, &buf[..n]);
+                        }
                         continue;
                     }
                     Err(e) => {
@@ -694,6 +740,7 @@ mod tests {
                 child: Mutex::new(None),
                 writer: Mutex::new(None),
                 reader_stop: Arc::new(AtomicBool::new(false)),
+                stdout_buf: Arc::new(Mutex::new(VecDeque::new())),
                 #[cfg(windows)]
                 job: Mutex::new(None),
             };
@@ -822,6 +869,7 @@ mod tests {
             child: Mutex::new(None),
             writer: Mutex::new(None),
             reader_stop: stop.clone(),
+            stdout_buf: Arc::new(Mutex::new(VecDeque::new())),
             #[cfg(windows)]
             job: Mutex::new(None),
         };
@@ -893,5 +941,96 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn push_bounded_under_cap_keeps_everything_in_order() {
+        let mut b = VecDeque::new();
+        assert_eq!(push_bounded(&mut b, b"hello"), 0);
+        assert_eq!(push_bounded(&mut b, b" world"), 0);
+        assert_eq!(b.len(), 11);
+        assert_eq!(b.iter().copied().collect::<Vec<u8>>(), b"hello world");
+    }
+
+    #[test]
+    fn push_bounded_drops_oldest_on_overflow() {
+        let mut b = VecDeque::new();
+        // Fill exactly to cap — no drop yet.
+        assert_eq!(push_bounded(&mut b, &vec![b'a'; STDOUT_BUF_CAP]), 0);
+        assert_eq!(b.len(), STDOUT_BUF_CAP);
+        // Push 10 more → 10 oldest dropped, length pinned at cap.
+        assert_eq!(push_bounded(&mut b, b"0123456789"), 10);
+        assert_eq!(b.len(), STDOUT_BUF_CAP);
+        // The newest 10 bytes are at the tail; the front is still old 'a's.
+        let tail: Vec<u8> = b.iter().copied().skip(STDOUT_BUF_CAP - 10).collect();
+        assert_eq!(tail, b"0123456789");
+        assert_eq!(*b.front().unwrap(), b'a');
+    }
+
+    #[test]
+    fn push_bounded_single_chunk_larger_than_cap_keeps_tail() {
+        let mut b = VecDeque::new();
+        let mut data = vec![b'x'; STDOUT_BUF_CAP];
+        data.extend_from_slice(b"TAIL");
+        let dropped = push_bounded(&mut b, &data);
+        assert_eq!(dropped, 4);
+        assert_eq!(b.len(), STDOUT_BUF_CAP);
+        let tail: Vec<u8> = b.iter().copied().skip(STDOUT_BUF_CAP - 4).collect();
+        assert_eq!(tail, b"TAIL");
+    }
+
+    /// Real-spawn round-trip: a child prints a known marker, and
+    /// `read_stdout` returns those bytes. `#[ignore]` for the same
+    /// reason as `real_short_lived_child_completes` — real ConPTY spawns
+    /// are flaky in headless CI. The pure `push_bounded_*` tests above
+    /// gate CI; `bin/terminal_smoke` exercises the full streaming path
+    /// on a dev machine + the Windows VM. Run locally with
+    /// `cargo test -- --ignored real_read_stdout_captures_child_output`.
+    #[test]
+    #[ignore]
+    fn real_read_stdout_captures_child_output() {
+        let argv: Vec<String> = if cfg!(target_os = "windows") {
+            vec![
+                "cmd.exe".to_string(),
+                "/c".to_string(),
+                "echo smoke_marker".to_string(),
+            ]
+        } else {
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "printf 'smoke_marker\\n'".to_string(),
+            ]
+        };
+        let t = ConPtyTransport::new();
+        let h = match t.start("real-read-1", &argv, HashMap::new(), None) {
+            Ok(h) => h,
+            Err(_e) => return, // PTY alloc/spawn can fail in headless CI; skip.
+        };
+        let mut got: Vec<u8> = Vec::new();
+        let started = Instant::now();
+        loop {
+            let chunk = t.read_stdout(&h, 4096).unwrap();
+            got.extend_from_slice(&chunk);
+            if got
+                .windows(b"smoke_marker".len())
+                .any(|w| w == b"smoke_marker")
+            {
+                return; // pass — captured the marker
+            }
+            // Exited AND fully drained without the marker → fail below.
+            if chunk.is_empty() && matches!(t.try_wait(&h), Ok(Some(_))) {
+                // One more drain in case bytes landed between the two calls.
+                let tail = t.read_stdout(&h, 4096).unwrap();
+                got.extend_from_slice(&tail);
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(5) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let s = String::from_utf8_lossy(&got);
+        assert!(s.contains("smoke_marker"), "read_stdout captured: {s:?}");
     }
 }

@@ -220,3 +220,46 @@ jobs:
           name: launch-smoke-linux
           path: smoke-artifacts/
           if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Terminal epic (v0.11.0) — PTY streaming-smoke. Runs `bin/terminal_smoke`,
+  # which spawns a short child, drives ConPtyTransport directly, and asserts
+  # stdout arrives INCREMENTALLY (bytes seen while the child is still running,
+  # across multiple reads) — not drained at exit. This is the local, provable
+  # signal the streaming terminal needs; it exercises portable-pty's ConPTY
+  # (Windows) / openpty (Linux) paths headlessly. The smoke SKIPs (exit 0) if
+  # no PTY can be allocated, so it never false-fails.
+  #
+  # Advisory (continue-on-error) until a few runs confirm the runners allocate
+  # a PTY reliably; then promote to a hard gate. Mirrors the launch-smoke
+  # advisory-first rollout.
+  terminal-smoke:
+    name: PTY streaming-smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [rust-test]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux Tauri deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: terminal-smoke-${{ matrix.os }}
+      - name: Run PTY streaming-smoke
+        working-directory: src-tauri
+        run: cargo run --bin terminal_smoke
