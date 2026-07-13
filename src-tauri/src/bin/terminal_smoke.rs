@@ -28,12 +28,18 @@ fn main() {
 fn run() -> i32 {
     // A child that emits 5 lines ~300 ms apart (~1.5 s total). Each line
     // is flushed by the shell on the newline because the PTY slave is a
-    // tty. `ping` is the portable no-tty sleep on Windows.
+    // tty. On Windows a `cmd /c "for /l ..."` one-liner mis-parses through
+    // ConPTY's single-string argv (it emitted only a few bytes on CI), so
+    // use PowerShell — `Write-Host ('line'+$_)` avoids inner double-quotes
+    // that the argv round-trip would mangle.
     let argv: Vec<String> = if cfg!(target_os = "windows") {
         vec![
-            "cmd.exe".to_string(),
-            "/c".to_string(),
-            "for /l %i in (1,1,5) do @(echo line%i & ping -n 2 127.0.0.1 >nul)".to_string(),
+            "powershell.exe".to_string(),
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-Command".to_string(),
+            "1..5 | ForEach-Object { Write-Host ('line'+$_); Start-Sleep -Milliseconds 300 }"
+                .to_string(),
         ]
     } else {
         vec![
