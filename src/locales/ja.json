@@ -568,5 +568,11 @@
     "no_data": "—",
     "open_label": "CLI Pulse を開く",
     "quit_label": "終了"
+  },
+  "terminal": {
+    "section_title": "ローカルターミナル (ベータ)",
+    "section_subtitle": "このマシンの組み込みターミナルで Claude を実行します。",
+    "hint": "ローカルターミナルの準備ができました。",
+    "init_failed": "ターミナルの初期化に失敗しました"
   }
 }

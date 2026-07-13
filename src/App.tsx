@@ -79,6 +79,7 @@ import {
   type PaceStatus,
 } from "./lib/pace";
 import appIcon from "./assets/app-icon.png";
+import { LocalTerminal } from "./components/LocalTerminal";
 import "./App.css";
 
 // Multi-currency display: a context carrying `fmt(usd)` (converts a USD cost to
@@ -1084,14 +1085,18 @@ export default function App() {
           />
         )}
         {tab === "sessions" && (
-          <Sessions
-            snapshot={sessions}
-            loading={sessionsLoading}
-            onRefresh={refreshSessions}
-            remoteSessions={remoteSessions}
-            remoteControlEnabled={remoteControlEnabled === true}
-            onRemoteSessionAction={refreshRemoteState}
-          />
+          <div className="space-y-6">
+            <Sessions
+              snapshot={sessions}
+              loading={sessionsLoading}
+              onRefresh={refreshSessions}
+              remoteSessions={remoteSessions}
+              remoteControlEnabled={remoteControlEnabled === true}
+              onRemoteSessionAction={refreshRemoteState}
+            />
+            {/* v0.11.0 (T2.3a) — in-app local terminal (xterm.js). */}
+            <LocalTerminal />
+          </div>
         )}
         {tab === "machine" && (
           <MachineTab

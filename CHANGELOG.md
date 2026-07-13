@@ -6,6 +6,13 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **In-app terminal pane — xterm.js skeleton (T2.3a).** A new `src/components/LocalTerminal.tsx` mounts an
+  **xterm.js** terminal (added `@xterm/xterm` + `@xterm/addon-fit`) under the **Sessions** tab: it fits to its
+  container and re-fits on resize (ResizeObserver). This slice is the crash-safe skeleton — xterm init is
+  wrapped in try/catch with a fallback so the CI launch-smoke's headless all-tabs render can't white-screen.
+  Launching a session (Start → `terminal_start`) and the single-flight streaming pump land in T2.3b; the
+  backend command surface already exists (T2.1/T2.2a/T2.2b). New `terminal.*` labels ×3 locales, pinned in the
+  critical-labels gate.
 - **Local terminal streaming I/O (T2.2b).** Three more Tauri commands on the `LocalTerminalManager`:
   `terminal_write` (keystrokes/paste/Ctrl-C → stdin; runs `write_stdin` on the blocking pool so a full stdin
   pipe never parks the async runtime), `terminal_read` (drains pending stdout as a **raw binary

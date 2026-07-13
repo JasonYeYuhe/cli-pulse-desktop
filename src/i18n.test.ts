@@ -472,6 +472,11 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "updater.error_signature",
     "updater.error_unknown",
     "updater.error_manual_download",
+    // v0.11.0 (T2.3a) — local in-app terminal (xterm.js) section chrome.
+    "terminal.section_title",
+    "terminal.section_subtitle",
+    "terminal.hint",
+    "terminal.init_failed",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

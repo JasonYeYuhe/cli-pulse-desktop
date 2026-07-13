@@ -574,5 +574,11 @@
     "no_data": "—",
     "open_label": "Open CLI Pulse",
     "quit_label": "Quit"
+  },
+  "terminal": {
+    "section_title": "Local terminal (beta)",
+    "section_subtitle": "Run Claude in an embedded terminal on this machine.",
+    "hint": "Local terminal ready.",
+    "init_failed": "Terminal failed to initialize"
   }
 }
