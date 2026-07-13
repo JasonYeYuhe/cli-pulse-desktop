@@ -573,6 +573,11 @@
     "section_title": "ローカルターミナル (ベータ)",
     "section_subtitle": "このマシンの組み込みターミナルで Claude を実行します。",
     "hint": "ローカルターミナルの準備ができました。",
-    "init_failed": "ターミナルの初期化に失敗しました"
+    "init_failed": "ターミナルの初期化に失敗しました",
+    "start_button": "Claude を起動",
+    "stop_button": "停止",
+    "starting": "起動中…",
+    "start_failed": "ターミナルを起動できませんでした",
+    "stopped": "[セッションを終了しました]"
   }
 }

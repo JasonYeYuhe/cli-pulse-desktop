@@ -477,6 +477,12 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "terminal.section_subtitle",
     "terminal.hint",
     "terminal.init_failed",
+    // v0.11.0 (T2.3b) — start/stop controls + status banners.
+    "terminal.start_button",
+    "terminal.stop_button",
+    "terminal.starting",
+    "terminal.start_failed",
+    "terminal.stopped",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

@@ -6,6 +6,17 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **In-app terminal — live streaming (T2.3b).** The `LocalTerminal` pane is now interactive: a **Start**
+  button spawns the user's own `claude` (`terminal_start`), syncs the PTY size to the fitted pane, and streams
+  it into xterm.js via a **single-flight requestAnimationFrame pump** — each frame drains the stdout ring with
+  `terminal_read` (raw ArrayBuffer → `term.write(Uint8Array)`) and only *then* schedules the next frame, so two
+  destructive drains can never overlap/reorder the output. Keystrokes/paste/Ctrl-C flow via `term.onData` →
+  `terminal_write`; xterm's `onResize` round-trips (debounced) to `terminal_resize`. **Stop** (and unmount)
+  cancel the pump, detach listeners, and `terminal_close` the session — no leaked pump/listener/session. DOM
+  renderer only (no WebGL/canvas) so the headless launch-smoke stays crash-safe. New `terminal.start_button` /
+  `stop_button` / `starting` / `start_failed` / `stopped` labels ×3 locales, pinned. *Live streaming +
+  `claude` PATH resolution get a real-run/VM verification (see the T2.3b runbook); CI covers compile + the
+  crash-safe headless render.*
 - **In-app terminal pane — xterm.js skeleton (T2.3a).** A new `src/components/LocalTerminal.tsx` mounts an
   **xterm.js** terminal (added `@xterm/xterm` + `@xterm/addon-fit`) under the **Sessions** tab: it fits to its
   container and re-fits on resize (ResizeObserver). This slice is the crash-safe skeleton — xterm init is

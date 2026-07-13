@@ -573,6 +573,11 @@
     "section_title": "本地终端 (测试版)",
     "section_subtitle": "在本机的内嵌终端中运行 Claude。",
     "hint": "本地终端已就绪。",
-    "init_failed": "终端初始化失败"
+    "init_failed": "终端初始化失败",
+    "start_button": "启动 Claude",
+    "stop_button": "停止",
+    "starting": "启动中…",
+    "start_failed": "无法启动终端",
+    "stopped": "[会话已关闭]"
   }
 }

@@ -579,6 +579,11 @@
     "section_title": "Local terminal (beta)",
     "section_subtitle": "Run Claude in an embedded terminal on this machine.",
     "hint": "Local terminal ready.",
-    "init_failed": "Terminal failed to initialize"
+    "init_failed": "Terminal failed to initialize",
+    "start_button": "Start Claude",
+    "stop_button": "Stop",
+    "starting": "Starting…",
+    "start_failed": "Couldn't start the terminal",
+    "stopped": "[session closed]"
   }
 }
