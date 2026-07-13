@@ -879,6 +879,10 @@ mod tests {
                 .push(h.session_id.clone());
             Ok(())
         }
+        fn resize(&self, _h: &SessionHandle, _rows: u16, _cols: u16) -> Result<(), TransportError> {
+            // The remote agent never resizes; satisfy the trait only.
+            Ok(())
+        }
         fn try_wait(&self, h: &SessionHandle) -> Result<Option<i32>, TransportError> {
             Ok(self.next_exit.lock().unwrap().get(&h.session_id).copied())
         }

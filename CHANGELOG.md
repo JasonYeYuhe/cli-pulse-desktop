@@ -6,6 +6,13 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **PTY resize round-trip (T2.1).** Added `resize(rows, cols)` to the transport — round-trips to
+  `ResizePseudoConsole` (Windows) / `TIOCSWINSZ` (POSIX) via portable-pty and delivers SIGWINCH so a
+  spawned CLI's line-wrapping tracks the terminal pane. This required relocating the PTY master: it was
+  moved into the reader thread as a keepalive (unreachable); it now lives behind `Arc<Mutex<…>>` shared
+  between the reader thread (still a keepalive) and `HandleInner`, so `resize` can reach it — teardown
+  (Drop → reader_stop / child kill / Job Object) is unchanged. `terminal_smoke` now also asserts a resize
+  round-trip; mock + real-spawn (ignored) tests added.
 - **PTY stdout streaming foundation (T0/T2 slice 1).** The managed-session PTY host
   (`remote/transport.rs`, portable-pty) previously read the child's stdout on a dedicated
   thread and **discarded** every chunk (`read_stdout` was an empty stub) — the host only

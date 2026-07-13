@@ -91,6 +91,8 @@ pub enum TransportError {
     InterruptFailed(String),
     #[error("terminate failed: {0}")]
     TerminateFailed(String),
+    #[error("resize failed: {0}")]
+    ResizeFailed(String),
     #[error("handle has no live state")]
     HandleClosed,
     #[error("internal: {0}")]
@@ -149,6 +151,12 @@ struct HandleInner {
     /// `STDOUT_BUF_CAP` bounds the memory (drop-oldest on overflow).
     /// Its own `Mutex` so a read never contends with a stdin write.
     stdout_buf: Arc<Mutex<VecDeque<u8>>>,
+    /// The PTY master, shared with the reader thread (which also holds a
+    /// clone as a keepalive). Stored here — not moved into the reader
+    /// thread — so `resize` can reach it to call `MasterPty::resize`
+    /// (SIGWINCH / ResizePseudoConsole). `None` only for test mocks that
+    /// build a `HandleInner` without a real PTY.
+    master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
     /// Windows Job Object handle. `Some` only on Windows. On Drop we
     /// CloseHandle it; `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` then fires
     /// and the kernel terminates the assigned child.
@@ -258,6 +266,13 @@ pub trait SessionTransport: Send + Sync {
     /// Send TerminateProcess (Windows) / SIGTERM (POSIX). Does NOT
     /// block waiting for the child to actually exit; use `try_wait`.
     fn terminate(&self, handle: &SessionHandle) -> Result<(), TransportError>;
+
+    /// Resize the PTY to `rows` × `cols`. Round-trips to
+    /// `ResizePseudoConsole` (Windows) / `TIOCSWINSZ` (POSIX) via
+    /// portable-pty and delivers SIGWINCH to the child so its
+    /// line-wrapping/formatting tracks the xterm.js pane. A no-op-safe
+    /// call the local terminal makes on every `onResize`.
+    fn resize(&self, handle: &SessionHandle, rows: u16, cols: u16) -> Result<(), TransportError>;
 
     /// Non-blocking poll. Returns `Some(exit_code)` if the child has
     /// exited, `None` if still running. Per the trait contract, MUST
@@ -373,15 +388,16 @@ impl SessionTransport for ConPtyTransport {
         let reader_stop = Arc::new(AtomicBool::new(false));
         let stdout_buf: Arc<Mutex<VecDeque<u8>>> = Arc::new(Mutex::new(VecDeque::new()));
 
-        // We need to keep the master alive so the writer/reader handles
-        // remain valid. portable-pty's MasterPty drops the kernel side
-        // when dropped. Stash it inside the reader thread closure so
-        // it's owned for the lifetime of the session.
-        let master_keepalive: Box<dyn MasterPty + Send> = pair.master;
+        // The master must stay alive for the writer/reader handles to
+        // remain valid (portable-pty drops the kernel side on drop), AND
+        // it must be reachable for `resize`. So it lives behind an
+        // Arc<Mutex> shared between the reader thread (as a keepalive) and
+        // `HandleInner`; whichever outlives the other keeps it open.
+        let master: Arc<Mutex<Box<dyn MasterPty + Send>>> = Arc::new(Mutex::new(pair.master));
 
         spawn_reader_thread(
             reader,
-            master_keepalive,
+            master.clone(),
             reader_stop.clone(),
             stdout_buf.clone(),
             session_id.to_string(),
@@ -400,6 +416,7 @@ impl SessionTransport for ConPtyTransport {
             writer: Mutex::new(Some(writer)),
             reader_stop,
             stdout_buf,
+            master: Some(master),
             #[cfg(windows)]
             job: Mutex::new(job),
         };
@@ -495,6 +512,25 @@ impl SessionTransport for ConPtyTransport {
         Ok(())
     }
 
+    fn resize(&self, handle: &SessionHandle, rows: u16, cols: u16) -> Result<(), TransportError> {
+        let master = handle
+            .inner
+            .master
+            .as_ref()
+            .ok_or(TransportError::HandleClosed)?;
+        let master = master
+            .lock()
+            .map_err(|_| TransportError::Internal("master mutex poisoned".to_string()))?;
+        master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| TransportError::ResizeFailed(e.to_string()))
+    }
+
     fn try_wait(&self, handle: &SessionHandle) -> Result<Option<i32>, TransportError> {
         let mut child_guard = handle
             .inner
@@ -583,7 +619,7 @@ fn push_bounded(buf: &mut VecDeque<u8>, data: &[u8]) -> usize {
 /// it on stop. Not worth the complexity for v0.8.0.
 fn spawn_reader_thread(
     mut reader: Box<dyn Read + Send>,
-    _master_keepalive: Box<dyn MasterPty + Send>,
+    _master_keepalive: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     stop: Arc<AtomicBool>,
     stdout_buf: Arc<Mutex<VecDeque<u8>>>,
     session_id: String,
@@ -715,6 +751,7 @@ mod tests {
         write_log: Mutex<Vec<Vec<u8>>>,
         interrupt_log: Mutex<Vec<String>>,
         terminate_log: Mutex<Vec<String>>,
+        resize_log: Mutex<Vec<(u16, u16)>>,
     }
 
     impl MockTransport {
@@ -723,6 +760,7 @@ mod tests {
                 write_log: Mutex::new(Vec::new()),
                 interrupt_log: Mutex::new(Vec::new()),
                 terminate_log: Mutex::new(Vec::new()),
+                resize_log: Mutex::new(Vec::new()),
             }
         }
     }
@@ -741,6 +779,7 @@ mod tests {
                 writer: Mutex::new(None),
                 reader_stop: Arc::new(AtomicBool::new(false)),
                 stdout_buf: Arc::new(Mutex::new(VecDeque::new())),
+                master: None,
                 #[cfg(windows)]
                 job: Mutex::new(None),
             };
@@ -779,6 +818,11 @@ mod tests {
             Ok(())
         }
 
+        fn resize(&self, _h: &SessionHandle, rows: u16, cols: u16) -> Result<(), TransportError> {
+            self.resize_log.lock().unwrap().push((rows, cols));
+            Ok(())
+        }
+
         fn try_wait(&self, _h: &SessionHandle) -> Result<Option<i32>, TransportError> {
             Ok(None)
         }
@@ -805,6 +849,8 @@ mod tests {
         assert_eq!(t.interrupt_log.lock().unwrap()[0], "sid-1");
         t.terminate(&h).unwrap();
         assert_eq!(t.terminate_log.lock().unwrap()[0], "sid-1");
+        t.resize(&h, 40, 120).unwrap();
+        assert_eq!(t.resize_log.lock().unwrap()[0], (40, 120));
     }
 
     #[test]
@@ -842,6 +888,14 @@ mod tests {
             fn terminate(&self, h: &SessionHandle) -> Result<(), TransportError> {
                 self.inner.terminate(h)
             }
+            fn resize(
+                &self,
+                h: &SessionHandle,
+                rows: u16,
+                cols: u16,
+            ) -> Result<(), TransportError> {
+                self.inner.resize(h, rows, cols)
+            }
             fn try_wait(&self, h: &SessionHandle) -> Result<Option<i32>, TransportError> {
                 self.inner.try_wait(h)
             }
@@ -870,6 +924,7 @@ mod tests {
             writer: Mutex::new(None),
             reader_stop: stop.clone(),
             stdout_buf: Arc::new(Mutex::new(VecDeque::new())),
+            master: None,
             #[cfg(windows)]
             job: Mutex::new(None),
         };
@@ -1032,5 +1087,38 @@ mod tests {
         }
         let s = String::from_utf8_lossy(&got);
         assert!(s.contains("smoke_marker"), "read_stdout captured: {s:?}");
+    }
+
+    /// Real-spawn: resize a live PTY succeeds. `#[ignore]` for the same
+    /// headless-CI-ConPTY-flake reason as the other real-spawn tests;
+    /// the mock covers the trait wiring, `bin/terminal_smoke` covers the
+    /// full path on a dev machine + the VM. Run locally with
+    /// `cargo test -- --ignored real_resize_live_pty_succeeds`.
+    #[test]
+    #[ignore]
+    fn real_resize_live_pty_succeeds() {
+        // A child that stays alive long enough to resize (POSIX `sleep`,
+        // Windows `ping` as a portable sleep).
+        let argv: Vec<String> = if cfg!(target_os = "windows") {
+            vec![
+                "cmd.exe".to_string(),
+                "/c".to_string(),
+                "ping -n 4 127.0.0.1 >nul".to_string(),
+            ]
+        } else {
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "sleep 2".to_string(),
+            ]
+        };
+        let t = ConPtyTransport::new();
+        let h = match t.start("real-resize-1", &argv, HashMap::new(), None) {
+            Ok(h) => h,
+            Err(_e) => return, // PTY alloc/spawn can fail in headless CI; skip.
+        };
+        // Resize a couple of times; both must succeed on a live PTY.
+        t.resize(&h, 40, 120).expect("resize 40x120");
+        t.resize(&h, 24, 80).expect("resize 24x80");
     }
 }

@@ -58,6 +58,18 @@ fn run() -> i32 {
         }
     };
 
+    // T2.1 — a live PTY must accept a resize round-trip (SIGWINCH /
+    // ResizePseudoConsole). A shell loop ignores SIGWINCH, so this
+    // doesn't perturb the streamed output we assert below.
+    match t.resize(&handle, 40, 120) {
+        Ok(()) => println!("  resize 40x120:             ok"),
+        Err(e) => {
+            println!("  resize failed: {e}");
+            println!("FAIL");
+            return 1;
+        }
+    }
+
     let mut captured: Vec<u8> = Vec::new();
     let mut read_events = 0usize;
     let mut saw_output_while_running = false;
