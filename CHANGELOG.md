@@ -6,6 +6,14 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **Local terminal registry + lifecycle (T2.2a).** A new `terminal.rs` `LocalTerminalManager` — the
+  backend for an in-app terminal that spawns the user's own `claude` on **this** machine (a new local path
+  reusing the `ConPtyTransport` PTY primitive but bypassing the Supabase remote-agent layer; a separate
+  transport instance, zero shared state). Three Tauri commands: `terminal_start` (→ id + pid, capped at 4
+  concurrent), `terminal_close` (idempotent; drops the handle → child kill + Windows Job Object teardown),
+  `terminal_status` (running + exit_code). Managed unconditionally (needs no pairing). Lifecycle only — byte
+  I/O (write/read) is the next slice, resize landed in T2.1. Cap + not-found + idempotency unit-tested;
+  real-spawn lifecycle + cap-enforcement tests added (ignored, like the transport's).
 - **PTY resize round-trip (T2.1).** Added `resize(rows, cols)` to the transport — round-trips to
   `ResizePseudoConsole` (Windows) / `TIOCSWINSZ` (POSIX) via portable-pty and delivers SIGWINCH so a
   spawned CLI's line-wrapping tracks the terminal pane. This required relocating the PTY master: it was

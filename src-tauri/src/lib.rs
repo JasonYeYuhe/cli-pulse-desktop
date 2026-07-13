@@ -37,6 +37,7 @@ pub mod service_status;
 pub mod sessions;
 pub mod smoke;
 pub mod supabase;
+pub mod terminal;
 pub mod top_projects;
 pub mod tray;
 pub mod wsl;
@@ -1525,6 +1526,50 @@ struct RemoteAgentState {
 }
 
 // ------------------------------------------------------------------------
+// v0.11.0 (T2.2a) — LOCAL in-app terminal: registry + lifecycle commands.
+// A NEW path (see terminal.rs), separate from the Supabase remote agent:
+// spawn the user's own `claude` on THIS machine and (T2.3) stream it into
+// an xterm.js pane. Byte I/O (write/read) is T2.2b; resize landed in T2.1.
+// The `LocalTerminalManager` is `.manage`d unconditionally in setup.
+// ------------------------------------------------------------------------
+
+/// Spawn a new local terminal (passthrough `claude`) and return its id + pid.
+#[tauri::command]
+fn terminal_start(
+    app: tauri::AppHandle,
+    cwd: Option<String>,
+) -> Result<terminal::StartInfo, String> {
+    use tauri::Manager;
+    let mgr = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?;
+    let mut env = std::collections::HashMap::new();
+    env.insert("TERM".to_string(), "xterm-256color".to_string());
+    mgr.start(&terminal::claude_argv(), env, cwd.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// Close (kill) a local terminal. Idempotent for an unknown id.
+#[tauri::command]
+fn terminal_close(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    use tauri::Manager;
+    let mgr = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?;
+    mgr.close(&id).map_err(|e| e.to_string())
+}
+
+/// Poll a local terminal's liveness (`running` + `exit_code`).
+#[tauri::command]
+fn terminal_status(app: tauri::AppHandle, id: String) -> Result<terminal::TerminalStatus, String> {
+    use tauri::Manager;
+    let mgr = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?;
+    mgr.status(&id).map_err(|e| e.to_string())
+}
+
+// ------------------------------------------------------------------------
 // v0.8.1 — `request_remote_session_start` and `agent_diagnostic` Tauri
 // commands shipped in v0.8.0 are removed in this revert; they were the
 // frontend entry points to the ConPTY managed-session host that
@@ -2930,6 +2975,10 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 log::info!("Log directory: {}", dir.display());
             }
+            // v0.11.0 (T2.2a) — local in-app terminal registry. Managed
+            // unconditionally (needs no pairing); byte I/O + UI land in
+            // later slices.
+            app.manage(terminal::LocalTerminalManager::new());
             match config::load() {
                 Ok(Some(cfg)) => log::info!(
                     "Paired (device {}…)",
@@ -3105,6 +3154,10 @@ pub fn run() {
             // v0.9.1a — ConPTY managed-session local host
             request_remote_session_start,
             agent_diagnostic,
+            // v0.11.0 (T2.2a) — local in-app terminal lifecycle
+            terminal_start,
+            terminal_close,
+            terminal_status,
             // v0.9.3 — Save diagnostic bundle (zip) to ~/Downloads/
             save_diagnostic_bundle,
             // v0.7.0 — Install Claude hook + check current status
