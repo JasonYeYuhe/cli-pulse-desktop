@@ -223,25 +223,28 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Terminal epic (v0.11.0) — PTY streaming-smoke. Runs `bin/terminal_smoke`,
-  # which spawns a short child, drives ConPtyTransport directly, and asserts
-  # stdout arrives INCREMENTALLY (bytes seen while the child is still running,
-  # across multiple reads) — not drained at exit. This is the local, provable
-  # signal the streaming terminal needs; it exercises portable-pty's ConPTY
-  # (Windows) / openpty (Linux) paths headlessly. The smoke SKIPs (exit 0) if
-  # no PTY can be allocated, so it never false-fails.
+  # which spawns a short child, drives ConPtyTransport directly, asserts stdout
+  # arrives INCREMENTALLY (bytes while the child is still running, across
+  # multiple reads) — not drained at exit — plus a resize round-trip. The smoke
+  # SKIPs (exit 0) if no PTY can be allocated, so it can't false-fail.
   #
-  # Advisory (continue-on-error) until a few runs confirm the runners allocate
-  # a PTY reliably; then promote to a hard gate. Mirrors the launch-smoke
-  # advisory-first rollout.
+  # LINUX ONLY (openpty). The Windows ConPTY path does NOT render output under
+  # the HEADLESS CI runner: terminal_smoke captured only ~4 bytes regardless of
+  # the child command (cmd `for /l` AND PowerShell both), while resize (a
+  # ResizePseudoConsole control op) succeeded — i.e. the pseudoconsole accepts
+  # control but paints no screen without a real console/session. Windows ConPTY
+  # streaming is verified on the VM instead (scripts/vm-verify-terminal.ps1,
+  # real console); the remote-agent ConPTY path has been VM-verified since
+  # v0.9.x. Linux openpty proves the cross-platform streaming LOGIC headlessly
+  # and is a HARD gate (promoted after several green runs).
   terminal-smoke:
     name: PTY streaming-smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: [rust-test]
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux Tauri deps
