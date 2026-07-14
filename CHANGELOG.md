@@ -4,6 +4,17 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
+### Added — terminal epic (T3)
+
+- **Multi-provider terminal (passthrough).** The in-app terminal now spawns **Codex** and **Gemini** too,
+  not just Claude: a provider picker (Claude / Codex / Gemini) in the pane spawns that provider's own
+  installed CLI through the same resolve-PATH → spawn → stream path (their own creds — passthrough, no managed
+  auth). Per-provider availability check (shows "install it" guidance when a provider's CLI isn't found), and
+  "Start {provider}". Backend: a `Provider` enum + generalized `provider_argv` / `provider_available` (the
+  `claude`-specific resolver is now provider-parameterized); `terminal_start` takes an optional `provider`
+  (defaults Claude — non-breaking). New `terminal.provider_missing` label; `start_button` now interpolates the
+  provider name (×3 locales).
+
 ## [0.11.0] — 2026-07-13
 
 **The in-app terminal.** A local terminal is now built into the app (Sessions tab): click **Start

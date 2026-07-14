@@ -580,7 +580,7 @@
     "section_subtitle": "Run Claude in an embedded terminal on this machine.",
     "hint": "Local terminal ready.",
     "init_failed": "Terminal failed to initialize",
-    "start_button": "Start Claude",
+    "start_button": "Start {{provider}}",
     "stop_button": "Stop",
     "starting": "Starting…",
     "start_failed": "Couldn't start the terminal",
@@ -588,6 +588,6 @@
     "exited": "[process exited {{code}}]",
     "exited_unknown": "[process exited]",
     "launched_count": "Launched {{n}} this session",
-    "claude_missing": "Claude CLI not found — install Claude Code to use this terminal."
+    "provider_missing": "{{provider}} CLI not found — install it to use this terminal."
   }
 }

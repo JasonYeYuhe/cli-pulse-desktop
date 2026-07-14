@@ -8,6 +8,12 @@ import "@xterm/xterm/css/xterm.css";
 type StartInfo = { id: string; pid: number };
 type Disposable = { dispose(): void };
 
+/** Passthrough providers the terminal can spawn (the user's own CLI). */
+const PROVIDERS = ["claude", "codex", "gemini"] as const;
+type ProviderId = (typeof PROVIDERS)[number];
+const providerLabel = (p: ProviderId): string =>
+  p.charAt(0).toUpperCase() + p.slice(1);
+
 /**
  * v0.11.0 (T2.3b) — the in-app LOCAL terminal pane, now live.
  *
@@ -37,8 +43,10 @@ export function LocalTerminal() {
   const [actionError, setActionError] = useState<string | null>(null);
   // T2.3d — LOCAL launched count (telemetry; never uploaded).
   const [launched, setLaunched] = useState(0);
-  // Whether `claude` is installed — gates the Start button vs an install hint.
-  const [claudeAvailable, setClaudeAvailable] = useState(true);
+  // T3 — passthrough provider picker (spawn the user's own CLI).
+  const [provider, setProvider] = useState<ProviderId>("claude");
+  // Whether the selected provider's CLI is installed — gates Start vs a hint.
+  const [providerAvailable, setProviderAvailable] = useState(true);
 
   const refreshLaunched = useCallback(() => {
     invoke<number>("terminal_launched_count")
@@ -200,7 +208,10 @@ export function LocalTerminal() {
     setBusy(true);
     setActionError(null);
     try {
-      const info = await invoke<StartInfo>("terminal_start", { cwd: null });
+      const info = await invoke<StartInfo>("terminal_start", {
+        cwd: null,
+        provider,
+      });
       // The component may have unmounted (tab switch) while terminal_start was
       // in flight — the unmount cleanup couldn't close a session it didn't yet
       // know about. If our terminal is gone or was replaced, close the orphan
@@ -258,7 +269,15 @@ export function LocalTerminal() {
     } finally {
       setBusy(false);
     }
-  }, [busy, detachListeners, pump, refreshLaunched, setSession, startStatusPoll]);
+  }, [
+    busy,
+    detachListeners,
+    provider,
+    pump,
+    refreshLaunched,
+    setSession,
+    startStatusPoll,
+  ]);
 
   const stop = useCallback(async () => {
     const id = sessionIdRef.current;
@@ -278,13 +297,17 @@ export function LocalTerminal() {
     termRef.current?.writeln("\r\n" + t("terminal.stopped"));
   }, [detachListeners, setSession, stopStreaming, t]);
 
-  // Seed the launched-count + claude-availability on mount.
+  // Seed the launched-count on mount.
   useEffect(() => {
     refreshLaunched();
-    invoke<boolean>("terminal_claude_available")
-      .then(setClaudeAvailable)
-      .catch(() => {});
   }, [refreshLaunched]);
+
+  // Re-check the selected provider's CLI availability whenever it changes.
+  useEffect(() => {
+    invoke<boolean>("terminal_provider_available", { provider })
+      .then(setProviderAvailable)
+      .catch(() => setProviderAvailable(true));
+  }, [provider]);
 
   // --- mount xterm (once); tear everything down on unmount ---
   useEffect(() => {
@@ -359,6 +382,26 @@ export function LocalTerminal() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {!sessionId && (
+            <div className="flex gap-0.5 rounded border border-neutral-800 p-0.5">
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setProvider(p)}
+                  disabled={busy}
+                  className={
+                    "px-2 py-1 text-[11px] rounded disabled:opacity-50 " +
+                    (provider === p
+                      ? "bg-neutral-700 text-neutral-100"
+                      : "text-neutral-400 hover:text-neutral-200")
+                  }
+                >
+                  {providerLabel(p)}
+                </button>
+              ))}
+            </div>
+          )}
           {sessionId ? (
             <button
               type="button"
@@ -368,18 +411,20 @@ export function LocalTerminal() {
             >
               {t("terminal.stop_button")}
             </button>
-          ) : claudeAvailable ? (
+          ) : providerAvailable ? (
             <button
               type="button"
               onClick={() => void start()}
               disabled={busy || !!initError}
               className="px-3 py-1.5 text-xs rounded border border-emerald-800 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-50"
             >
-              {busy ? t("terminal.starting") : t("terminal.start_button")}
+              {busy
+                ? t("terminal.starting")
+                : t("terminal.start_button", { provider: providerLabel(provider) })}
             </button>
           ) : (
             <span className="text-xs text-amber-400 max-w-[16rem] text-right">
-              {t("terminal.claude_missing")}
+              {t("terminal.provider_missing", { provider: providerLabel(provider) })}
             </span>
           )}
         </div>

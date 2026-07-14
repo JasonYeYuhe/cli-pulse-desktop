@@ -574,7 +574,7 @@
     "section_subtitle": "このマシンの組み込みターミナルで Claude を実行します。",
     "hint": "ローカルターミナルの準備ができました。",
     "init_failed": "ターミナルの初期化に失敗しました",
-    "start_button": "Claude を起動",
+    "start_button": "{{provider}} を起動",
     "stop_button": "停止",
     "starting": "起動中…",
     "start_failed": "ターミナルを起動できませんでした",
@@ -582,6 +582,6 @@
     "exited": "[プロセス終了 {{code}}]",
     "exited_unknown": "[プロセス終了]",
     "launched_count": "このセッションで {{n}} 回起動",
-    "claude_missing": "Claude CLI が見つかりません — このターミナルを使うには Claude Code をインストールしてください。"
+    "provider_missing": "{{provider}} CLI が見つかりません — このターミナルを使うにはインストールしてください。"
   }
 }

@@ -1533,25 +1533,30 @@ struct RemoteAgentState {
 // The `LocalTerminalManager` is `.manage`d unconditionally in setup.
 // ------------------------------------------------------------------------
 
-/// Spawn a new local terminal (passthrough `claude`) and return its id + pid.
+/// Spawn a new local terminal running `provider`'s CLI (passthrough — the
+/// user's own claude/codex/gemini). `provider` defaults to Claude. Returns the
+/// new id + pid.
 #[tauri::command]
 fn terminal_start(
     app: tauri::AppHandle,
     cwd: Option<String>,
+    provider: Option<terminal::Provider>,
 ) -> Result<terminal::StartInfo, String> {
     use tauri::Manager;
     let mgr = app
         .try_state::<terminal::LocalTerminalManager>()
         .ok_or("local terminal manager not initialised")?;
+    let provider = provider.unwrap_or_default();
     let mut env = std::collections::HashMap::new();
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     let info = mgr
-        .start(&terminal::claude_argv(), env, cwd.as_deref())
+        .start(&terminal::provider_argv(provider), env, cwd.as_deref())
         .map_err(|e| e.to_string())?;
     // v0.11.0 (T2.3d) — LOCAL usage signal: is the in-app terminal actually
-    // used? A bare count in the local log — no cwd / argv / output.
+    // used? A bare count + provider in the local log — no cwd / argv / output.
     log::info!(
-        "local terminal launched (#{}, pid {})",
+        "local terminal launched ({:?} #{}, pid {})",
+        provider,
         mgr.launched_count(),
         info.pid
     );
@@ -1571,11 +1576,11 @@ fn terminal_launched_count(app: tauri::AppHandle) -> Result<u64, String> {
     Ok(mgr.launched_count())
 }
 
-/// Whether `claude` is installed/resolvable — so the pane can show install
-/// guidance instead of a Start button that fails.
+/// Whether `provider`'s CLI is installed/resolvable (defaults to Claude) — so
+/// the pane can show install guidance instead of a Start button that fails.
 #[tauri::command]
-fn terminal_claude_available() -> bool {
-    terminal::claude_available()
+fn terminal_provider_available(provider: Option<terminal::Provider>) -> bool {
+    terminal::provider_available(provider.unwrap_or_default())
 }
 
 /// Close (kill) a local terminal. Idempotent for an unknown id.
@@ -3241,7 +3246,7 @@ pub fn run() {
             terminal_resize,
             // v0.11.0 (T2.3d) — local launched-count telemetry
             terminal_launched_count,
-            terminal_claude_available,
+            terminal_provider_available,
             // v0.9.3 — Save diagnostic bundle (zip) to ~/Downloads/
             save_diagnostic_bundle,
             // v0.7.0 — Install Claude hook + check current status

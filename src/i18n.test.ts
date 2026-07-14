@@ -488,8 +488,8 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "terminal.exited_unknown",
     // v0.11.0 (T2.3d) — local launched-count line.
     "terminal.launched_count",
-    // v0.11.0 — claude-not-installed guidance.
-    "terminal.claude_missing",
+    // v0.11.0 — provider-not-installed guidance (T3 multi-provider).
+    "terminal.provider_missing",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(

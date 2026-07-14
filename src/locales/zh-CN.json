@@ -574,7 +574,7 @@
     "section_subtitle": "在本机的内嵌终端中运行 Claude。",
     "hint": "本地终端已就绪。",
     "init_failed": "终端初始化失败",
-    "start_button": "启动 Claude",
+    "start_button": "启动 {{provider}}",
     "stop_button": "停止",
     "starting": "启动中…",
     "start_failed": "无法启动终端",
@@ -582,6 +582,6 @@
     "exited": "[进程已退出 {{code}}]",
     "exited_unknown": "[进程已退出]",
     "launched_count": "本次会话已启动 {{n}} 次",
-    "claude_missing": "未找到 Claude CLI —— 请安装 Claude Code 以使用此终端。"
+    "provider_missing": "未找到 {{provider}} CLI —— 请安装后再使用此终端。"
   }
 }

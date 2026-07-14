@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::remote::transport::{ConPtyTransport, SessionHandle, SessionTransport, TransportError};
 
@@ -53,32 +53,54 @@ pub struct TerminalStatus {
     pub exit_code: Option<i32>,
 }
 
-/// The argv for a passthrough local terminal: the user's own `claude`.
-///
-/// A GUI-launched Tauri app inherits a THIN PATH (no login-shell rc), so bare
-/// `claude` often won't resolve. So we resolve to an absolute path — searching
-/// PATH first (the shell-launched / `tauri dev` case), then common per-user +
-/// system install locations. On Windows an npm-global `claude` is a `.cmd` /
-/// `.ps1` shim that ConPTY's `CreateProcess` can't spawn directly, so it's
-/// wrapped in `cmd /c`. Last resort: bare `claude`, so the OS gets a chance
-/// and the spawn error is surfaced to the user. VERIFIED on macOS
-/// (`~/.local/bin/claude` streams `claude --version`); Windows shim path is
-/// VM-verified.
-pub fn claude_argv() -> Vec<String> {
-    match find_claude() {
-        Some(path) => wrap_resolved(path),
-        None => vec!["claude".to_string()],
+/// A CLI provider the local terminal can spawn (passthrough — the user's own
+/// installed CLI, using their own creds). v0.11.0 shipped Claude; T3 adds
+/// Codex + Gemini via the same resolve/spawn/stream path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    #[default]
+    Claude,
+    Codex,
+    Gemini,
+}
+
+impl Provider {
+    /// The base executable name of this provider's CLI.
+    fn command(self) -> &'static str {
+        match self {
+            Provider::Claude => "claude",
+            Provider::Codex => "codex",
+            Provider::Gemini => "gemini",
+        }
     }
 }
 
-/// Whether a `claude` executable was found (PATH or a common install dir).
-/// Lets the UI show install guidance up front instead of a Start button that
-/// fails with a cryptic spawn error.
-pub fn claude_available() -> bool {
-    find_claude().is_some()
+/// The argv for a passthrough local terminal running `provider`'s CLI.
+///
+/// A GUI-launched Tauri app inherits a THIN PATH (no login-shell rc), so a bare
+/// name often won't resolve. So we resolve to an absolute path — searching PATH
+/// first (the shell-launched / `tauri dev` case), then common per-user + system
+/// install locations. On Windows an npm-global CLI is a `.cmd` / `.ps1` shim
+/// ConPTY's `CreateProcess` can't spawn directly, so it's wrapped in `cmd /c`.
+/// Last resort: the bare name, so the OS gets a chance and the spawn error is
+/// surfaced to the user. VERIFIED on macOS for Claude (`~/.local/bin/claude`
+/// streams `claude --version`); Windows shim path is VM-verified.
+pub fn provider_argv(provider: Provider) -> Vec<String> {
+    let base = provider.command();
+    match find_provider_cli(base) {
+        Some(path) => wrap_resolved(path),
+        None => vec![base.to_string()],
+    }
 }
 
-/// Wrap a resolved claude path into an argv, using `cmd /c` for Windows shims.
+/// Whether `provider`'s CLI was found (PATH or a common install dir). Lets the
+/// UI show install guidance up front instead of a Start button that fails.
+pub fn provider_available(provider: Provider) -> bool {
+    find_provider_cli(provider.command()).is_some()
+}
+
+/// Wrap a resolved CLI path into an argv, using `cmd /c` for Windows shims.
 fn wrap_resolved(path: PathBuf) -> Vec<String> {
     let s = path.to_string_lossy().to_string();
     #[cfg(windows)]
@@ -91,30 +113,30 @@ fn wrap_resolved(path: PathBuf) -> Vec<String> {
     vec![s]
 }
 
-/// Executable file names to look for, per platform.
-fn claude_exe_names() -> &'static [&'static str] {
+/// Executable file names to look for a CLI named `base`, per platform.
+fn provider_exe_names(base: &str) -> Vec<String> {
     #[cfg(windows)]
     {
-        &[
-            "claude.cmd",
-            "claude.exe",
-            "claude.bat",
-            "claude.ps1",
-            "claude",
+        vec![
+            format!("{base}.cmd"),
+            format!("{base}.exe"),
+            format!("{base}.bat"),
+            format!("{base}.ps1"),
+            base.to_string(),
         ]
     }
     #[cfg(not(windows))]
     {
-        &["claude"]
+        vec![base.to_string()]
     }
 }
 
-/// Locate an executable `claude`: PATH first, then common install dirs.
-fn find_claude() -> Option<PathBuf> {
-    let names = claude_exe_names();
+/// Locate an executable CLI named `base`: PATH first, then common install dirs.
+fn find_provider_cli(base: &str) -> Option<PathBuf> {
+    let names = provider_exe_names(base);
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
-            for name in names {
+            for name in &names {
                 let cand = dir.join(name);
                 if is_executable_file(&cand) {
                     return Some(cand);
@@ -122,8 +144,8 @@ fn find_claude() -> Option<PathBuf> {
             }
         }
     }
-    for dir in claude_candidate_dirs() {
-        for name in names {
+    for dir in provider_candidate_dirs() {
+        for name in &names {
             let cand = dir.join(name);
             if is_executable_file(&cand) {
                 return Some(cand);
@@ -134,11 +156,12 @@ fn find_claude() -> Option<PathBuf> {
 }
 
 /// Common install locations to check when PATH is thin (GUI launch).
-fn claude_candidate_dirs() -> Vec<PathBuf> {
+fn provider_candidate_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(home) = dirs::home_dir() {
         out.push(home.join(".local").join("bin"));
         out.push(home.join("bin"));
+        out.push(home.join(".cargo").join("bin"));
         out.push(home.join(".npm-global").join("bin"));
         #[cfg(windows)]
         out.push(home.join("AppData").join("Roaming").join("npm"));
@@ -443,8 +466,10 @@ mod tests {
     }
 
     #[test]
-    fn claude_argv_is_never_empty() {
-        assert!(!claude_argv().is_empty());
+    fn provider_argv_is_never_empty() {
+        for p in [Provider::Claude, Provider::Codex, Provider::Gemini] {
+            assert!(!provider_argv(p).is_empty());
+        }
     }
 
     #[cfg(unix)]
@@ -478,14 +503,14 @@ mod tests {
         }
     }
 
-    /// Env-specific: if `claude` is installed, `claude_argv` resolves it to a
-    /// real executable (not the bare-`claude` last resort). `#[ignore]` — CI
-    /// has no `claude`. Run locally with
-    /// `cargo test -- --ignored claude_argv_resolves_installed_claude`.
+    /// Env-specific: if `claude` is installed, `provider_argv` resolves it to a
+    /// real executable (not the bare last resort). `#[ignore]` — CI has no
+    /// `claude`. Run locally with
+    /// `cargo test -- --ignored provider_argv_resolves_installed_claude`.
     #[test]
     #[ignore]
-    fn claude_argv_resolves_installed_claude() {
-        let argv = claude_argv();
+    fn provider_argv_resolves_installed_claude() {
+        let argv = provider_argv(Provider::Claude);
         eprintln!("resolved claude argv: {argv:?}");
         let last = argv.last().unwrap();
         if last != "claude" {
