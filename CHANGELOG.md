@@ -4,7 +4,18 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
-### Added — terminal epic (v0.11.0, in progress)
+## [0.11.0] — 2026-07-13
+
+**The in-app terminal.** A local terminal is now built into the app (Sessions tab): click **Start
+Claude** to run your own `claude` on this machine and drive it in an embedded xterm.js pane — spawn,
+stream, type/paste/Ctrl-C, resize, and exit-detection, plus a local usage signal. Backend reuses the
+hardened ConPTY/PTY transport (Ctrl-C, Windows Job Objects, Drop teardown); output streams over a
+single-flight rAF pump reading raw ArrayBuffers so it never reorders. `claude` is resolved robustly
+(PATH + common install dirs; Windows `.cmd` shim), with graceful "install Claude" guidance when it's
+missing. Every slice was adversarially reviewed. (Multi-provider managed spawn — Codex/Gemini on-plan —
+is the next phase.)
+
+### Added — terminal epic
 
 - **Robust `claude` resolution for the in-app terminal.** A GUI-launched app inherits a thin PATH (no
   login-shell rc), so bare `claude` often wouldn't resolve. `claude_argv()` now resolves to an absolute path —
