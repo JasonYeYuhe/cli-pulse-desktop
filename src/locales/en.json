@@ -587,6 +587,7 @@
     "stopped": "[session closed]",
     "exited": "[process exited {{code}}]",
     "exited_unknown": "[process exited]",
-    "launched_count": "Launched {{n}} this session"
+    "launched_count": "Launched {{n}} this session",
+    "claude_missing": "Claude CLI not found — install Claude Code to use this terminal."
   }
 }

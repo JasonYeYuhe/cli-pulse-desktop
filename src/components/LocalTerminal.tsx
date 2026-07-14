@@ -37,6 +37,8 @@ export function LocalTerminal() {
   const [actionError, setActionError] = useState<string | null>(null);
   // T2.3d — LOCAL launched count (telemetry; never uploaded).
   const [launched, setLaunched] = useState(0);
+  // Whether `claude` is installed — gates the Start button vs an install hint.
+  const [claudeAvailable, setClaudeAvailable] = useState(true);
 
   const refreshLaunched = useCallback(() => {
     invoke<number>("terminal_launched_count")
@@ -276,9 +278,12 @@ export function LocalTerminal() {
     termRef.current?.writeln("\r\n" + t("terminal.stopped"));
   }, [detachListeners, setSession, stopStreaming, t]);
 
-  // Seed the launched-count on mount (it persists for the process lifetime).
+  // Seed the launched-count + claude-availability on mount.
   useEffect(() => {
     refreshLaunched();
+    invoke<boolean>("terminal_claude_available")
+      .then(setClaudeAvailable)
+      .catch(() => {});
   }, [refreshLaunched]);
 
   // --- mount xterm (once); tear everything down on unmount ---
@@ -363,7 +368,7 @@ export function LocalTerminal() {
             >
               {t("terminal.stop_button")}
             </button>
-          ) : (
+          ) : claudeAvailable ? (
             <button
               type="button"
               onClick={() => void start()}
@@ -372,6 +377,10 @@ export function LocalTerminal() {
             >
               {busy ? t("terminal.starting") : t("terminal.start_button")}
             </button>
+          ) : (
+            <span className="text-xs text-amber-400 max-w-[16rem] text-right">
+              {t("terminal.claude_missing")}
+            </span>
           )}
         </div>
       </div>

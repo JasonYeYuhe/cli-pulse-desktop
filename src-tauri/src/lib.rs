@@ -1571,6 +1571,13 @@ fn terminal_launched_count(app: tauri::AppHandle) -> Result<u64, String> {
     Ok(mgr.launched_count())
 }
 
+/// Whether `claude` is installed/resolvable — so the pane can show install
+/// guidance instead of a Start button that fails.
+#[tauri::command]
+fn terminal_claude_available() -> bool {
+    terminal::claude_available()
+}
+
 /// Close (kill) a local terminal. Idempotent for an unknown id.
 #[tauri::command]
 fn terminal_close(app: tauri::AppHandle, id: String) -> Result<(), String> {
@@ -3234,6 +3241,7 @@ pub fn run() {
             terminal_resize,
             // v0.11.0 (T2.3d) — local launched-count telemetry
             terminal_launched_count,
+            terminal_claude_available,
             // v0.9.3 — Save diagnostic bundle (zip) to ~/Downloads/
             save_diagnostic_bundle,
             // v0.7.0 — Install Claude hook + check current status

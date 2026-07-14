@@ -71,6 +71,13 @@ pub fn claude_argv() -> Vec<String> {
     }
 }
 
+/// Whether a `claude` executable was found (PATH or a common install dir).
+/// Lets the UI show install guidance up front instead of a Start button that
+/// fails with a cryptic spawn error.
+pub fn claude_available() -> bool {
+    find_claude().is_some()
+}
+
 /// Wrap a resolved claude path into an argv, using `cmd /c` for Windows shims.
 fn wrap_resolved(path: PathBuf) -> Vec<String> {
     let s = path.to_string_lossy().to_string();

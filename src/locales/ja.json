@@ -581,6 +581,7 @@
     "stopped": "[セッションを終了しました]",
     "exited": "[プロセス終了 {{code}}]",
     "exited_unknown": "[プロセス終了]",
-    "launched_count": "このセッションで {{n}} 回起動"
+    "launched_count": "このセッションで {{n}} 回起動",
+    "claude_missing": "Claude CLI が見つかりません — このターミナルを使うには Claude Code をインストールしてください。"
   }
 }

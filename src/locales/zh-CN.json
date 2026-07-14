@@ -581,6 +581,7 @@
     "stopped": "[会话已关闭]",
     "exited": "[进程已退出 {{code}}]",
     "exited_unknown": "[进程已退出]",
-    "launched_count": "本次会话已启动 {{n}} 次"
+    "launched_count": "本次会话已启动 {{n}} 次",
+    "claude_missing": "未找到 Claude CLI —— 请安装 Claude Code 以使用此终端。"
   }
 }
