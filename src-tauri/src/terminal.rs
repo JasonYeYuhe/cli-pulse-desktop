@@ -12,6 +12,7 @@
 //! is T2.2b; `resize` landed in T2.1. No frontend yet.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -52,18 +53,124 @@ pub struct TerminalStatus {
     pub exit_code: Option<i32>,
 }
 
-/// The argv for a passthrough local terminal: bare `claude`, PATH-resolved
-/// by the OS at spawn (the user's own install + creds).
+/// The argv for a passthrough local terminal: the user's own `claude`.
 ///
-/// KNOWN LIMITATION (resolved in T2.3b, when the pane is wired and
-/// testable in the real app): a GUI-launched Tauri app inherits a thin
-/// PATH (no login-shell rc), so bare `claude` may not resolve; on Windows
-/// an npm-global `claude` is a `.cmd` / `.ps1` shim that ConPTY /
-/// `CommandBuilder` may not spawn directly (may need `cmd /c`). Robust
-/// resolution (a `which`/`where` lookup + shim wrapping) is deferred to
-/// that slice, where it can be verified on a real Windows install.
+/// A GUI-launched Tauri app inherits a THIN PATH (no login-shell rc), so bare
+/// `claude` often won't resolve. So we resolve to an absolute path — searching
+/// PATH first (the shell-launched / `tauri dev` case), then common per-user +
+/// system install locations. On Windows an npm-global `claude` is a `.cmd` /
+/// `.ps1` shim that ConPTY's `CreateProcess` can't spawn directly, so it's
+/// wrapped in `cmd /c`. Last resort: bare `claude`, so the OS gets a chance
+/// and the spawn error is surfaced to the user. VERIFIED on macOS
+/// (`~/.local/bin/claude` streams `claude --version`); Windows shim path is
+/// VM-verified.
 pub fn claude_argv() -> Vec<String> {
-    vec!["claude".to_string()]
+    match find_claude() {
+        Some(path) => wrap_resolved(path),
+        None => vec!["claude".to_string()],
+    }
+}
+
+/// Wrap a resolved claude path into an argv, using `cmd /c` for Windows shims.
+fn wrap_resolved(path: PathBuf) -> Vec<String> {
+    let s = path.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        let lower = s.to_ascii_lowercase();
+        if lower.ends_with(".cmd") || lower.ends_with(".bat") || lower.ends_with(".ps1") {
+            return vec!["cmd".to_string(), "/c".to_string(), s];
+        }
+    }
+    vec![s]
+}
+
+/// Executable file names to look for, per platform.
+fn claude_exe_names() -> &'static [&'static str] {
+    #[cfg(windows)]
+    {
+        &[
+            "claude.cmd",
+            "claude.exe",
+            "claude.bat",
+            "claude.ps1",
+            "claude",
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        &["claude"]
+    }
+}
+
+/// Locate an executable `claude`: PATH first, then common install dirs.
+fn find_claude() -> Option<PathBuf> {
+    let names = claude_exe_names();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            for name in names {
+                let cand = dir.join(name);
+                if is_executable_file(&cand) {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+    for dir in claude_candidate_dirs() {
+        for name in names {
+            let cand = dir.join(name);
+            if is_executable_file(&cand) {
+                return Some(cand);
+            }
+        }
+    }
+    None
+}
+
+/// Common install locations to check when PATH is thin (GUI launch).
+fn claude_candidate_dirs() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        out.push(home.join(".local").join("bin"));
+        out.push(home.join("bin"));
+        out.push(home.join(".npm-global").join("bin"));
+        #[cfg(windows)]
+        out.push(home.join("AppData").join("Roaming").join("npm"));
+    }
+    #[cfg(not(windows))]
+    {
+        out.push(PathBuf::from("/usr/local/bin"));
+        out.push(PathBuf::from("/opt/homebrew/bin"));
+        out.push(PathBuf::from("/usr/bin"));
+    }
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            out.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            out.push(PathBuf::from(pf).join("nodejs"));
+        }
+    }
+    out
+}
+
+/// True if `p` is a regular file that is executable (Unix: any exec bit;
+/// Windows: existence — the extension implies executability).
+fn is_executable_file(p: &Path) -> bool {
+    if !p.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p)
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// One registered local terminal: the PTY handle plus the first-observed
@@ -326,6 +433,60 @@ mod tests {
         ));
         assert_eq!(m.open_count(), 0);
         assert_eq!(m.launched_count(), 0);
+    }
+
+    #[test]
+    fn claude_argv_is_never_empty() {
+        assert!(!claude_argv().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_executable_file_detects_a_real_binary() {
+        assert!(is_executable_file(Path::new("/bin/sh")));
+        assert!(!is_executable_file(Path::new("/definitely/not/here/xyz")));
+        assert!(!is_executable_file(Path::new("/bin"))); // a dir, not a file
+    }
+
+    #[test]
+    fn wrap_resolved_path_shape() {
+        #[cfg(not(windows))]
+        {
+            assert_eq!(
+                wrap_resolved(PathBuf::from("/usr/local/bin/claude")),
+                vec!["/usr/local/bin/claude".to_string()]
+            );
+        }
+        #[cfg(windows)]
+        {
+            let argv = wrap_resolved(PathBuf::from(r"C:\Users\x\AppData\Roaming\npm\claude.cmd"));
+            assert_eq!(argv[0], "cmd");
+            assert_eq!(argv[1], "/c");
+            assert!(argv[2].ends_with("claude.cmd"));
+            // A plain .exe is spawned directly (no cmd /c).
+            assert_eq!(
+                wrap_resolved(PathBuf::from(r"C:\tools\claude.exe")),
+                vec![r"C:\tools\claude.exe".to_string()]
+            );
+        }
+    }
+
+    /// Env-specific: if `claude` is installed, `claude_argv` resolves it to a
+    /// real executable (not the bare-`claude` last resort). `#[ignore]` — CI
+    /// has no `claude`. Run locally with
+    /// `cargo test -- --ignored claude_argv_resolves_installed_claude`.
+    #[test]
+    #[ignore]
+    fn claude_argv_resolves_installed_claude() {
+        let argv = claude_argv();
+        eprintln!("resolved claude argv: {argv:?}");
+        let last = argv.last().unwrap();
+        if last != "claude" {
+            assert!(
+                Path::new(last).exists(),
+                "resolved claude path should exist: {last}"
+            );
+        }
     }
 
     /// Real-spawn lifecycle: start → status(running) → close → gone.

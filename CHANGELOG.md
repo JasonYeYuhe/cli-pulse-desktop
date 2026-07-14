@@ -6,6 +6,14 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **Robust `claude` resolution for the in-app terminal.** A GUI-launched app inherits a thin PATH (no
+  login-shell rc), so bare `claude` often wouldn't resolve. `claude_argv()` now resolves to an absolute path —
+  PATH first (the shell-launched / `tauri dev` case), then common install dirs (`~/.local/bin`,
+  `/usr/local/bin`, `/opt/homebrew/bin`, npm-global, …). On Windows an npm-global `claude` is a `.cmd`/`.ps1`
+  shim ConPTY can't spawn directly, so it's wrapped in `cmd /c`. **Verified on macOS end-to-end**: the real
+  `LocalTerminalManager` spawns `claude` and streams `claude --version` back through `read_stdout`, and
+  `claude_argv()` resolves `~/.local/bin/claude`. Windows shim path is VM-verified. Unit-tested (PATH search,
+  exec-bit check, shim wrapping).
 - **In-app terminal — exit handling + telemetry (T2.3c / T2.3d).** The terminal now notices a child that
   exits on its own: a `terminal_status` poll flushes the last output, prints `[process exited N]`, and returns
   the pane to **Start** (T2.3c). The pump was factored into a single-flight `drainOnce` shared by the pump and
