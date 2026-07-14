@@ -4,6 +4,8 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-14
+
 ### Added — terminal epic (T3)
 
 - **Multi-provider terminal (passthrough).** The in-app terminal now spawns **Codex** and **Gemini** too,
