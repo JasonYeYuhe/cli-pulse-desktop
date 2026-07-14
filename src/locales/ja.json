@@ -578,6 +578,9 @@
     "stop_button": "停止",
     "starting": "起動中…",
     "start_failed": "ターミナルを起動できませんでした",
-    "stopped": "[セッションを終了しました]"
+    "stopped": "[セッションを終了しました]",
+    "exited": "[プロセス終了 {{code}}]",
+    "exited_unknown": "[プロセス終了]",
+    "launched_count": "このセッションで {{n}} 回起動"
   }
 }

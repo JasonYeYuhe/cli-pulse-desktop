@@ -6,6 +6,15 @@ All notable changes to CLI Pulse Desktop (Windows + Linux).
 
 ### Added — terminal epic (v0.11.0, in progress)
 
+- **In-app terminal — exit handling + telemetry (T2.3c / T2.3d).** The terminal now notices a child that
+  exits on its own: a `terminal_status` poll flushes the last output, prints `[process exited N]`, and returns
+  the pane to **Start** (T2.3c). The pump was factored into a single-flight `drainOnce` shared by the pump and
+  the exit-flush. Backgrounded windows intentionally show the *tail* of a burst (rAF pauses while hidden; the
+  bounded ring drops-oldest) — correct terminal semantics, documented. And a **local-only** launched-count
+  (T2.3d): a `terminal_launched_count` command + a `log::info!` per launch (a bare count + pid — no cwd / argv
+  / output) + a subtle "Launched N this session" line, so we can tell whether the in-app terminal is actually
+  used. It is **never uploaded**; shipping an aggregate for real adoption analytics would be a shared-schema
+  change (owner's call). New `terminal.exited` / `exited_unknown` / `launched_count` labels ×3 locales.
 - **In-app terminal — live streaming (T2.3b).** The `LocalTerminal` pane is now interactive: a **Start**
   button spawns the user's own `claude` (`terminal_start`), syncs the PTY size to the fitted pane, and streams
   it into xterm.js via a **single-flight requestAnimationFrame pump** — each frame drains the stdout ring with

@@ -1545,8 +1545,30 @@ fn terminal_start(
         .ok_or("local terminal manager not initialised")?;
     let mut env = std::collections::HashMap::new();
     env.insert("TERM".to_string(), "xterm-256color".to_string());
-    mgr.start(&terminal::claude_argv(), env, cwd.as_deref())
-        .map_err(|e| e.to_string())
+    let info = mgr
+        .start(&terminal::claude_argv(), env, cwd.as_deref())
+        .map_err(|e| e.to_string())?;
+    // v0.11.0 (T2.3d) — LOCAL usage signal: is the in-app terminal actually
+    // used? A bare count in the local log — no cwd / argv / output.
+    log::info!(
+        "local terminal launched (#{}, pid {})",
+        mgr.launched_count(),
+        info.pid
+    );
+    Ok(info)
+}
+
+/// LOCAL-only count of in-app terminals launched this process lifetime — the
+/// "in-app terminal launched vs external CLI" telemetry. Never uploaded (a
+/// bare integer, no content). Uploading an aggregate for real adoption
+/// analytics would be a shared-schema change — the owner's call.
+#[tauri::command]
+fn terminal_launched_count(app: tauri::AppHandle) -> Result<u64, String> {
+    use tauri::Manager;
+    let mgr = app
+        .try_state::<terminal::LocalTerminalManager>()
+        .ok_or("local terminal manager not initialised")?;
+    Ok(mgr.launched_count())
 }
 
 /// Close (kill) a local terminal. Idempotent for an unknown id.
@@ -3210,6 +3232,8 @@ pub fn run() {
             terminal_write,
             terminal_read,
             terminal_resize,
+            // v0.11.0 (T2.3d) — local launched-count telemetry
+            terminal_launched_count,
             // v0.9.3 — Save diagnostic bundle (zip) to ~/Downloads/
             save_diagnostic_bundle,
             // v0.7.0 — Install Claude hook + check current status

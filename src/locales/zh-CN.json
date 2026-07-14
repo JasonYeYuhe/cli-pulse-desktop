@@ -578,6 +578,9 @@
     "stop_button": "停止",
     "starting": "启动中…",
     "start_failed": "无法启动终端",
-    "stopped": "[会话已关闭]"
+    "stopped": "[会话已关闭]",
+    "exited": "[进程已退出 {{code}}]",
+    "exited_unknown": "[进程已退出]",
+    "launched_count": "本次会话已启动 {{n}} 次"
   }
 }

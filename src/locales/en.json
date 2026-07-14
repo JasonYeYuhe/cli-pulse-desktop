@@ -584,6 +584,9 @@
     "stop_button": "Stop",
     "starting": "Starting…",
     "start_failed": "Couldn't start the terminal",
-    "stopped": "[session closed]"
+    "stopped": "[session closed]",
+    "exited": "[process exited {{code}}]",
+    "exited_unknown": "[process exited]",
+    "launched_count": "Launched {{n}} this session"
   }
 }

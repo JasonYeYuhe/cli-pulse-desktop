@@ -483,6 +483,11 @@ describe("i18n covers all critical labels in all 3 languages", () => {
     "terminal.starting",
     "terminal.start_failed",
     "terminal.stopped",
+    // v0.11.0 (T2.3c) — child-exit banners.
+    "terminal.exited",
+    "terminal.exited_unknown",
+    // v0.11.0 (T2.3d) — local launched-count line.
+    "terminal.launched_count",
   ] as const;
 
   it.each(["en", "zh-CN", "ja"] as const)(
